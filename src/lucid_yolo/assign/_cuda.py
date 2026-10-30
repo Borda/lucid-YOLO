@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Optional CUDA scheduling for TAL's unchanged dense assignment expressions.
 
-The opt-in scope belongs to one assignment, including nested calls and failures.
-Outputs own ordinary PyTorch storage; only compiled-signature metadata survives a
-call. The device passes and their compiler load on the first launch every cheap gate
-admits, never on import. First launches finish before becoming capture-ready. A first
-launch's toolchain failure warns once and keeps that family native; out-of-memory,
-completion-fence errors and errors after a verified launch propagate.
+The opt-in scope belongs to one assignment, including nested calls and failures. Outputs own ordinary PyTorch storage;
+only compiled-signature metadata survives a call. The device passes and their compiler load on the first launch every
+cheap gate admits, never on import. First launches finish before becoming capture-ready. A first launch's toolchain
+failure warns once and keeps that family native; out-of-memory, completion-fence errors and errors after a verified
+launch propagate.
 """
 
 from __future__ import annotations
@@ -102,10 +101,9 @@ def _device_supported(device: torch.device) -> bool:
 def _kernels() -> ModuleType | None:
     """Load the optional device passes once, for the first launch every cheap gate admitted.
 
-    An absent compiler, or one outside the supported range, keeps assignment native
-    without a warning, as an install without the extra expects. Any other failure while
-    loading is a broken toolchain: it warns once and the passes stay unavailable for
-    the rest of the process.
+    An absent compiler, or one outside the supported range, keeps assignment native without a warning, as an install
+    without the extra expects. Any other failure while loading is a broken toolchain: it warns once and the passes stay
+    unavailable for the rest of the process.
     """
     try:
         module = importlib.import_module(_KERNELS_MODULE)
@@ -135,8 +133,7 @@ def _indexable(value: Tensor) -> bool:
 def _supported(kind: str, values: tuple[Tensor, ...]) -> bool:
     """Keep tensor subclasses, other devices/layouts and unavailable toolchains native.
 
-    The device passes load last, so a CPU, MPS, ROCm or pre-Ampere call never imports
-    the optional compiler.
+    The device passes load last, so a CPU, MPS, ROCm or pre-Ampere call never imports the optional compiler.
     """
     if any(type(value) is not Tensor for value in values):
         return False
@@ -167,13 +164,13 @@ def _run(
 ) -> _Result | None:
     """Publish readiness only after a first eager launch and its completion fence.
 
-    A previously unseen specialization stays native inside capture: its compilation
-    belongs to an earlier eager warmup. The same runtime-size kernel can serve many
-    target counts, so those counts are deliberately absent from its readiness key.
+    A previously unseen specialization stays native inside capture: its compilation belongs to an earlier eager warmup.
+    The same runtime-size kernel can serve many target counts, so those counts are deliberately absent from its
+    readiness key.
 
-    Only a failing first launch keeps its family native. Out-of-memory is the
-    workload's condition rather than the toolchain's, and a failing completion fence
-    reports a device error a native rerun cannot clear, so both propagate unlatched.
+    Only a failing first launch keeps its family native. Out-of-memory is the workload's condition rather than the
+    toolchain's, and a failing completion fence reports a device error a native rerun cannot clear, so both
+    propagate unlatched.
     """
     family = kind, device
     key = kind, device, *signature

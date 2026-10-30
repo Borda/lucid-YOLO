@@ -1,31 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
 """Golden harness: recompute and verify frozen metric goldens (WP-005).
 
-A *golden* is a JSON file pinning the output of a deterministic *producer* — a
-zero-argument importable function returning ``dict[str, float]``. The harness
-discovers every ``goldens/*.json`` and every ``goldens/frozen/**/*.json``,
-resolves each file's producer, recomputes it, and compares each stored value
-against the freshly computed one within a per-metric absolute tolerance. A
-metric absent from ``tolerances`` (or given tolerance ``0.0``) must match
-exactly.
+A *golden* is a JSON file pinning the output of a deterministic *producer* — a zero-argument importable function
+returning ``dict[str, float]``. The harness discovers every ``goldens/*.json`` and every ``goldens/frozen/**/*.json``,
+resolves each file's producer, recomputes it, and compares each stored value against the freshly computed one within
+a per-metric absolute tolerance. A metric absent from ``tolerances`` (or given tolerance ``0.0``) must match exactly.
 
-The comparison runs in both directions on a live golden: a stored metric the producer
-no longer emits fails, and so does a metric the producer emits that the golden does not
-store. A golden pins its producer's *output*, so a metric nobody hand-added to the file
-is an unguarded number rather than an absent one, and the gate reported ``PASS`` with
-the old metric count while it stayed that way (M-44).
+The comparison runs in both directions on a live golden: a stored metric the producer no longer emits fails, and
+so does a metric the producer emits that the golden does not store. A golden pins its producer's *output*, so a
+metric nobody hand-added to the file is an unguarded number rather than an absent one, and the gate reported ``PASS``
+with the old metric count while it stayed that way (M-44).
 
-Frozen files travel the identical comparison path, so a release's frozen goldens
-staying green *is* the frozen-golden regression: current code must still satisfy
-every value snapshotted at every past release. They are exempt from the unpinned-metric
-half alone — a past release pinned the metrics that existed then — and from the producer
-run itself when byte-identical to a live sibling that has already run it, which is what
-keeps a sweep from recomputing the same seven producers up to six times (:func:`check_all`).
+Frozen files travel the identical comparison path, so a release's frozen goldens staying green *is* the frozen-golden
+regression: current code must still satisfy every value snapshotted at every past release. They are exempt from the
+unpinned-metric half alone — a past release pinned the metrics that existed then — and from the producer run itself
+when byte-identical to a live sibling that has already run it, which is what keeps a sweep from recomputing the
+same seven producers up to six times (:func:`check_all`).
 
-The ``goldens/gpu/`` subtree is **not** part of the default discovery: those
-goldens' producers retrain a model on an accelerator over a generated dataset, so
-they would break an offline run. They are recomputed only with ``--include-gpu``
-(see :func:`discover_gpu_goldens`), which the default ``make gate`` never passes.
+The ``goldens/gpu/`` subtree is **not** part of the default discovery: those goldens' producers retrain a model on
+an accelerator over a generated dataset, so they would break an offline run. They are recomputed only with
+``--include-gpu`` (see :func:`discover_gpu_goldens`), which the default ``make gate`` never passes.
 
 Golden file schema::
 
@@ -36,14 +30,12 @@ Golden file schema::
       "freezable": <bool, optional, default true>
     }
 
-``"freezable": false`` marks a golden whose producer's output is pinned to an
-external package rather than to this project's own code (WP-132: two producers
-render synthetic images through ``fuse-augmentations``, so once that package's
-generator moves, no future code change can satisfy "the frozen copy still holds"
-— the frozen snapshot was never a real regression guard). Such a golden is
-excluded from ``make freeze-goldens`` and must never appear under
-``goldens/frozen/``; :func:`check_golden` fails loudly if one ever does, rather
-than silently comparing a snapshot nothing can keep green (WP-154c).
+``"freezable": false`` marks a golden whose producer's output is pinned to an external package rather than to
+this project's own code (WP-132: two producers render synthetic images through ``fuse-augmentations``, so once that
+package's generator moves, no future code change can satisfy "the frozen copy still holds" — the frozen snapshot
+was never a real regression guard). Such a golden is excluded from ``make freeze-goldens`` and must never appear
+under ``goldens/frozen/``; :func:`check_golden` fails loudly if one ever does, rather than silently comparing a
+snapshot nothing can keep green (WP-154c).
 
 The discovery/compare core is importable (``discover_goldens``, ``check_golden``,
 ``check_all``); :func:`main` is a thin CLI over it.
@@ -84,10 +76,9 @@ class GoldenError(Exception):
 class MetricComparison:
     """Outcome of comparing one stored metric against its recomputed value.
 
-    Two directions of absence are recorded with a ``nan`` on the missing side, and
-    both are failures: ``actual`` is ``nan`` when the golden pins a metric the producer
-    no longer emits, and ``expected`` is ``nan`` when the producer emits a metric the
-    golden does not pin. :func:`format_result` reads the two apart.
+    Two directions of absence are recorded with a ``nan`` on the missing side, and both are failures: ``actual`` is
+    ``nan`` when the golden pins a metric the producer no longer emits, and ``expected`` is ``nan`` when the producer
+    emits a metric the golden does not pin. :func:`format_result` reads the two apart.
 
     Attributes:
         metric: The metric name.
@@ -112,8 +103,7 @@ class GoldenResult:
         path: The golden file's path.
         passed: ``True`` only when the file loaded, ran, and every metric matched.
         comparisons: Per-metric comparisons (empty when ``error`` is set).
-        error: A failure message when the file is malformed or its producer
-            failed, otherwise ``None``.
+        error: A failure message when the file is malformed or its producer failed, otherwise ``None``.
         reused: ``True`` when the producer was not run for this file because a
             byte-identical live golden had already run it (see :func:`check_all`).
     """
@@ -161,18 +151,15 @@ def discover_goldens(goldens_dir: Path) -> list[Path]:
 def discover_gpu_goldens(goldens_dir: Path) -> list[Path]:
     """Discover the accelerator-gated goldens under ``goldens_dir/gpu``.
 
-    These live in a ``gpu/`` subdirectory that :func:`discover_goldens` deliberately
-    does **not** glob, so the default offline harness never recomputes them (their
-    producers need an accelerator and a generated dataset). They are checked only
-    when the caller explicitly opts in via ``--include-gpu``.
+    These live in a ``gpu/`` subdirectory that :func:`discover_goldens` deliberately does **not** glob, so the
+    default offline harness never recomputes them (their producers need an accelerator and a generated dataset).
+    They are checked only when the caller explicitly opts in via ``--include-gpu``.
 
     Args:
-        goldens_dir: The directory holding the ``gpu/`` subtree (typically
-            ``<repo>/goldens``).
+        goldens_dir: The directory holding the ``gpu/`` subtree (typically ``<repo>/goldens``).
 
     Returns:
-        Sorted list of ``gpu/*.json`` golden paths; empty if the subdirectory is
-        absent.
+        Sorted list of ``gpu/*.json`` golden paths; empty if the subdirectory is absent.
 
     Examples:
         ```pycon
@@ -191,9 +178,8 @@ def discover_gpu_goldens(goldens_dir: Path) -> list[Path]:
 def resolve_producer(spec: str) -> Producer:
     """Resolve a ``"module:function"`` producer spec to a callable.
 
-    The repository root is prepended to ``sys.path`` so ``scripts.*`` and
-    ``tests.*`` module paths resolve as namespace packages regardless of the
-    current working directory.
+    The repository root is prepended to ``sys.path`` so ``scripts.*`` and ``tests.*`` module paths resolve as
+    namespace packages regardless of the current working directory.
 
     Args:
         spec: A ``"module:function"`` string, e.g. ``"scripts.golden_producers:fixture_checksums"``.
@@ -239,9 +225,8 @@ def _parse_golden(path: Path) -> tuple[str, dict[str, float], dict[str, float], 
         defaults to ``True`` when the field is absent.
 
     Raises:
-        GoldenError: If the file is not valid JSON, is not an object, is missing
-            a string ``producer`` or a ``values`` mapping, or gives ``freezable``
-            a non-boolean value.
+        GoldenError: If the file is not valid JSON, is not an object, is missing a string ``producer`` or a
+            ``values`` mapping, or gives ``freezable`` a non-boolean value.
     """
     try:
         data = json.loads(path.read_text())
@@ -273,23 +258,19 @@ def _compare_values(
 ) -> list[MetricComparison]:
     """Compare stored ``expected`` metrics against recomputed ``actual`` values.
 
-    A metric absent from ``tolerances``, or given tolerance ``0.0``, must match
-    exactly; otherwise the absolute difference must not exceed the tolerance. A
-    metric missing from ``actual`` is recorded as a failed comparison.
+    A metric absent from ``tolerances``, or given tolerance ``0.0``, must match exactly; otherwise the absolute
+    difference must not exceed the tolerance. A metric missing from ``actual`` is recorded as a failed comparison.
 
-    With ``require_all_pinned``, a metric the producer emits that the golden does
-    *not* store is also a failed comparison (WP-005 pins a producer's output, so an
-    unpinned metric is an unguarded number, not an absent one — M-44). Frozen
-    snapshots pass ``False``: a past release pinned the metrics that existed then,
-    and holding it to today's set would fail every prior snapshot on every metric
-    addition.
+    With ``require_all_pinned``, a metric the producer emits that the golden does *not* store is also a failed
+    comparison (WP-005 pins a producer's output, so an unpinned metric is an unguarded number, not an absent one —
+    M-44). Frozen snapshots pass ``False``: a past release pinned the metrics that existed then, and holding it to
+    today's set would fail every prior snapshot on every metric addition.
 
     Args:
         expected: Metric values stored in the golden file.
         actual: Metric values freshly produced.
         tolerances: Per-metric absolute tolerances.
-        require_all_pinned: Report metrics present in ``actual`` but absent from
-            ``expected`` as failures.
+        require_all_pinned: Report metrics present in ``actual`` but absent from ``expected`` as failures.
 
     Returns:
         One :class:`MetricComparison` per stored metric, then one per unpinned
@@ -315,17 +296,14 @@ def check_golden(path: Path, *, cache: dict[str, dict[str, float]] | None = None
 
     Args:
         path: The golden file path.
-        cache: Optional producer-output cache keyed by the golden file's SHA-256, as
-            maintained by :func:`check_all`. A file whose digest is already present
-            reuses that output instead of re-running the producer; a *live* file
-            whose digest is absent records its output there. Frozen files never
-            write to the cache, so a frozen snapshot is only ever short-circuited by
-            a live golden it is byte-identical to.
+        cache: Optional producer-output cache keyed by the golden file's SHA-256, as maintained by :func:`check_all`.
+            A file whose digest is already present reuses that output instead of re-running the producer; a *live*
+            file whose digest is absent records its output there. Frozen files never write to the cache, so a
+            frozen snapshot is only ever short-circuited by a live golden it is byte-identical to.
 
     Returns:
-        A :class:`GoldenResult`; ``error`` is set (and ``passed`` is ``False``)
-        when the file is malformed or its producer cannot be resolved or run.
-        ``reused`` reports whether the producer run was taken from ``cache``.
+        A :class:`GoldenResult`; ``error`` is set (and ``passed`` is ``False``) when the file is malformed or its
+        producer cannot be resolved or run. ``reused`` reports whether the producer run was taken from ``cache``.
 
     Examples:
         ```pycon
@@ -363,25 +341,21 @@ def check_golden(path: Path, *, cache: dict[str, dict[str, float]] | None = None
 def check_all(goldens_dir: Path = DEFAULT_GOLDENS_DIR, include_gpu: bool = False) -> list[GoldenResult]:
     """Discover and check every golden under ``goldens_dir``.
 
-    By default only the offline goldens (top-level and ``frozen/``) are checked, so
-    a run on a machine with no accelerator and no generated dataset stays green.
-    With ``include_gpu`` the ``gpu/`` subtree is appended — those producers retrain a
-    model on the local accelerator (see :func:`discover_gpu_goldens`).
+    By default only the offline goldens (top-level and ``frozen/``) are checked, so a run on a machine with no
+    accelerator and no generated dataset stays green. With ``include_gpu`` the ``gpu/`` subtree is appended — those
+    producers retrain a model on the local accelerator (see :func:`discover_gpu_goldens`).
 
-    A release freeze copies live goldens verbatim, so most frozen files are byte-identical
-    to a live sibling — 41 of this repository's 50 offline goldens are, which had the seven
-    freezable producers recomputed up to six times per sweep. Live goldens are therefore
-    checked first and their producer output recorded against the file's SHA-256; a frozen
-    file whose bytes match one of them reuses that output rather than re-running an
-    identical computation, and is reported with ``reused``. Byte-equality is the whole
-    safety argument, so a frozen file that differs from its live sibling, or has none,
-    takes the full path — as does every parse, ``freezable`` and tolerance check, which
-    still run per file (M-41).
+    A release freeze copies live goldens verbatim, so most frozen files are byte-identical to a live sibling — 41 of
+    this repository's 50 offline goldens are, which had the seven freezable producers recomputed up to six times per
+    sweep. Live goldens are therefore checked first and their producer output recorded against the file's SHA-256; a
+    frozen file whose bytes match one of them reuses that output rather than re-running an identical computation, and
+    is reported with ``reused``. Byte-equality is the whole safety argument, so a frozen file that differs from its
+    live sibling, or has none, takes the full path — as does every parse, ``freezable`` and tolerance check,
+    which still run per file (M-41).
 
     Args:
         goldens_dir: The directory to scan (defaults to ``<repo>/goldens``).
-        include_gpu: Also check the accelerator-gated ``gpu/*.json`` goldens.
-            Defaults to ``False``.
+        include_gpu: Also check the accelerator-gated ``gpu/*.json`` goldens. Defaults to ``False``.
 
     Returns:
         One :class:`GoldenResult` per discovered golden, in discovery order.

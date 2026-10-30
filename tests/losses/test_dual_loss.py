@@ -1,15 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for the dual-branch loss composition (WP-028).
 
-DualBranchLoss scores a dense one-to-many branch (SmallTargetAssigner,
-``topk = 10``) and a unique one-to-one branch (UniqueAssigner, ``topk = 7 -> 1``)
-with shared gains, then combines the totals as
-``L = alpha * L_o2m + (1 - alpha) * L_o2o``. These tests cover the assignment
-wiring (o2o yields one positive per GT while o2m yields several), the static
-alpha combination and its settability (the WP-035 schedule seam), a finite
-zero-GT batch, and gradient flow into both branches. The head's raw logits are
-mapped through a sigmoid for the assigners; scenes live on the same 4x4 stride-8
-grid used by the assigner tests.
+DualBranchLoss scores a dense one-to-many branch (SmallTargetAssigner, ``topk = 10``) and a unique one-to-one branch
+(UniqueAssigner, ``topk = 7 -> 1``) with shared gains, then combines the totals as
+``L = alpha * L_o2m + (1 - alpha) * L_o2o``. These tests cover the assignment wiring (o2o yields one positive per GT
+while o2m yields several), the static alpha combination and its settability (the WP-035 schedule seam), a finite zero-GT
+batch, and gradient flow into both branches. The head's raw logits are mapped through a sigmoid for the
+assigners; scenes live on the same 4x4 stride-8 grid used by the assigner tests.
 """
 
 from __future__ import annotations
@@ -47,6 +44,27 @@ def _boxes_from_leaf(leaf: Tensor) -> Tensor:
         [[2.0, 3.0, 3.0, 4.0]]
     """
     return torch.stack([leaf[..., 0], leaf[..., 1], leaf[..., 0] + 1.0, leaf[..., 1] + 1.0], dim=-1)
+
+
+def _perfect_whole_grid_scene() -> tuple[BranchPrediction, Tensor, Tensor, Tensor, Tensor]:
+    """Return ``(branch, points, gt, labels, mask)`` for one GT covering the grid, every prediction equal to it.
+
+    Both branches may share the returned prediction: zero logits and the GT box repeated on all 16 anchors.
+
+    Examples:
+        >>> branch, points, gt, labels, mask = _perfect_whole_grid_scene()
+        >>> tuple(branch.boxes.shape), tuple(points.shape), tuple(gt.shape)
+        ((1, 16, 4), (16, 2), (1, 1, 4))
+    """
+    gt = torch.tensor([[[0.0, 0.0, 32.0, 32.0]]])  # covers all 16 anchors
+    boxes = gt.expand(1, 16, 4).contiguous()  # every pred == the GT box
+    return (
+        BranchPrediction(torch.zeros(1, 16, 1), boxes),
+        _grid_points(),
+        gt,
+        torch.tensor([[0]]),
+        torch.tensor([[True]]),
+    )
 
 
 def test_one_positive_per_gt() -> None:
@@ -88,17 +106,12 @@ def test_every_gt_covered_by_o2o() -> None:
 
 def test_alpha_weights_two_branch_totals() -> None:
     """total equals alpha*o2m + (1-alpha)*o2o exactly, and tracks a changed alpha."""
-    gt = torch.tensor([[[0.0, 0.0, 32.0, 32.0]]])  # covers all 16 anchors
-    logits = torch.zeros(1, 16, 1)
-    boxes = gt.expand(1, 16, 4).contiguous()  # every pred == the GT box
-    labels = torch.tensor([[0]])
-    mask = torch.tensor([[True]])
-    points = _grid_points()
+    branch, points, gt, labels, mask = _perfect_whole_grid_scene()
     loss = DualBranchLoss()
 
-    default = loss(BranchPrediction(logits, boxes), BranchPrediction(logits, boxes), points, gt, labels, mask)
+    default = loss(branch, branch, points, gt, labels, mask)
     loss.alpha = 0.25
-    changed = loss(BranchPrediction(logits, boxes), BranchPrediction(logits, boxes), points, gt, labels, mask)
+    changed = loss(branch, branch, points, gt, labels, mask)
 
     assert default.alpha == 0.5
     assert math.isclose(default.total.item(), 0.5 * default.o2m.total.item() + 0.5 * default.o2o.total.item())
@@ -111,25 +124,17 @@ def test_alpha_weights_two_branch_totals() -> None:
 def test_tensor_alpha_blends_bit_equal_to_attribute_and_records_override(alpha: float) -> None:
     """A keyword ``alpha`` tensor drives the blend and records the weight actually used.
 
-    The compiled step (WP-187) passes the weight as a ``float64`` 0-d tensor so the
-    region does not guard on its value; a stale attribute must not change the
-    recorded weight. ``0.8`` is the case a
-    ``float32`` tensor would put one ulp off.
+    The compiled step (WP-187) passes the weight as a ``float64`` 0-d tensor so the region does not guard on its
+    value; a stale attribute must not change the recorded weight. ``0.8`` is the case a ``float32`` tensor would put
+    one ulp off.
     """
-    gt = torch.tensor([[[0.0, 0.0, 32.0, 32.0]]])
-    logits = torch.zeros(1, 16, 1)
-    boxes = gt.expand(1, 16, 4).contiguous()
-    labels = torch.tensor([[0]])
-    mask = torch.tensor([[True]])
-    points = _grid_points()
+    branch, points, gt, labels, mask = _perfect_whole_grid_scene()
     loss = DualBranchLoss(alpha=alpha)
     tensor_alpha = torch.tensor(alpha, dtype=torch.float64)
 
-    from_attribute = loss(BranchPrediction(logits, boxes), BranchPrediction(logits, boxes), points, gt, labels, mask)
+    from_attribute = loss(branch, branch, points, gt, labels, mask)
     loss.alpha = 0.5  # a stale attribute must not leak into a tensor-driven blend
-    from_tensor = loss(
-        BranchPrediction(logits, boxes), BranchPrediction(logits, boxes), points, gt, labels, mask, alpha=tensor_alpha
-    )
+    from_tensor = loss(branch, branch, points, gt, labels, mask, alpha=tensor_alpha)
 
     assert torch.equal(from_tensor.total, from_attribute.total)
     assert from_tensor.alpha == tensor_alpha

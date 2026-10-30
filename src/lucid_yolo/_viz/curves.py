@@ -1,35 +1,30 @@
 # SPDX-License-Identifier: Apache-2.0
 """Training-curve figures from a run's Lightning CSV log (WP-080, WP-189).
 
-Reads the CSV a run's :class:`~pytorch_lightning.loggers.CSVLogger` wrote
-(``lightning_logs/version_N/metrics.csv``) and builds one three- or four-panel figure:
+Reads the CSV a run's :class:`~pytorch_lightning.loggers.CSVLogger` wrote (``lightning_logs/version_N/metrics.csv``)
+and builds one three- or four-panel figure:
 
 1. **val/mAP** — the epoch-end E2E proxy logged by WP-077, the run's headline curve;
 2. **loss** — train and validation totals on one axis;
-3. **o2o components** — the one-to-one branch's classification, CIoU and L1 terms,
-   which is where a mis-scaled term shows up as a flat line (the WP-078 signature);
-4. **segmentation, oriented or keypoint terms** — a ``task: segment`` run's pre-gain
-   instance-mask and auxiliary semantic terms (WP-087, A38); an ``obb`` run's rotated
-   ProbIoU, retargeted L1 and angle terms (WP-088); a ``keypoints`` run's RLE term or
-   its Laplace-NLL control (WP-123, WP-135) — whichever the CSV's own columns name.
+3. **o2o components** — the one-to-one branch's classification, CIoU and L1 terms, which is where a mis-scaled term
+   shows up as a flat line (the WP-078 signature);
+4. **segmentation, oriented or keypoint terms** — a ``task: segment`` run's pre-gain instance-mask and auxiliary
+   semantic terms (WP-087, A38); an ``obb`` run's rotated ProbIoU, retargeted L1 and angle terms (WP-088);
+   a ``keypoints`` run's RLE term or its Laplace-NLL control (WP-123, WP-135) — whichever the CSV's own columns name.
 
-Panels are skipped when the run predates the column they need, so the figure also
-works on the older runs whose CSVs carry no ``val/mAP``. The fourth panel follows
-the same rule from the other side: a detection run's CSV has none of the mask,
-oriented or keypoint columns, so it renders the three panels it always did, at the
-width it always did.
+Panels are skipped when the run predates the column they need, so the figure also works on the older runs whose CSVs
+carry no ``val/mAP``. The fourth panel follows the same rule from the other side: a detection run's CSV has none of the
+mask, oriented or keypoint columns, so it renders the three panels it always did, at the width it always did.
 
-Two callers, one figure. :func:`build_run_figure` returns the figure and nothing
-else; ``scripts/plot_training.py`` wraps it in the deterministic SVG save the
-reproduction report needs (fixed hashsalt, suppressed date metadata), and
-:func:`plot_curves` is the notebook entry, where the figure is displayed rather than
-written and the title defaults to the run directory's name. The panels are the same
-object either way, so a figure a notebook shows is the figure the report commits.
+Two callers, one figure. :func:`build_run_figure` returns the figure and nothing else; ``scripts/plot_training.py``
+wraps it in the deterministic SVG save the reproduction report needs (fixed hashsalt, suppressed date metadata), and
+:func:`plot_curves` is the notebook entry, where the figure is displayed rather than written and the title defaults to
+the run directory's name. The panels are the same object either way, so a figure a notebook shows is the figure the
+report commits.
 
-Nothing here selects a backend. ``matplotlib.use("Agg")`` is a process-wide setting
-that switches a notebook *away* from its inline display, so the headless choice
-belongs to the script and the test session that need it, not to a module a notebook
-imports.
+Nothing here selects a backend. ``matplotlib.use("Agg")`` is a process-wide setting that switches a notebook *away*
+from its inline display, so the headless choice belongs to the script and the test session that need it, not to a
+module a notebook imports.
 """
 
 from __future__ import annotations
@@ -50,33 +45,30 @@ if TYPE_CHECKING:
 #: Panel 3 series: CSV column suffix -> legend label, in plot order.
 _COMPONENTS = (("o2o_cls", "classification"), ("o2o_box", "CIoU"), ("o2o_l1", "L1 (stride units)"))
 
-#: Panel 4 series: CSV column -> legend label and colour, in plot order. ``val/semantic``
-#: is missing on purpose, not by oversight — see :func:`_panel_segmentation`. The colours
-#: repeat the loss panel's train-grey / validation-blue pairing so the mask term reads the
-#: same way there as here.
+#: Panel 4 series: CSV column -> legend label and colour, in plot order. ``val/semantic`` is missing on purpose, not
+#: by oversight — see :func:`_panel_segmentation`. The colours repeat the loss panel's train-grey / validation-blue
+#: pairing so the mask term reads the same way there as here.
 _SEG_SERIES = (
     ("train/mask", "mask (train)", "#7f7f7f"),
     ("val/mask", "mask (validation)", "#1f77b4"),
     ("train/semantic", "semantic (train only)", "#2ca02c"),
 )
 
-#: Panel 4 series for an oriented run: the pre-gain terms that replace and extend the box
-#: pair (A49, A50, WP-088). Validation only, matching panel 3 — both splits would put six
-#: curves on one axis to say what three already say.
+#: Panel 4 series for an oriented run: the pre-gain terms that replace and extend the box pair (A49, A50, WP-088).
+#: Validation only, matching panel 3 — both splits would put six curves on one axis to say what three already say.
 _OBB_SERIES = (("rbox", "rotated ProbIoU"), ("rl1", "L1 (stride units)"), ("angle", "angle"))
 
-#: Panel 4 series for a keypoints run: the single term ``keypoint_loss`` selects
-#: between (WP-135) — RLE's flow-plus-Laplace NLL by default, or the Laplace-NLL
-#: control with the flow term removed. Both write the same ``keypoint`` column, so
-#: the panel cannot and does not distinguish which loss a given run trained under;
-#: that distinction lives in the run's own ``config.yaml``, not its metrics.
+#: Panel 4 series for a keypoints run: the single term ``keypoint_loss`` selects between (WP-135) — RLE's
+#: flow-plus-Laplace NLL by default, or the Laplace-NLL control with the flow term removed. Both write the same
+#: ``keypoint`` column, so the panel cannot and does not distinguish which loss a given run trained under; that
+#: distinction lives in the run's own ``config.yaml``, not its metrics.
 _KEYPOINT_SERIES = (
     ("train/keypoint", "keypoint (train)", "#7f7f7f"),
     ("val/keypoint", "keypoint (validation)", "#1f77b4"),
 )
 
-#: Panel 1 series when a run logs no ``val/mAP``: the oriented metric that replaces it
-#: (WP-102). mAP50 leads because the oriented DoD is stated at IoU 0.50.
+#: Panel 1 series when a run logs no ``val/mAP``: the oriented metric that replaces it (WP-102). mAP50 leads because
+#: the oriented DoD is stated at IoU 0.50.
 _ROTATED_SERIES = (
     ("val/rotated_mAP50", "mAP50", "#1f77b4"),
     ("val/rotated_mAP", "mAP50-95", "#7f7f7f"),
@@ -89,9 +81,8 @@ _PANEL_WIDTH, _FIGURE_HEIGHT = 4.5, 3.9
 def _figure_size(panels: int) -> tuple[float, float]:
     """Return the figure size in inches for a given panel count.
 
-    The three-panel value is load-bearing rather than cosmetic: the committed
-    detection figure was rendered at it, and widening the figure by a fraction of
-    an inch moves every coordinate in the SVG, so the byte-identity the script
+    The three-panel value is load-bearing rather than cosmetic: the committed detection figure was rendered at it, and
+    widening the figure by a fraction of an inch moves every coordinate in the SVG, so the byte-identity the script
     promises would break for a run whose numbers never changed.
 
     Examples:
@@ -109,9 +100,8 @@ def _figure_size(panels: int) -> tuple[float, float]:
 def load_series(path: Path, column: str) -> tuple[list[int], list[float]]:
     """Read one metric column from a Lightning CSV log, dropping rows that lack it.
 
-    Lightning writes a sparse table — a step row carries only the training
-    metrics, an epoch-end row only the validation ones — so every column needs
-    its own row filter rather than a shared index.
+    Lightning writes a sparse table — a step row carries only the training metrics, an epoch-end row only the
+    validation ones — so every column needs its own row filter rather than a shared index.
 
     Args:
         path: The ``metrics.csv`` written by the run's ``CSVLogger``.
@@ -162,14 +152,13 @@ def _mark_close_mosaic(axis: Axes, close_mosaic: int | None) -> None:
 def _panel_rotated_map(axis: Axes, path: Path, close_mosaic: int | None) -> bool:
     """Draw the oriented metric panel: rotated mAP50 and mAP50-95 (WP-063).
 
-    Both are drawn because they answer different questions about the same run. mAP50
-    leads and is annotated — the oriented DoD is stated at IoU 0.50, and localization
-    at 0.50 is what an orientation either gets right or does not. The stricter mean
-    over 0.50-0.95 sits beneath it and is where a systematically slightly-wrong
-    heading shows up as a gap rather than as a failure.
+    Both are drawn because they answer different questions about the same run. mAP50 leads and is annotated — the
+    oriented DoD is stated at IoU 0.50, and localization at 0.50 is what an orientation either gets right or does not.
+    The stricter mean over 0.50-0.95 sits beneath it and is where a systematically slightly-wrong heading shows up as a
+    gap rather than as a failure.
 
-    Neither is a whole-image number: both score tiles as supplied, and the merge
-    policy for overlapping tiles belongs to WP-064 (`eval/dota_eval.py`).
+    Neither is a whole-image number: both score tiles as supplied, and the merge policy for overlapping tiles belongs to
+    WP-064 (`eval/dota_eval.py`).
     """
     drawn = False
     for column, label, color in _ROTATED_SERIES:
@@ -200,11 +189,10 @@ def _panel_rotated_map(axis: Axes, path: Path, close_mosaic: int | None) -> bool
 def _panel_map(axis: Axes, path: Path, close_mosaic: int | None) -> bool:
     """Draw the headline metric panel; return whether the run logged one at all.
 
-    An oriented run logs no ``val/mAP`` — that figure reads the A44 composition's
-    pre-rotation rectangle and was dropped rather than carried beside a metric that
-    answers the question (WP-102) — so the panel falls back to the rotated pair. The
-    annotated value is the leading series either way, which for an oriented run is
-    mAP50, where its acceptance criterion is stated.
+    An oriented run logs no ``val/mAP`` — that figure reads the A44 composition's pre-rotation rectangle and was dropped
+    rather than carried beside a metric that answers the question (WP-102) — so the panel falls back to the rotated
+    pair. The annotated value is the leading series either way, which for an oriented run is mAP50, where its acceptance
+    criterion is stated.
     """
     epochs, values = load_series(path, "val/mAP")
     if not epochs:
@@ -228,10 +216,9 @@ def _panel_map(axis: Axes, path: Path, close_mosaic: int | None) -> bool:
 def epoch_means(epochs: Sequence[int], values: Sequence[float]) -> tuple[list[int], list[float]]:
     """Collapse a per-step series to one mean per epoch.
 
-    Training metrics are logged every N steps, so a raw plot is a sawtooth whose
-    first point (the untrained opening loss) sets the axis range for the whole
-    run. Averaging within the epoch gives a curve comparable to the once-per-epoch
-    validation series.
+    Training metrics are logged every N steps, so a raw plot is a sawtooth whose first point (the untrained opening
+    loss) sets the axis range for the whole run. Averaging within the epoch gives a curve comparable to the
+    once-per-epoch validation series.
 
     Args:
         epochs: Per-sample epoch indices, non-decreasing.
@@ -286,16 +273,14 @@ def _has_segmentation(path: Path) -> bool:
 def _panel_segmentation(axis: Axes, path: Path) -> None:
     """Draw the epoch-mean pre-gain segmentation terms (A38): instance mask, and semantic.
 
-    ``val/semantic`` is left out deliberately. The auxiliary semantic branch is
-    training-only (A17), so the run does log the validation column but every entry
-    in it is exactly 0.0 — which on this axis is a flat line pinned to the bottom,
-    the same shape a dead loss term makes. Drawing it would make a working run
-    look like the WP-078 failure it is not, so the panel shows the training curve,
-    which descends, and the legend says which of the two is train-only.
+    ``val/semantic`` is left out deliberately. The auxiliary semantic branch is training-only (A17), so the run does log
+    the validation column but every entry in it is exactly 0.0 — which on this axis is a flat line pinned to the bottom,
+    the same shape a dead loss term makes. Drawing it would make a working run look like the WP-078 failure it is not,
+    so the panel shows the training curve, which descends, and the legend says which of the two is train-only.
 
-    The axis is linear rather than the log used by the loss and component panels:
-    these are per-pixel means confined to roughly one decade, and a log axis would
-    stretch the semantic term's approach to zero into the panel's dominant feature.
+    The axis is linear rather than the log used by the loss and component panels: these are per-pixel means confined to
+    roughly one decade, and a log axis would stretch the semantic term's approach to zero into the panel's
+    dominant feature.
     """
     for column, label, color in _SEG_SERIES:
         epochs, values = load_series(path, column)
@@ -315,15 +300,13 @@ def _has_oriented(path: Path) -> bool:
 def _panel_oriented(axis: Axes, path: Path) -> None:
     """Draw the pre-gain oriented terms an ``obb`` run adds to the shared objective.
 
-    Two of the three replace terms panel 3 also carries: ``rbox`` is the rotated
-    ProbIoU that stands in for CIoU (A49) and ``rl1`` the L1 retargeted onto the
-    rotated box's own extents (A50), so panel 3's ``o2o_box`` and ``o2o_l1`` are the
-    zeros the dual loss is constructed with rather than live terms. ``angle`` is the
-    one term with no axis-aligned counterpart at all.
+    Two of the three replace terms panel 3 also carries: ``rbox`` is the rotated ProbIoU that stands in for CIoU (A49)
+    and ``rl1`` the L1 retargeted onto the rotated box's own extents (A50), so panel 3's ``o2o_box`` and ``o2o_l1``
+    are the zeros the dual loss is constructed with rather than live terms. ``angle`` is the one term with no
+    axis-aligned counterpart at all.
 
-    The axis is log, as panel 3 is: the three terms sit decades apart, and the angle
-    term in particular is small enough that a linear axis would draw it flat against
-    the bottom whether it was learning or dead.
+    The axis is log, as panel 3 is: the three terms sit decades apart, and the angle term in particular is small enough
+    that a linear axis would draw it flat against the bottom whether it was learning or dead.
     """
     for column, label in _OBB_SERIES:
         epochs, values = load_series(path, f"val/{column}")
@@ -343,12 +326,10 @@ def _has_keypoint(path: Path) -> bool:
 def _panel_keypoint(axis: Axes, path: Path) -> None:
     """Draw the epoch-mean keypoint loss term, whichever of WP-135's two arms trained it.
 
-    A single series each split, unlike the segmentation and oriented panels' three:
-    the module logs one aggregate ``keypoint`` value regardless of which loss produced
-    it (RLE's flow-plus-Laplace NLL, or the Laplace-NLL control alone). The axis is
-    linear rather than log, since RLE's negative log-likelihood is signed — a run's
-    ``keypoint`` value crosses zero as the flow's density concentrates, which a log
-    axis cannot represent at all.
+    A single series each split, unlike the segmentation and oriented panels' three: the module logs one aggregate
+    ``keypoint`` value regardless of which loss produced it (RLE's flow-plus-Laplace NLL, or the Laplace-NLL control
+    alone). The axis is linear rather than log, since RLE's negative log-likelihood is signed — a run's ``keypoint``
+    value crosses zero as the flow's density concentrates, which a log axis cannot represent at all.
     """
     for column, label, color in _KEYPOINT_SERIES:
         epochs, values = load_series(path, column)
@@ -362,13 +343,11 @@ def _panel_keypoint(axis: Axes, path: Path) -> None:
 def build_run_figure(metrics: Path, title: str, close_mosaic: int | None = None) -> Figure:
     """Build one run's figure and return it, unsaved and open.
 
-    A segmentation, oriented or keypoints run gets a fourth panel for the terms
-    unique to its task; a detection run, whose CSV has none of those columns, gets
-    the three panels and the exact geometry it got before that panel existed.
+    A segmentation, oriented or keypoints run gets a fourth panel for the terms unique to its task; a detection run,
+    whose CSV has none of those columns, gets the three panels and the exact geometry it got before that panel existed.
 
-    The figure is returned open on purpose: the script saves it and closes it, a
-    notebook displays it, and closing it here would serve the first caller by
-    breaking the second.
+    The figure is returned open on purpose: the script saves it and closes it, a notebook displays it, and closing it
+    here would serve the first caller by breaking the second.
 
     Args:
         metrics: Path to the run's ``metrics.csv``.
@@ -424,10 +403,9 @@ def build_run_figure(metrics: Path, title: str, close_mosaic: int | None = None)
 def plot_curves(metrics: Path, title: str | None = None, close_mosaic: int | None = None) -> Figure:
     """Plot a run's curves for a notebook: the report's panels, titled by the run directory.
 
-    The same figure :func:`build_run_figure` builds, with the one default a notebook
-    wants and a report does not: no title given, the suptitle is the run directory's
-    own name (``version_8`` for ``lightning_logs/version_8/metrics.csv``), which is
-    how a reader scrolling past several runs tells them apart.
+    The same figure :func:`build_run_figure` builds, with the one default a notebook wants and a report does not: no
+    title given, the suptitle is the run directory's own name (``version_8`` for
+    ``lightning_logs/version_8/metrics.csv``), which is how a reader scrolling past several runs tells them apart.
 
     Args:
         metrics: Path to the run's ``metrics.csv``.

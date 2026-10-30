@@ -1,19 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-010 random-affine transform (blueprint section 5.9).
 
-Covers the box/mask consistency contract (the DoD), the identity transform,
-recovery of a seeded translation on both the image and the box centres, canvas
-clipping (partial clip and fully-outside drop with label alignment), visibility
-filtering, the rotated-box guard, and byte-for-byte determinism under a seeded
-generator.
+Covers the box/mask consistency contract (the DoD), the identity transform, recovery of a seeded translation on both
+the image and the box centres, canvas clipping (partial clip and fully-outside drop with label alignment), visibility
+filtering, the rotated-box guard, and byte-for-byte determinism under a seeded generator.
 
-Keypoints (WP-132) get their own class, including A70's case: this transform
-manufactures it — translate and scale can push a point off-canvas while its box still
-survives the visibility filter — and A70 says such a point is carried through with its
-true coordinate and its visibility, neither clamped to the edge nor zeroed.
+Keypoints (WP-132) get their own class, including A70's case: this transform manufactures it — translate and scale can
+push a point off-canvas while its box still survives the visibility filter — and A70 says such a point is carried
+through with its true coordinate and its visibility, neither clamped to the edge nor zeroed.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 import torch
@@ -24,8 +23,8 @@ from lucid_yolo.data.affine import _DEFAULT_PAD_VALUE
 
 #: Square canvas used across the suite.
 _CANVAS = 64
-#: A stated pad value distinct from the default, exact in binary so no rounding can hide a
-#: fill that came from the default instead.
+#: A stated pad value distinct from the default, exact in binary so no rounding can hide a fill that came from the
+#: default instead.
 _STATED_PAD = 0.25
 
 
@@ -39,6 +38,22 @@ def _image() -> torch.Tensor:
         torch.Size([3, 64, 64])
     """
     return torch.rand(3, _CANVAS, _CANVAS)
+
+
+def _still_affine(**overrides: Any) -> RandomAffine:
+    """Build a ``RandomAffine`` that samples nothing unless an override says otherwise.
+
+    Rotation, translation, scale and shear all default to ``0.0`` here, so a case states only the one range it
+    exercises and every other draw is the identity.
+
+    Args:
+        **overrides: Constructor arguments replacing the zeroed defaults or adding to them.
+
+    Examples:
+        >>> _still_affine(min_box_size=3.0).min_box_size
+        3.0
+    """
+    return RandomAffine(**{"degrees": 0.0, "translate": 0.0, "scale": 0.0, "shear": 0.0, **overrides})
 
 
 def _polygon_targets() -> Targets:
@@ -86,12 +101,11 @@ class TestKeypoints:
     def test_points_warp_by_sampled_translation(self) -> None:
         """A translation-only warp moves each keypoint by exactly the sampled offset.
 
-        This is the contract that makes a keypoint target usable at all: the points must
-        land where the image content lands. A transform that carried them unwarped — or
-        dropped them, as this one did before WP-132 — supervises the model against the
-        pre-augmentation scene.
+        This is the contract that makes a keypoint target usable at all: the points must land where the image content
+        lands. A transform that carried them unwarped — or dropped them, as this one did before WP-132 — supervises the
+        model against the pre-augmentation scene.
         """
-        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=seeded_generator())
+        affine = _still_affine(translate=0.15, generator=seeded_generator())
         points = torch.tensor([[[12.0, 14.0], [28.0, 32.0]]])
         targets = _posed_targets(torch.tensor([[10.0, 12.0, 30.0, 34.0]]), points, torch.tensor([[2, 1]]))
 
@@ -104,11 +118,10 @@ class TestKeypoints:
     def test_visibility_survives_warp_unchanged(self) -> None:
         """Visibility codes are carried across the warp verbatim, not recomputed.
 
-        The affine moves coordinates; it has no basis for revising whether a point was
-        annotated. Silently rewriting these values would corrupt the flag the OKS scorer
-        and the loss mask both read.
+        The affine moves coordinates; it has no basis for revising whether a point was annotated. Silently rewriting
+        these values would corrupt the flag the OKS scorer and the loss mask both read.
         """
-        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=seeded_generator())
+        affine = _still_affine(translate=0.15, generator=seeded_generator())
         visibility = torch.tensor([[2, 1]])
         targets = _posed_targets(
             torch.tensor([[10.0, 12.0, 30.0, 34.0]]), torch.tensor([[[12.0, 14.0], [28.0, 32.0]]]), visibility
@@ -121,24 +134,24 @@ class TestKeypoints:
     def test_keypoint_free_targets_keep_canonical_empty(self) -> None:
         """A detection-only warp returns the canonical empty keypoint pair, untouched.
 
-        Every golden in the repo sits on this path. If the keypoint carry-through were not
-        an exact no-op for point-free targets, detect/segment/obb results would move.
+        Every golden in the repo sits on this path. If the keypoint carry-through were not an exact no-op for
+        point-free targets, detect/segment/obb results would move.
         """
-        affine = RandomAffine(degrees=0.0, translate=0.1, scale=0.0, shear=0.0, generator=seeded_generator())
+        affine = _still_affine(translate=0.1, generator=seeded_generator())
 
         _, out = affine(_image(), _polygon_targets())
 
         assert out.keypoints.shape == (0, 0, 2)
         assert out.keypoint_vis.shape == (0, 0)
 
-    def test_dropped_instance_takes_points_with_it(self) -> None:
+    def test_dropped_instance_takes_points_along(self) -> None:
         """When the canvas filter drops an instance, the surviving keypoint rows stay aligned.
 
-        The points share the box instance axis, so a filter that removed a box without
-        removing its point set would silently re-pair every later instance with the wrong
-        landmarks — a misalignment no shape check downstream would catch.
+        The points share the box instance axis, so a filter that removed a box without removing its point set would
+        silently re-pair every later instance with the wrong landmarks — a misalignment no shape check downstream
+        would catch.
         """
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        affine = _still_affine()
         targets = _posed_targets(
             torch.tensor([[5.0, 5.0, 25.0, 25.0], [200.0, 200.0, 240.0, 240.0]]),
             torch.tensor([[[6.0, 7.0]], [[210.0, 220.0]]]),
@@ -153,13 +166,12 @@ class TestKeypoints:
     def test_point_pushed_off_canvas_neither_clamped_nor_zeroed(self) -> None:
         """A70: a point warped outside the canvas on a kept instance keeps coordinate and visibility.
 
-        The affine translates a box that stays comfortably inside the canvas while one of
-        its landmarks crosses the right edge. Clamping that landmark to the boundary would
-        supervise the model toward a location the object is not at, and demoting it to
-        ``v=0`` would collide with A66's "never annotated" meaning of that flag. Both are
+        The affine translates a box that stays comfortably inside the canvas while one of its landmarks crosses the
+        right edge. Clamping that landmark to the boundary would supervise the model toward a location the object is
+        not at, and demoting it to ``v=0`` would collide with A66's "never annotated" meaning of that flag. Both are
         rejected, so the transform must leave the true coordinate standing.
         """
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        affine = _still_affine()
         outside = torch.tensor([[[20.0, 20.0], [_CANVAS + 30.0, _CANVAS + 12.0]]])
         targets = _posed_targets(torch.tensor([[10.0, 10.0, 40.0, 40.0]]), outside, torch.tensor([[2, 2]]))
 
@@ -172,12 +184,11 @@ class TestKeypoints:
     def test_polygon_path_warps_points_from_unclamped_matrix(self) -> None:
         """On the polygon path an off-canvas point is still unclamped, though rings are clamped.
 
-        The two modalities take deliberately opposite treatment on the same call: a ring is
-        clamped because it is rasterised onto the canvas, while A70 keeps a point where it
-        truly is. Warping points from the clipped rings would quietly re-impose the clamp
-        A70 rejects.
+        The two modalities take deliberately opposite treatment on the same call: a ring is clamped because it is
+        rasterised onto the canvas, while A70 keeps a point where it truly is. Warping points from the clipped rings
+        would quietly re-impose the clamp A70 rejects.
         """
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        affine = _still_affine()
         ring = torch.tensor([[10.0, 10.0], [40.0, 10.0], [40.0, 40.0], [10.0, 40.0]])
         outside = torch.tensor([[[_CANVAS + 25.0, 20.0]]])
         targets = Targets(
@@ -214,7 +225,7 @@ class TestIdentity:
 
     def test_identity_leaves_boxes_exact(self) -> None:
         """Zero rotation/translation/scale/shear returns the input boxes exactly."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        affine = _still_affine()
         targets = _polygon_targets()
 
         _, out = affine(_image(), targets)
@@ -225,7 +236,7 @@ class TestIdentity:
 
     def test_identity_leaves_image_within_tolerance(self) -> None:
         """The identity grid_sample reproduces the image within interpolation tolerance."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        affine = _still_affine()
         image = _image()
 
         out_image, _ = affine(image, Targets.empty())
@@ -238,7 +249,7 @@ class TestKnownTranslation:
 
     def test_box_centres_shift_by_sampled_offset(self) -> None:
         """Box centres move by exactly the sampled (tx, ty) recovered from last_params."""
-        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=seeded_generator())
+        affine = _still_affine(translate=0.15, generator=seeded_generator())
         targets = _polygon_targets()
         in_centres = torch.stack(
             [(targets.boxes[:, 0] + targets.boxes[:, 2]) / 2, (targets.boxes[:, 1] + targets.boxes[:, 3]) / 2], dim=1
@@ -255,7 +266,7 @@ class TestKnownTranslation:
 
     def test_bright_pixel_shifts_same_direction(self) -> None:
         """A single bright pixel lands near centre + sampled offset (content follows boxes)."""
-        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=seeded_generator())
+        affine = _still_affine(translate=0.15, generator=seeded_generator())
         image = torch.full((1, _CANVAS, _CANVAS), 114.0 / 255.0)
         row0, col0 = _CANVAS // 2, _CANVAS // 2
         image[0, row0, col0] = 1.0
@@ -274,7 +285,7 @@ class TestClipping:
 
     def test_partial_box_clipped_to_canvas(self) -> None:
         """A box translated off the right edge is clamped to the canvas width."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        affine = _still_affine()
         targets = Targets(boxes=torch.tensor([[50.0, 10.0, 80.0, 40.0]]), labels=torch.tensor([0]))
 
         _, out = affine(_image(), targets)
@@ -285,7 +296,7 @@ class TestClipping:
 
     def test_fully_outside_dropped_and_labels_aligned(self) -> None:
         """An off-canvas instance is removed while surviving labels stay aligned."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        affine = _still_affine()
         targets = Targets(
             boxes=torch.tensor([[5.0, 5.0, 25.0, 25.0], [200.0, 200.0, 240.0, 240.0]]),
             labels=torch.tensor([7, 9]),
@@ -302,7 +313,7 @@ class TestVisibilityFilter:
 
     def test_mostly_clipped_instance_removed(self) -> None:
         """A box with only a thin sliver inside the canvas is dropped by min_visibility."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, min_visibility=0.5)
+        affine = _still_affine(min_visibility=0.5)
         targets = Targets(boxes=torch.tensor([[60.0, 10.0, 160.0, 40.0]]), labels=torch.tensor([0]))
 
         _, out = affine(_image(), targets)
@@ -313,13 +324,12 @@ class TestVisibilityFilter:
 def _sliver_targets(route: str) -> Targets:
     """Build one box clipped to a sliver, on the modality axis naming ``route``.
 
-    The box spans ``[60, 10, 160, 40]`` on a 64-wide canvas, so clipping leaves four
-    columns of thirty rows — 4% of its own area — which every threshold pairing below
-    is chosen against.
+    The box spans ``[60, 10, 160, 40]`` on a 64-wide canvas, so clipping leaves four columns of thirty rows — 4% of its
+    own area — which every threshold pairing below is chosen against.
 
     Args:
-        route: ``"rotated"``, ``"polygons"`` or ``"boxes"``, naming which of the three
-            keep-mask call sites the returned targets route through.
+        route: ``"rotated"``, ``"polygons"`` or ``"boxes"``, naming which of the three keep-mask call sites the
+            returned targets route through.
 
     Returns:
         Targets carrying exactly one instance.
@@ -344,21 +354,19 @@ def _sliver_targets(route: str) -> Targets:
 class TestKeepThresholdsReachUpstream:
     """Both thresholds are passed to upstream's keep mask at every one of the three call sites.
 
-    Upstream's ``instance_keep_mask`` defaults ``min_size`` and ``min_visibility`` to
-    ``0.0``, which drops nothing, against this project's ``2.0`` and ``0.1``. Omitting
-    either argument at any call site keeps every instance with no shape change and no
-    exception, so the failure is silent — these cases are what makes it loud. One case per
-    site per threshold, plus the control that the drop is the threshold's doing.
+    Upstream's ``instance_keep_mask`` defaults ``min_size`` and ``min_visibility`` to ``0.0``, which drops nothing,
+    against this project's ``2.0`` and ``0.1``. Omitting either argument at any call site keeps every instance with no
+    shape change and no exception, so the failure is silent — these cases are what makes it loud. One case per site per
+    threshold, plus the control that the drop is the threshold's doing.
     """
 
     def test_size_threshold_drops_sliver(self, route: str) -> None:
         """A four-column clipped box falls below ``min_box_size`` and is dropped.
 
-        ``min_visibility`` is pinned at ``0.0`` so nothing but the size rule can account
-        for the drop: if ``min_size`` were left to upstream's default the instance would
-        survive, since 4 >= 0.0.
+        ``min_visibility`` is pinned at ``0.0`` so nothing but the size rule can account for the drop: if ``min_size``
+        were left to upstream's default the instance would survive, since 4 >= 0.0.
         """
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, min_box_size=8.0, min_visibility=0.0)
+        affine = _still_affine(min_box_size=8.0, min_visibility=0.0)
 
         _, out = affine(_image(), _sliver_targets(route))
 
@@ -367,11 +375,10 @@ class TestKeepThresholdsReachUpstream:
     def test_visibility_threshold_drops_sliver(self, route: str) -> None:
         """A box retaining 4% of its area falls below ``min_visibility`` and is dropped.
 
-        ``min_box_size`` is pinned at ``0.0`` so nothing but the visibility rule can
-        account for the drop: at upstream's default of ``0.0`` the instance would survive,
-        since 0.04 >= 0.0.
+        ``min_box_size`` is pinned at ``0.0`` so nothing but the visibility rule can account for the drop: at
+        upstream's default of ``0.0`` the instance would survive, since 0.04 >= 0.0.
         """
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, min_box_size=0.0, min_visibility=0.5)
+        affine = _still_affine(min_box_size=0.0, min_visibility=0.5)
 
         _, out = affine(_image(), _sliver_targets(route))
 
@@ -380,11 +387,10 @@ class TestKeepThresholdsReachUpstream:
     def test_upstream_defaults_would_keep_sliver(self, route: str) -> None:
         """With both thresholds at upstream's defaults the same instance survives.
 
-        The control for the two cases above: it pins that they fail for the reason claimed
-        — the thresholds this project passes — rather than because the sliver is dropped by
-        the clip, the warp or anything else on the path.
+        The control for the two cases above: it pins that they fail for the reason claimed — the thresholds this
+        project passes — rather than because the sliver is dropped by the clip, the warp or anything else on the path.
         """
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, min_box_size=0.0, min_visibility=0.0)
+        affine = _still_affine(min_box_size=0.0, min_visibility=0.0)
 
         _, out = affine(_image(), _sliver_targets(route))
 
@@ -410,10 +416,9 @@ class TestLetterboxCanvas:
     def test_same_size_letterbox_matches_plain_targets(self) -> None:
         """A letterbox onto the source canvas reproduces the plain path's targets exactly.
 
-        The fit is the identity when target and source agree, so the letterboxed
-        transform must land where the plain one does. This is the case that catches a
-        composition applied on the wrong side: an inverted or transposed letterbox
-        matrix is still the identity here only if the fit really is one.
+        The fit is the identity when target and source agree, so the letterboxed transform must land where the plain
+        one does. This is the case that catches a composition applied on the wrong side: an inverted or transposed
+        letterbox matrix is still the identity here only if the fit really is one.
         """
         image = _image()
         targets = _polygon_targets()
@@ -432,12 +437,11 @@ class TestLetterboxCanvas:
     def test_smaller_letterbox_emits_own_canvas(self) -> None:
         """A half-size letterbox emits a half-size image from one resample.
 
-        The output size comes from the fit rather than from the input, which is the
-        whole point of fusing the two: the source canvas reaches the training canvas
-        without an intermediate full-size image ever existing.
+        The output size comes from the fit rather than from the input, which is the whole point of fusing the two: the
+        source canvas reaches the training canvas without an intermediate full-size image ever existing.
         """
         out = _CANVAS // 2
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, letterbox=out)
+        affine = _still_affine(letterbox=out)
 
         out_image, _ = affine(_image(), Targets.empty())
 
@@ -447,20 +451,18 @@ class TestLetterboxCanvas:
 class TestGateStreamSeeding:
     """The discarded activation gates draw from a stream the caller's seed determines (L-32).
 
-    Upstream draws a per-transform activation gate whether or not it can fail, so this class
-    holds a second generator purely to keep those draws out of the caller's sequence. Left
-    unseeded, that stream was reproducible only because ``torch.Generator()`` happens to
-    start from a fixed constant *and* every gate here sits at ``prob = 1.0`` so its value is
-    thrown away — two premises the code relied on and stated only half of. Seeding it from
-    the caller's generator makes the reproducibility a property of this class instead.
+    Upstream draws a per-transform activation gate whether or not it can fail, so this class holds a second generator
+    purely to keep those draws out of the caller's sequence. Left unseeded, that stream was reproducible only because
+    ``torch.Generator()`` happens to start from a fixed constant *and* every gate here sits at ``prob = 1.0`` so its
+    value is thrown away — two premises the code relied on and stated only half of. Seeding it from the caller's
+    generator makes the reproducibility a property of this class instead.
     """
 
     def test_seeded_caller_seeds_gate_stream(self) -> None:
         """A caller-supplied generator determines the gate stream rather than leaving it default.
 
-        The default ``torch.Generator()`` state is the same constant in every process, so an
-        unseeded gate stream looks reproducible under test while being reproducible for a
-        reason nothing here owns.
+        The default ``torch.Generator()`` state is the same constant in every process, so an unseeded gate stream looks
+        reproducible under test while being reproducible for a reason nothing here owns.
         """
         affine = RandomAffine(generator=seeded_generator(1234))
 
@@ -469,8 +471,8 @@ class TestGateStreamSeeding:
     def test_different_caller_seeds_give_different_gate_streams(self) -> None:
         """Two affines seeded differently draw their gates from different streams.
 
-        Every affine sharing one stream is the shape of the bug this guards: two pipelines
-        built under different seeds would agree on a sequence neither of them chose.
+        Every affine sharing one stream is the shape of the bug this guards: two pipelines built under different seeds
+        would agree on a sequence neither of them chose.
         """
         first = RandomAffine(generator=seeded_generator(1))
         second = RandomAffine(generator=seeded_generator(2))
@@ -480,8 +482,8 @@ class TestGateStreamSeeding:
     def test_same_caller_seed_gives_same_gate_stream(self) -> None:
         """Rebuilding an affine at one seed rebuilds the same gate stream.
 
-        The point of seeding it at all is reproducibility, so the property the module
-        docstring claims — one seed determines the whole pipeline — must hold here too.
+        The point of seeding it at all is reproducibility, so the property the module docstring claims — one seed
+        determines the whole pipeline — must hold here too.
         """
         first = RandomAffine(generator=seeded_generator(7))
         second = RandomAffine(generator=seeded_generator(7))
@@ -491,9 +493,9 @@ class TestGateStreamSeeding:
     def test_gate_stream_not_callers_own(self) -> None:
         """The gate draws never come out of the caller's generator.
 
-        This is the property WP-079 was opened by losing: a gate drawn from the caller's
-        stream shifts every subsequent transform's draw, so an upstream change in how many
-        gates exist would silently re-roll the whole augmentation sequence.
+        This is the property WP-079 was opened by losing: a gate drawn from the caller's stream shifts every subsequent
+        transform's draw, so an upstream change in how many gates exist would silently re-roll the whole augmentation
+        sequence.
         """
         caller = seeded_generator(1234)
         affine = RandomAffine(generator=caller)
@@ -504,8 +506,8 @@ class TestGateStreamSeeding:
     def test_unseeded_caller_leaves_gate_stream_anonymous(self) -> None:
         """With no caller generator there is no seed to derive from, and none is invented.
 
-        A default-constructed affine has nothing to be reproducible *with*; giving its gate
-        stream a fabricated seed would suggest otherwise.
+        A default-constructed affine has nothing to be reproducible *with*; giving its gate stream a fabricated seed
+        would suggest otherwise.
         """
         affine = RandomAffine()
 
@@ -515,11 +517,10 @@ class TestGateStreamSeeding:
 class TestCenteredInput:
     """Prepared training feeds the same centred pixels to a fixed-canvas resample.
 
-    The letterbox route retains byte parity even for identity parameters. Without
-    letterboxing the dependency can bypass resampling for an identity transform;
-    restoring an already-centred float then retains its subtraction round-off.
-    The boundary test checks both routes and uses an absolute float32 bound,
-    without a relative tolerance that could hide a larger difference.
+    The letterbox route retains byte parity even for identity parameters. Without letterboxing the dependency can
+    bypass resampling for an identity transform; restoring an already-centred float then retains its subtraction
+    round-off. The boundary test checks both routes and uses an absolute float32 bound, without a relative tolerance
+    that could hide a larger difference.
     """
 
     @pytest.mark.parametrize("pad_value", [float("nan"), float("inf"), float("-inf")])
@@ -532,13 +533,12 @@ class TestCenteredInput:
     def test_matches_plain_warp_including_exposed_pad(self, pad_value: float) -> None:
         """A centred source reproduces the plain warp byte-for-byte, pad region included.
 
-        ``scale=0.4`` and ``translate=0.3`` are large enough that the sampled transform
-        reliably zooms out and shifts the canvas, exposing padding — exactly where a wrong
-        fill would show and an interior-only comparison would miss it. The caller only
-        centres the input; ``centered_input=True`` owns restoring the fill on return, so a
-        test that re-added the pad itself would double it and fail for the wrong reason.
-        Both affines take the same ``pad_value`` and the caller centres by it, the default
-        and a stated value alike: centring means subtracting the affine's own fill.
+        ``scale=0.4`` and ``translate=0.3`` are large enough that the sampled transform reliably zooms out and shifts
+        the canvas, exposing padding — exactly where a wrong fill would show and an interior-only comparison would
+        miss it. The caller only centres the input; ``centered_input=True`` owns restoring the fill on return, so a
+        test that re-added the pad itself would double it and fail for the wrong reason. Both affines take the same
+        ``pad_value`` and the caller centres by it, the default and a stated value alike: centring means subtracting
+        the affine's own fill.
         """
         image = _image()
         plain = RandomAffine(
@@ -566,14 +566,12 @@ class TestCenteredInput:
     def test_stated_pad_value_fills_exposed_canvas(self, centered_input: bool, input_shift: float) -> None:
         """A stated ``pad_value`` fills exposed canvas on both routes; content keeps its value.
 
-        Half a canvas of translation exposes the left half. The plain route fills it
-        with ``pad_value``; the centred route receives content already shifted down by
-        that same ``pad_value`` and restores it, never the module default. One column on
-        each side of the seam is left out, where bilinear sampling may blend the two.
-        The exposed fill is exact. Content is held to one float32 epsilon, absolute:
-        the resampler's sampling coordinates round, so a few content samples land one
-        ulp below ``1.0`` on both routes alike, while restoring the default instead of
-        ``pad_value`` would miss by about ``0.2``.
+        Half a canvas of translation exposes the left half. The plain route fills it with ``pad_value``; the centred
+        route receives content already shifted down by that same ``pad_value`` and restores it, never the module
+        default. One column on each side of the seam is left out, where bilinear sampling may blend the two. The
+        exposed fill is exact. Content is held to one float32 epsilon, absolute: the resampler's sampling coordinates
+        round, so a few content samples land one ulp below ``1.0`` on both routes alike, while restoring the default
+        instead of ``pad_value`` would miss by about ``0.2``.
         """
         affine = RandomAffine(pad_value=_STATED_PAD, centered_input=centered_input)
         image = torch.full((3, _CANVAS, _CANVAS), 1.0 - input_shift)
@@ -590,24 +588,13 @@ class TestCenteredInput:
     def test_identity_roundoff_boundary(self, letterbox: int | None) -> None:
         """Identity stays byte-exact with letterbox and within absolute epsilon otherwise.
 
-        The RGB codes cover values whose centring round trip loses low bits. A
-        fixed canvas follows the training route and must retain exact byte parity;
-        the standalone identity may bypass the dependency's fill subtraction.
+        The RGB codes cover values whose centring round trip loses low bits. A fixed canvas follows the training route
+        and must retain exact byte parity; the standalone identity may bypass the dependency's fill subtraction.
         """
         image = torch.arange(3 * _CANVAS * _CANVAS, dtype=torch.float32).reshape(3, _CANVAS, _CANVAS)
         image = image.remainder(256).div(255)
-        plain = RandomAffine(
-            degrees=0.0, translate=0.0, scale=0.0, shear=0.0, letterbox=letterbox, generator=seeded_generator(7)
-        )
-        centered = RandomAffine(
-            degrees=0.0,
-            translate=0.0,
-            scale=0.0,
-            shear=0.0,
-            letterbox=letterbox,
-            generator=seeded_generator(7),
-            centered_input=True,
-        )
+        plain = _still_affine(letterbox=letterbox, generator=seeded_generator(7))
+        centered = _still_affine(letterbox=letterbox, generator=seeded_generator(7), centered_input=True)
         out_plain, _ = plain(image.clone(), Targets.empty())
         out_centered, _ = centered(image.clone() - _DEFAULT_PAD_VALUE, Targets.empty())
         if letterbox is None:
@@ -619,10 +606,9 @@ class TestCenteredInput:
     def test_fuses_with_no_fill_only_when_centered(self) -> None:
         """The fused segment omits ``fill`` for a centred source and keeps it otherwise.
 
-        This is the construction-time half of the identity above. A centred source that
-        still filled with the pad value would double-count it once the round trip restores
-        the shift — the plausible regression the byte-identity test above also catches, less
-        directly than reading the wiring itself.
+        This is the construction-time half of the identity above. A centred source that still filled with the pad
+        value would double-count it once the round trip restores the shift — the plausible regression the
+        byte-identity test above also catches, less directly than reading the wiring itself.
         """
         plain = RandomAffine(translate=0.3, generator=seeded_generator(1))
         centered = RandomAffine(translate=0.3, generator=seeded_generator(1), centered_input=True)

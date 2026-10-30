@@ -1,14 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Resolve a split's image directory and annotation file from a dataset root (WP-098).
 
-The reader takes any COCO-format annotation file, but the *layout* around it was pinned
-to one dataset: the datamodule defaulted to ``train2017`` and ``instances_train2017.json``,
-which is COCO 2017's own spelling and nothing else's. Every other COCO-format root — the
-tiled oriented layout this project writes itself, the per-split exports the fixture
-generator emits — reached the reader only by restating all four paths on the command
-line. Four overrides that are always the same four values are not configuration; they
-are a naming convention that had not been written down, and the same convention was
-open-coded a third time inside the oriented evaluator.
+The reader takes any COCO-format annotation file, but the *layout* around it was pinned to one dataset: the datamodule
+defaulted to ``train2017`` and ``instances_train2017.json``, which is COCO 2017's own spelling and nothing else's. Every
+other COCO-format root — the tiled oriented layout this project writes itself, the per-split exports the fixture
+generator emits — reached the reader only by restating all four paths on the command line. Four overrides that are
+always the same four values are not configuration; they are a naming convention that had not been written down, and the
+same convention was open-coded a third time inside the oriented evaluator.
 
 :data:`CANDIDATES` is that convention, in order:
 
@@ -17,41 +15,36 @@ open-coded a third time inside the oriented evaluator.
     images-subdirectory      <root>/images/train/ <root>/annotations/instances_train.json
     per-split export         <root>/train/       <root>/train/_annotations.coco.json
 
-A candidate counts only when **both** its directory and its annotation file exist, so a
-root holding one layout cannot be resolved into another's half; the first match wins, so
-a root that somehow satisfies two is resolved the same way every time rather than by
-directory-iteration order. When none matches, the COCO 2017 pair is returned unchanged.
-That keeps this a naming rule rather than an existence check, and leaves the "no such
-file" to the reader that opens it, with the path it actually wanted in the message. An
-explicit override still wins over all of it.
+A candidate counts only when **both** its directory and its annotation file exist, so a root holding one layout cannot
+be resolved into another's half; the first match wins, so a root that somehow satisfies two is resolved the same way
+every time rather than by directory-iteration order. When none matches, the COCO 2017 pair is returned unchanged. That
+keeps this a naming rule rather than an existence check, and leaves the "no such file" to the reader that opens it,
+with the path it actually wanted in the message. An explicit override still wins over all of it.
 
-Adding a layout is one row here. What this does **not** do is read a different *annotation*
-format: a YOLO ``labels/*.txt`` tree is a reader (:mod:`lucid_yolo.data.yolo`, WP-099), not a
-spelling. Its own naming convention lives beside this one as :data:`YOLO_CANDIDATES` /
-:func:`resolve_yolo_split`, deliberately a **second table rather than four more rows**. A YOLO
-split's annotations are a *directory*, so the "both halves exist" predicate that makes this
-table safe would have to become an existence check that accepts either kind of thing — and a
-root satisfying both conventions would then resolve to whichever row came first, handing a
-labels directory to the COCO reader or an ``instances_*.json`` to the YOLO one. Which
-convention applies is a property of the reader asking, so the reader asks its own table::
+Adding a layout is one row here. What this does **not** do is read a different *annotation* format: a YOLO
+``labels/*.txt`` tree is a reader (:mod:`lucid_yolo.data.yolo`, WP-099), not a spelling. Its own naming convention
+lives beside this one as :data:`YOLO_CANDIDATES` / :func:`resolve_yolo_split`, deliberately a **second table rather
+than four more rows**. A YOLO split's annotations are a *directory*, so the "both halves exist" predicate that makes
+this table safe would have to become an existence check that accepts either kind of thing — and a root satisfying both
+conventions would then resolve to whichever row came first, handing a labels directory to the COCO reader or an
+``instances_*.json`` to the YOLO one. Which convention applies is a property of the reader asking, so the reader asks
+its own table::
 
     per-split export       <root>/train/images/   <root>/train/labels/
     split-subdirectory     <root>/images/train/   <root>/labels/train/
 
-One caller has no reader to ask with (WP-099b): :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule`
-is handed a ``data_root`` and has to *decide* which reader the root calls for, which is the
-question the two tables above deliberately do not answer. :func:`detect_layout` answers it, and
-it is a third thing rather than a merged table — it consults both tables and demands an
-**unambiguous** answer:
+One caller has no reader to ask with (WP-099b): :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule` is handed
+a ``data_root`` and has to *decide* which reader the root calls for, which is the question the two tables above
+deliberately do not answer. :func:`detect_layout` answers it, and it is a third thing rather than a merged table —
+it consults both tables and demands an **unambiguous** answer:
 
-* Neither convention satisfied raises, naming both and every path tried. The tables fall back
-  instead of raising because a reader follows them and reports the file it could not open; a
-  dispatcher has no such reader, so a fallback here would just pick one at random and let the
-  wrong reader report a missing file it was never pointed at.
-* **Both** satisfied raises too — the one place this module refuses precedence. Inside a table
-  the rows are the same reader, so first-match is merely a tie-break between spellings; across
-  the two tables the loser is a different *label space* and a different image set, and picking
-  one silently trains on annotations nobody named. The caller states which it meant.
+* Neither convention satisfied raises, naming both and every path tried. The tables fall back instead of raising
+  because a reader follows them and reports the file it could not open; a dispatcher has no such reader, so a
+  fallback here would just pick one at random and let the wrong reader report a missing file it was never pointed at.
+* **Both** satisfied raises too — the one place this module refuses precedence. Inside a table the rows are the same
+  reader, so first-match is merely a tie-break between spellings; across the two tables the loser is a different
+  *label space* and a different image set, and picking one silently trains on annotations nobody named. The caller
+  states which it meant.
 """
 
 from __future__ import annotations
@@ -82,19 +75,17 @@ CANDIDATES: tuple[tuple[str, str], ...] = (
     ("{split}", "{split}/_annotations.coco.json"),
 )
 
-#: YOLO-tree conventions tried in order, as ``(images directory, labels directory)`` templates
-#: taking ``{split}``. The per-split spelling comes first because it is the one a published
-#: export was read from (WP-099); both halves are directories, which is why this cannot be
-#: rows of :data:`CANDIDATES`.
+#: YOLO-tree conventions tried in order, as ``(images directory, labels directory)`` templates taking ``{split}``.
+#: The per-split spelling comes first because it is the one a published export was read from (WP-099); both halves
+#: are directories, which is why this cannot be rows of :data:`CANDIDATES`.
 YOLO_CANDIDATES: tuple[tuple[str, str], ...] = (
     ("{split}/images", "{split}/labels"),
     ("images/{split}", "labels/{split}"),
 )
 
-#: File a YOLO root publishes its class list and split entries under. It lives here rather than
-#: in :mod:`lucid_yolo.data.yolo` (which re-exports it) because it is the same kind of fact as
-#: the tables above — a name a dataset root is recognised by — and :func:`detect_layout` needs it
-#: without importing the reader.
+#: File a YOLO root publishes its class list and split entries under. It lives here rather than in
+#: :mod:`lucid_yolo.data.yolo` (which re-exports it) because it is the same kind of fact as the tables above — a
+#: name a dataset root is recognised by — and :func:`detect_layout` needs it without importing the reader.
 DATA_YAML_NAME = "data.yaml"
 
 #: Splits :func:`detect_layout` probes when a caller names none: the two a training run builds.
@@ -175,16 +166,14 @@ def resolve_split(data_root: Path, split: str) -> tuple[Path, Path]:
 def resolve_yolo_split(data_root: Path, split: str) -> tuple[Path, Path]:
     """Return the ``(images_dir, labels_dir)`` pair for ``split`` under a YOLO ``data_root``.
 
-    The sibling of :func:`resolve_split` for the tree :mod:`lucid_yolo.data.yolo` reads, and
-    the same kind of rule: a naming convention with a deterministic fallback, never an
-    existence check that raises. Both halves are directories here, so both are tested with
-    ``is_dir()``.
+    The sibling of :func:`resolve_split` for the tree :mod:`lucid_yolo.data.yolo` reads, and the same kind of rule: a
+    naming convention with a deterministic fallback, never an existence check that raises. Both halves are directories
+    here, so both are tested with ``is_dir()``.
 
     Args:
         data_root: Dataset root holding the split's images and labels trees.
-        split: Split name, ``"train"`` or ``"val"`` (a YOLO ``data.yaml`` also spells its
-            validation split ``"valid"`` in the directory it points at, which is why the
-            dataset's own entry outranks this convention).
+        split: Split name, ``"train"`` or ``"val"`` (a YOLO ``data.yaml`` also spells its validation split ``"valid"``
+            in the directory it points at, which is why the dataset's own entry outranks this convention).
 
     Returns:
         The first pair in :data:`YOLO_CANDIDATES` whose two directories both exist; the
@@ -228,11 +217,10 @@ def resolve_yolo_split(data_root: Path, split: str) -> tuple[Path, Path]:
 def detect_layout(data_root: Path, splits: Sequence[str] = _PROBE_SPLITS) -> DatasetLayout:
     """Return which of the two conventions ``data_root`` actually satisfies (WP-099b).
 
-    The question :func:`resolve_split` and :func:`resolve_yolo_split` deliberately do not answer
-    — see the module docstring. A root satisfies COCO when any probed split has both halves of a
-    :data:`CANDIDATES` row on disk, and YOLO when it holds a :data:`DATA_YAML_NAME` *and* any
-    probed split has both directories of a :data:`YOLO_CANDIDATES` row. Satisfying one is the
-    answer; satisfying neither or both raises rather than guessing.
+    The question :func:`resolve_split` and :func:`resolve_yolo_split` deliberately do not answer — see the module
+    docstring. A root satisfies COCO when any probed split has both halves of a :data:`CANDIDATES` row on disk, and
+    YOLO when it holds a :data:`DATA_YAML_NAME` *and* any probed split has both directories of a
+    :data:`YOLO_CANDIDATES` row. Satisfying one is the answer; satisfying neither or both raises rather than guessing.
 
     A YOLO root whose ``data.yaml`` points its splits somewhere neither row names is legible to
     :meth:`~lucid_yolo.data.yolo.YoloDetectionDataset.from_root` and invisible here, which is one

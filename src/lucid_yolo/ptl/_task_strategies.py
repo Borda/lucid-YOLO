@@ -1,21 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """The private training and validation routes for each supervision task.
 
-One strategy per :class:`~lucid_yolo.tasks.Task` owns target padding, extra-loss
-composition and logging, replay selection and validation behavior. The exhaustive
-:data:`_STRATEGIES` table lets :class:`~lucid_yolo.ptl.module.DetectionLitModule`
-resolve its strategy once, after validating the task, rather than select behavior
-from the task string at every step.
+One strategy per :class:`~lucid_yolo.tasks.Task` owns target padding, extra-loss composition and logging, replay
+selection and validation behavior. The exhaustive :data:`_STRATEGIES` table lets
+:class:`~lucid_yolo.ptl.module.DetectionLitModule` resolve its strategy once, after validating the task, rather than
+select behavior from the task string at every step.
 
-Strategies hold no tensors or per-fit state. Registered losses, replay holders and
-validation accumulators stay on the Lightning module, so checkpoint keys and
-module-method override checks keep their existing owners. Copying or unpickling a
-strategy retains the process's registered instance: the oriented replay certificate
-checks that identity as well as the extra-loss implementation.
+Strategies hold no tensors or per-fit state. Registered losses, replay holders and validation accumulators stay on
+the Lightning module, so checkpoint keys and module-method override checks keep their existing owners. Copying or
+unpickling a strategy retains the process's registered instance: the oriented replay certificate checks that
+identity as well as the extra-loss implementation.
 
-``module.py`` is imported only for typing because it imports this table at runtime;
-importing it here at runtime would create a cycle. The strategies call the existing
-module methods for task loss terms and validation accumulation.
+``module.py`` is imported only for typing because it imports this table at runtime; importing it here at runtime
+would create a cycle. The strategies call the existing module methods for task loss terms and validation
+accumulation.
 """
 
 from __future__ import annotations

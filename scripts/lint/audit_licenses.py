@@ -1,89 +1,68 @@
 # SPDX-License-Identifier: Apache-2.0
 """Dependency-license audit: reject the licence classes D13 does not admit.
 
-Scans every distribution installed in the active environment and fails when a
-forbidden licence indicator is found, per the project policy that every dependency
-must be Apache-compatible, including transitive ones.
+Scans every distribution installed in the active environment and fails when a forbidden licence indicator is found,
+per the project policy that every dependency must be Apache-compatible, including transitive ones.
 
-**What "forbidden" means here is a list of named families, not the policy.** D13
-rules out "AGPL, GPL, LGPL and every other copyleft license; source-available,
-research-only and non-commercial licenses; anything commercially licensed or of
-unstated license" — a description no regex can hold. Two patterns approximate it:
-:data:`COPYLEFT_PATTERN` recognizes the GPL family (AGPL/GPL/LGPL, spelled either as
-an identifier or as "GNU ... General Public License"), and
-:data:`NON_PERMISSIVE_PATTERN` recognizes the source-available and non-commercial
-classes D18d names — SSPL, Business Source/BUSL, Elastic, PolyForm, Prosperity, the
-Commons Clause rider, and non-commercial grants including ``CC BY-NC``. Both are
-consulted through :func:`inadmissible_license`. A copyleft licence outside the GPL
-family (EUPL, OSL, CDDL, MS-RL) is admitted by both patterns and would pass; so
-would a proprietary licence that names itself something new. The last clause of D13
-— "of unstated license" — is the one surface below that is not a pattern at all, and
-it is the only one that catches a class nobody listed.
+**What "forbidden" means here is a list of named families, not the policy.** D13 rules out "AGPL, GPL, LGPL and every
+other copyleft license; source-available, research-only and non-commercial licenses; anything commercially licensed
+or of unstated license" — a description no regex can hold. Two patterns approximate it: :data:`COPYLEFT_PATTERN`
+recognizes the GPL family (AGPL/GPL/LGPL, spelled either as an identifier or as "GNU ... General Public License"),
+and :data:`NON_PERMISSIVE_PATTERN` recognizes the source-available and non-commercial classes D18d names —
+SSPL, Business Source/BUSL, Elastic, PolyForm, Prosperity, the Commons Clause rider, and non-commercial grants
+including ``CC BY-NC``. Both are consulted through :func:`inadmissible_license`. A copyleft licence outside the
+GPL family (EUPL, OSL, CDDL, MS-RL) is admitted by both patterns and would pass; so would a proprietary licence
+that names itself something new. The last clause of D13 — "of unstated license" — is the one surface below that
+is not a pattern at all, and it is the only one that catches a class nobody listed.
 
-Four surfaces are read, because neither what a distribution says about itself nor
-what it says in the documents beside it is the whole story.
-:func:`license_indicators` reads the ``License``, ``License-Expression`` and
-``License ::`` classifier fields — what the package says about itself.
-:func:`bundled_license_indicators` reads the ``License-File`` documents the wheel
-ships alongside them, because a wheel may vendor a native library under a license
-its metadata never mentions: ``shapely`` declares ``BSD 3-Clause`` and bundles GEOS
-shared libraries under LGPLv2.1, which the metadata-only audit passed for as long
-as it existed (found by WP-063, recorded as D15). :func:`bundled_binary_indicators`
-reads the wheel's own file list, because a wheel may vendor a copyleft binary and
-declare it **nowhere at all**: ``av`` declares ``BSD-3-Clause``, ships a
-``licenses/LICENSE.txt`` whose text contains no GPL mention anywhere in it, and
-ships ``av/.dylibs/libx264.165.dylib`` — x264 is GPL. Both of the first two checks
-pass it clean (WP-109). Bundled findings carry their own allowlists, since a
-vendored binary and a package's own license are different exposures and are
-decided separately.
+Four surfaces are read, because neither what a distribution says about itself nor what it says in the documents
+beside it is the whole story. :func:`license_indicators` reads the ``License``, ``License-Expression`` and
+``License ::`` classifier fields — what the package says about itself. :func:`bundled_license_indicators` reads
+the ``License-File`` documents the wheel ships alongside them, because a wheel may vendor a native library
+under a license its metadata never mentions: ``shapely`` declares ``BSD 3-Clause`` and bundles GEOS shared
+libraries under LGPLv2.1, which the metadata-only audit passed for as long as it existed (found by WP-063,
+recorded as D15). :func:`bundled_binary_indicators` reads the wheel's own file list, because a wheel may
+vendor a copyleft binary and declare it **nowhere at all**: ``av`` declares ``BSD-3-Clause``, ships a
+``licenses/LICENSE.txt`` whose text contains no GPL mention anywhere in it, and ships ``av/.dylibs/libx264.165.dylib``
+— x264 is GPL. Both of the first two checks pass it clean (WP-109). Bundled findings carry their own allowlists,
+since a vendored binary and a package's own license are different exposures and are decided separately.
 
-**The binary scan narrows the hole rather than closing it, and should be read that
-way.** It matches shipped filenames against :data:`COPYLEFT_BINARIES`, a table of
-native libraries whose names identify a known copyleft project, so it catches the
-libraries that table lists and nothing else. A wheel vendoring a copyleft library
-this file has never heard of, or shipping one under a name that does not announce
-it, passes exactly as ``av`` did before the table existed. A green run is evidence
-that no *listed* library is present, and is not evidence that no copyleft binary
-is. The table is documentation as much as data for the same reason: each entry
-records the license and where it was verified, so the next reader can argue with
-it instead of trusting it.
+**The binary scan narrows the hole rather than closing it, and should be read that way.** It matches shipped
+filenames against :data:`COPYLEFT_BINARIES`, a table of native libraries whose names identify a known copyleft
+project, so it catches the libraries that table lists and nothing else. A wheel vendoring a copyleft library
+this file has never heard of, or shipping one under a name that does not announce it, passes exactly as
+``av`` did before the table existed. A green run is evidence that no *listed* library is present, and is not
+evidence that no copyleft binary is. The table is documentation as much as data for the same reason: each
+entry records the license and where it was verified, so the next reader can argue with it instead of trusting it.
 
-The file list comes from each distribution's ``RECORD`` — what the wheel declared
-it installed — and not from walking site-packages, which keeps the check to the
-question it can answer and off the disk. A distribution installed without a
-``RECORD`` therefore ships nothing as far as this check can see; every one in the
-current environment has one.
+The file list comes from each distribution's ``RECORD`` — what the wheel declared it installed — and not from
+walking site-packages, which keeps the check to the question it can answer and off the disk. A distribution
+installed without a ``RECORD`` therefore ships nothing as far as this check can see; every one in the current
+environment has one.
 
-The fourth surface is the **absence** of a license, added by WP-115.
-:func:`unreadable_license_reason` reports a distribution none of the three checks
-above can read at all: the copyleft checks match a forbidden pattern against a
-declaration, so a distribution declaring nothing matches nothing and passes in the
-same run that prints a clean verdict. That inverts the reading rule the bundled
-check follows. There, an absent or unreadable license document is not evidence of a
-copyleft one and is skipped; here, an absent license *is* the finding, because what
-cannot be read cannot be cleared. When no field declares anything, the shipped
-``License-File`` documents are identified by their own opening prose against
-:data:`PERMISSIVE_TEXTS`, and a document matching nothing in that table stays a
-finding rather than being given the benefit of the doubt.
+The fourth surface is the **absence** of a license, added by WP-115. :func:`unreadable_license_reason` reports
+a distribution none of the three checks above can read at all: the copyleft checks match a forbidden pattern
+against a declaration, so a distribution declaring nothing matches nothing and passes in the same run that
+prints a clean verdict. That inverts the reading rule the bundled check follows. There, an absent or unreadable
+license document is not evidence of a copyleft one and is skipped; here, an absent license *is* the finding,
+because what cannot be read cannot be cleared. When no field declares anything, the shipped ``License-File``
+documents are identified by their own opening prose against :data:`PERMISSIVE_TEXTS`, and a document matching
+nothing in that table stays a finding rather than being given the benefit of the doubt.
 
-That fourth check is the one graded by tier (:func:`dependency_tiers`), and it is
-the only one. A package in the ``[project.dependencies]`` closure is republished in
-this project's own wheel metadata and installed by everyone who installs it, so an
-unreadable license there is a failure; a package reachable only through the ``dev``,
-``docs`` or ``typing`` dependency groups appears in no wheel metadata, is imported by
-``src/`` never, and is vendored into no published artifact, so it is reported and the run
-still passes. A package reachable from both takes the stricter tier, and so does one
-the resolver cannot attribute at all — a gap in the walk must fail loudly rather
-than quietly demote a shipped dependency. The declared-licence checks are tier-blind
-and stay that way: an AGPL or SSPL dependency is a failure wherever it sits, and a
-distribution whose only license document is forbidden prose is a failure for the same
-reason, regardless of which group reached it.
+That fourth check is the one graded by tier (:func:`dependency_tiers`), and it is the only one. A package in
+the ``[project.dependencies]`` closure is republished in this project's own wheel metadata and installed by
+everyone who installs it, so an unreadable license there is a failure; a package reachable only through the
+``dev``, ``docs`` or ``typing`` dependency groups appears in no wheel metadata, is imported by ``src/`` never,
+and is vendored into no published artifact, so it is reported and the run still passes. A package reachable
+from both takes the stricter tier, and so does one the resolver cannot attribute at all — a gap in the walk
+must fail loudly rather than quietly demote a shipped dependency. The declared-licence checks are tier-blind
+and stay that way: an AGPL or SSPL dependency is a failure wherever it sits, and a distribution whose only
+license document is forbidden prose is a failure for the same reason, regardless of which group reached it.
 
-**The examples below assert nothing about what is installed**, and neither does the test
-suite (WP-115b). This script is the live check — it runs against the real environment as
-a commit-time hook, which is the whole point of it. A *test* that made the same assertion
-would fail for anyone whose environment holds something this repository never named, which
-is a property of their machine rather than a defect in this file.
+**The examples below assert nothing about what is installed**, and neither does the test suite (WP-115b). This
+script is the live check — it runs against the real environment as a commit-time hook, which is the whole
+point of it. A *test* that made the same assertion would fail for anyone whose environment holds something
+this repository never named, which is a property of their machine rather than a defect in this file.
 
 Examples:
     Run against the active environment (exit 1 on violation)::
@@ -105,28 +84,26 @@ from typing import NamedTuple, cast
 from packaging.requirements import Requirement
 from packaging.utils import NormalizedName, canonicalize_name
 
-#: The project's own metadata, located from this file rather than from installed
-#: metadata: the tiers are a property of what the repository declares, and the docs
-#: CI job installs the site toolchain without installing the project at all.
+#: The project's own metadata, located from this file rather than from installed metadata: the tiers are a
+#: property of what the repository declares, and the docs CI job installs the site toolchain without installing the
+#: project at all.
 PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 #: Matches GPL-family identifiers (AGPL-3.0, GPLv2, LGPL, "GNU General Public License").
 COPYLEFT_PATTERN = re.compile(r"\b(?:[AL]?GPL|GNU (?:Affero |Lesser )?General Public License)", re.IGNORECASE)
 
-#: Matches the non-GPL licence classes D13 rules inadmissible and D18d names by
-#: example: source-available (SSPL, Business Source/BUSL, Elastic), the PolyForm and
-#: Prosperity families, the Commons Clause rider, and any non-commercial grant
-#: (`CC BY-NC`, "NonCommercial"). A second pattern rather than more alternatives in
-#: :data:`COPYLEFT_PATTERN`, because these are not copyleft and filing them there
-#: would make the finding misdescribe what it found — SSPL is copyleft in spirit and
-#: BUSL is not copyleft at all; both are inadmissible for the same policy reason and
-#: for different licence reasons. Tier-blind exactly as the copyleft pattern is: an
+#: Matches the non-GPL licence classes D13 rules inadmissible and D18d names by example: source-available
+#: (SSPL, Business Source/BUSL, Elastic), the PolyForm and Prosperity families, the Commons Clause rider, and
+#: any non-commercial grant (`CC BY-NC`, "NonCommercial"). A second pattern rather than more alternatives in
+#: :data:`COPYLEFT_PATTERN`, because these are not copyleft and filing them there would make the finding misdescribe
+#: what it found — SSPL is copyleft in spirit and BUSL is not copyleft at all; both are inadmissible for the
+#: same policy reason and for different licence reasons. Tier-blind exactly as the copyleft pattern is: an
 #: SSPL dependency is a failure wherever in the graph it sits.
 #:
-#: Deliberately not a catch-all for "anything unrecognized". That check exists and is
-#: a different one — :func:`unreadable_license_reason`, the fourth surface, which
-#: reports a distribution declaring nothing at all. This pattern names classes, so a
-#: class nobody listed passes it, exactly as :data:`COPYLEFT_BINARIES` says of itself.
+#: Deliberately not a catch-all for "anything unrecognized". That check exists and is a different one —
+#: :func:`unreadable_license_reason`, the fourth surface, which reports a distribution declaring nothing at
+#: all. This pattern names classes, so a class nobody listed passes it, exactly as :data:`COPYLEFT_BINARIES` says
+#: of itself.
 NON_PERMISSIVE_PATTERN = re.compile(
     r"\b(?:SSPL|Server Side Public License"
     r"|BUSL|Business Source License"
@@ -143,10 +120,9 @@ NON_PERMISSIVE_PATTERN = re.compile(
 #: Empty by design — any addition requires a DECISIONS.md entry first.
 ALLOWLIST: dict[str, str] = {}
 
-#: Distributions whose *bundled* license files may name a copyleft license, with
-#: the reason. Separate from :data:`ALLOWLIST`, which exempts a package's own
-#: license: vendoring an LGPL binary and being LGPL are different exposures.
-#: Additions require a DECISIONS.md entry, exactly as for :data:`ALLOWLIST`.
+#: Distributions whose *bundled* license files may name a copyleft license, with the reason. Separate from
+#: :data:`ALLOWLIST`, which exempts a package's own license: vendoring an LGPL binary and being LGPL are
+#: different exposures. Additions require a DECISIONS.md entry, exactly as for :data:`ALLOWLIST`.
 BUNDLED_ALLOWLIST: dict[str, str] = {
     "numpy": (
         "D15: BSD-3-Clause itself; its wheel bundles libquadmath under LGPL-2.1-or-later, "
@@ -162,11 +138,10 @@ BUNDLED_ALLOWLIST: dict[str, str] = {
     ),
 }
 
-#: Distributions exempt from the *unreadable-license* check, with the reason. A fourth
-#: allowlist and a fourth exposure: this one excuses a package whose license cannot be
-#: read at all, which is neither a copyleft declaration (:data:`ALLOWLIST`) nor a
-#: vendored copyleft library (:data:`BUNDLED_ALLOWLIST`, :data:`BUNDLED_BINARY_ALLOWLIST`).
-#: Additions require a DECISIONS.md entry first, exactly as for the other three.
+#: Distributions exempt from the *unreadable-license* check, with the reason. A fourth allowlist and a fourth
+#: exposure: this one excuses a package whose license cannot be read at all, which is neither a copyleft
+#: declaration (:data:`ALLOWLIST`) nor a vendored copyleft library (:data:`BUNDLED_ALLOWLIST`,
+#: :data:`BUNDLED_BINARY_ALLOWLIST`). Additions require a DECISIONS.md entry first, exactly as for the other three.
 UNREADABLE_ALLOWLIST: dict[str, str] = {
     "cuda-toolkit": (
         "D17: an NVIDIA meta-package whose wheel dist-info holds only METADATA, WHEEL and "
@@ -180,41 +155,36 @@ UNREADABLE_ALLOWLIST: dict[str, str] = {
     ),
 }
 
-#: License exceptions that make a GPL-family declaration permissive by construction,
-#: so a match on one is not a finding for **any** package. The GCC Runtime Library
-#: Exception exists precisely to let GPL-3 runtime objects (``libgfortran``,
-#: ``libgcc``) be linked into programs under any license; treating it as copyleft
-#: would flag every wheel built by gcc and teach the reader to ignore the gate.
-#: Recognized by expression, not by package, so a new dependency carrying the same
-#: exception needs no allowlist entry (D15).
+#: License exceptions that make a GPL-family declaration permissive by construction, so a match on one is not
+#: a finding for **any** package. The GCC Runtime Library Exception exists precisely to let GPL-3 runtime
+#: objects (``libgfortran``, ``libgcc``) be linked into programs under any license; treating it as copyleft
+#: would flag every wheel built by gcc and teach the reader to ignore the gate. Recognized by expression, not by
+#: package, so a new dependency carrying the same exception needs no allowlist entry (D15).
 LICENSE_EXCEPTIONS = re.compile(r"WITH\s+GCC-exception-3\.1", re.IGNORECASE)
 
-#: Free-text ``License`` fields longer than this are full license prose (some
-#: packages embed third-party license texts that mention GPL), not an SPDX-style
-#: identifier — they are skipped in favor of ``License-Expression`` and classifiers.
+#: Free-text ``License`` fields longer than this are full license prose (some packages embed third-party
+#: license texts that mention GPL), not an SPDX-style identifier — they are skipped in favor of ``License-Expression``
+#: and classifiers.
 MAX_IDENTIFIER_LEN = 100
 
-#: Lines in a bundled license file that *declare* a license, as opposed to the
-#: license prose itself. A full LGPL text mentions "GPL" on dozens of lines, so
-#: matching the body would report every bundled copy of any license; the wheels
-#: that vendor a binary announce it in a ``License: <name>`` or ``Name: <lib>``
-#: header block instead (the pattern numpy, scipy and shapely all follow).
+#: Lines in a bundled license file that *declare* a license, as opposed to the license prose itself. A full
+#: LGPL text mentions "GPL" on dozens of lines, so matching the body would report every bundled copy of any
+#: license; the wheels that vendor a binary announce it in a ``License: <name>`` or ``Name: <lib>`` header
+#: block instead (the pattern numpy, scipy and shapely all follow).
 BUNDLED_DECLARATION = re.compile(r"^\s*(?:License|Licence)\s*:\s*(\S.*)$", re.IGNORECASE | re.MULTILINE)
 
-#: The tier whose packages this project republishes: everything reachable from
-#: ``[project.dependencies]`` lands in the wheel's own ``Requires-Dist`` and is
-#: installed by every user. An unreadable license here is a failure.
+#: The tier whose packages this project republishes: everything reachable from ``[project.dependencies]`` lands
+#: in the wheel's own ``Requires-Dist`` and is installed by every user. An unreadable license here is a failure.
 TIER_SHIPPED = "base"
 
-#: The dependency groups that ship nowhere. PEP 735 groups appear in no wheel
-#: metadata at all, so a package reached only through one of them is a tool this
-#: repository runs, not a dependency anyone inherits. Reported, not fatal.
+#: The dependency groups that ship nowhere. PEP 735 groups appear in no wheel metadata at all, so a package
+#: reached only through one of them is a tool this repository runs, not a dependency anyone inherits. Reported,
+#: not fatal.
 TIER_GROUPS = ("dev", "docs", "typing")
 
-#: How many lines of a license document :func:`recognize_license_text` reads. A
-#: license names itself in its own header; further down, Apache-2.0's appendix
-#: quotes a boilerplate notice and the GPL texts quote each other, so a recognizer
-#: reading the whole body would identify documents by what they cite.
+#: How many lines of a license document :func:`recognize_license_text` reads. A license names itself in its
+#: own header; further down, Apache-2.0's appendix quotes a boilerplate notice and the GPL texts quote each
+#: other, so a recognizer reading the whole body would identify documents by what they cite.
 LICENSE_HEADER_LINES = 15
 
 
@@ -223,23 +193,21 @@ class LicenseText(NamedTuple):
 
     Attributes:
         license: SPDX-style identifier for what the phrase identifies.
-        note: Why the phrase is distinctive, and what it must not also match — the
-            table decides whether a package with no license field passes, so an
-            entry that states only a phrase cannot be argued with.
+        note: Why the phrase is distinctive, and what it must not also match — the table decides whether a package
+            with no license field passes, so an entry that states only a phrase cannot be argued with.
     """
 
     license: str
     note: str
 
 
-#: Opening phrases that identify a permissive license text, keyed by the lowercased
-#: phrase :func:`recognize_license_text` searches for. This table is reached only when
-#: a distribution declares no license field at all, and identification *is* the verdict:
-#: the copyleft pattern is deliberately not run over a recognized text as a second
-#: opinion, because MPL-2.0 names the GNU General Public License in its own
-#: Secondary-License definitions and would self-flag a license this environment already
-#: carries through `certifi` and `pathspec`. Anything unrecognized stays a finding, so
-#: the cost of a missing entry is a false alarm rather than a silent pass.
+#: Opening phrases that identify a permissive license text, keyed by the lowercased phrase
+#: :func:`recognize_license_text` searches for. This table is reached only when a distribution declares no
+#: license field at all, and identification *is* the verdict: the copyleft pattern is deliberately not run
+#: over a recognized text as a second opinion, because MPL-2.0 names the GNU General Public License in its
+#: own Secondary-License definitions and would self-flag a license this environment already carries through
+#: `certifi` and `pathspec`. Anything unrecognized stays a finding, so the cost of a missing entry is a false
+#: alarm rather than a silent pass.
 PERMISSIVE_TEXTS: dict[str, LicenseText] = {
     "apache license": LicenseText(
         "Apache-2.0",
@@ -279,24 +247,21 @@ PERMISSIVE_TEXTS: dict[str, LicenseText] = {
     ),
 }
 
-#: Filenames a shipped native library carries, in every spelling the four platforms
-#: use: ``.so``/``.dylib``/``.dll``/``.pyd`` plain, and with the version tag either
-#: platform appends (``libx264.165.dylib``, ``libx264.so.164``).
+#: Filenames a shipped native library carries, in every spelling the four platforms use:
+#: ``.so``/``.dylib``/``.dll``/``.pyd`` plain, and with the version tag either platform appends
+#: (``libx264.165.dylib``, ``libx264.so.164``).
 NATIVE_LIBRARY_SUFFIX = re.compile(r"\.(?:so|dylib|dll|pyd)(?:\.\d+(?:\.\d+)*)?$", re.IGNORECASE)
 
-#: The other version spelling, joined to the name rather than separated from it
-#: (``avcodec-61.dll``). Stripped so that one table entry matches every platform's
-#: build of the same library.
+#: The other version spelling, joined to the name rather than separated from it (``avcodec-61.dll``). Stripped
+#: so that one table entry matches every platform's build of the same library.
 LIBRARY_VERSION_TAG = re.compile(r"[-_]\d+$")
 
-#: The hash ``auditwheel`` grafts onto a vendored library's name when it repairs a
-#: manylinux wheel: the ``libgeos_c.so.1.19.2`` that macOS ships verbatim arrives on
-#: Linux as ``libgeos_c-abcdd5fa.so.1.19.2``. Eight lowercase hex characters, uniformly
-#: — checked against all 20 vendored libraries in the ``shapely`` and ``pillow``
-#: manylinux wheels. Stripping it is not cosmetic: without it the table matches on macOS
-#: and goes blind on Linux, which is the platform CI actually runs on, and the blindness
-#: would present as a green gate. ``test_live_shapely_ships_the_geos_binaries_the_table_names``
-#: is what fails if the convention ever changes.
+#: The hash ``auditwheel`` grafts onto a vendored library's name when it repairs a manylinux wheel: the
+#: ``libgeos_c.so.1.19.2`` that macOS ships verbatim arrives on Linux as ``libgeos_c-abcdd5fa.so.1.19.2``.
+#: Eight lowercase hex characters, uniformly — checked against all 20 vendored libraries in the ``shapely`` and
+#: ``pillow`` manylinux wheels. Stripping it is not cosmetic: without it the table matches on macOS and goes
+#: blind on Linux, which is the platform CI actually runs on, and the blindness would present as a green gate.
+#: ``test_live_shapely_ships_the_geos_binaries_the_table_names`` is what fails if the convention ever changes.
 AUDITWHEEL_GRAFT = re.compile(r"-[0-9a-f]{8}$")
 
 
@@ -305,9 +270,8 @@ class CopyleftLibrary(NamedTuple):
 
     Attributes:
         license: SPDX-style identifier for the license the project ships under.
-        note: Why the entry is here and where the license was verified — the table
-            is read by people deciding whether a finding is real, so an entry that
-            states only an identifier cannot be checked or argued with.
+        note: Why the entry is here and where the license was verified — the table is read by people deciding
+            whether a finding is real, so an entry that states only an identifier cannot be checked or argued with.
     """
 
     license: str
@@ -317,13 +281,12 @@ class CopyleftLibrary(NamedTuple):
 #: The FFmpeg libraries, listed as a family because they are built and shipped as one.
 FFMPEG_LIBRARIES = ("avcodec", "avdevice", "avfilter", "avformat", "avutil", "postproc", "swresample", "swscale")
 
-#: Two licenses rather than one, because which of them applies is a build-time choice
-#: the shipped filename does not record. Stated as a range instead of picking a side.
+#: Two licenses rather than one, because which of them applies is a build-time choice the shipped filename does
+#: not record. Stated as a range instead of picking a side.
 FFMPEG_LICENSE = "LGPL-2.1-or-later, GPL-2.0-or-later if built --enable-gpl"
 
-#: Shared by every entry in :data:`FFMPEG_LIBRARIES`: one library of the family arriving
-#: in a wheel means the rest did too, so eight separate justifications would be one fact
-#: written eight times.
+#: Shared by every entry in :data:`FFMPEG_LIBRARIES`: one library of the family arriving in a wheel means the
+#: rest did too, so eight separate justifications would be one fact written eight times.
 FFMPEG_NOTE = (
     "FFmpeg's own `LICENSE.md` states most of it is under the LGPL v2.1 or later, and that passing "
     "`--enable-gpl` to activate its optional GPL-covered parts changes FFmpeg's license to GPL v2+. Which "
@@ -332,11 +295,10 @@ FFMPEG_NOTE = (
     "in is a wheel vendoring FFmpeg for video I/O, which is exactly what `av` is (WP-109)."
 )
 
-#: Native libraries whose *filename* identifies a known copyleft project, keyed by the
-#: normalized stem :func:`library_stem` produces. Deliberately a named table and not a
-#: heuristic: `torch` alone ships hundreds of binaries, and a check that failed on every
-#: unrecognized one would be silenced within a week. The cost of that choice is stated in
-#: the module docstring — this catches what it lists, and nothing else.
+#: Native libraries whose *filename* identifies a known copyleft project, keyed by the normalized stem
+#: :func:`library_stem` produces. Deliberately a named table and not a heuristic: `torch` alone ships hundreds
+#: of binaries, and a check that failed on every unrecognized one would be silenced within a week. The cost of
+#: that choice is stated in the module docstring — this catches what it lists, and nothing else.
 COPYLEFT_BINARIES: dict[str, CopyleftLibrary] = {
     "x264": CopyleftLibrary(
         "GPL-2.0-or-later",
@@ -378,11 +340,11 @@ COPYLEFT_BINARIES: dict[str, CopyleftLibrary] = {
 #: Vendored binaries that :data:`COPYLEFT_BINARIES` names and that are permitted anyway,
 #: keyed by ``(distribution name lowercased, library stem)``.
 #:
-#: Deliberately keyed on the *pair* where :data:`BUNDLED_ALLOWLIST` is keyed on the package
-#: alone. That file's own rule is that a package listed for one vendored library must not be
-#: excused for every other one it ships; a package-keyed entry here would break exactly that
-#: rule, since allowing shapely's GEOS would also wave through a libx264 it started shipping
-#: tomorrow. Additions require a DECISIONS.md entry, as for both other allowlists.
+#: Deliberately keyed on the *pair* where :data:`BUNDLED_ALLOWLIST` is keyed on the package alone. That file's
+#: own rule is that a package listed for one vendored library must not be excused for every other one it
+#: ships; a package-keyed entry here would break exactly that rule, since allowing shapely's GEOS would also wave
+#: through a libx264 it started shipping tomorrow. Additions require a DECISIONS.md entry, as for both other
+#: allowlists.
 BUNDLED_BINARY_ALLOWLIST: dict[tuple[str, str], str] = {
     ("shapely", "geos"): (
         "D15: the LGPLv2.1 GEOS build shapely's wheel carries, already decided there for the "
@@ -397,8 +359,8 @@ BUNDLED_BINARY_ALLOWLIST: dict[tuple[str, str], str] = {
 def inadmissible_license(declaration: str) -> str | None:
     """Name the forbidden licence class a declaration falls into, or ``None``.
 
-    The single place the two patterns are consulted, so the declared-metadata check
-    and the bundled-document check cannot end up recognizing different policies.
+    The single place the two patterns are consulted, so the declared-metadata check and the bundled-document check
+    cannot end up recognizing different policies.
 
     Args:
         declaration: One licence string — a metadata field, a classifier, or a
@@ -452,18 +414,16 @@ def license_indicators(dist: metadata.Distribution) -> list[str]:
 def bundled_license_indicators(dist: metadata.Distribution) -> list[str]:
     """Collect license declarations from the license files a distribution ships.
 
-    Reads each ``License-File`` the metadata names and returns the ``License: ...``
-    declaration lines inside it, not the license prose — a bundled copy of the LGPL
-    names "GPL" throughout its own text, so matching the body would flag every wheel
-    that ships any license file at all.
+    Reads each ``License-File`` the metadata names and returns the ``License: ...`` declaration lines inside it,
+    not the license prose — a bundled copy of the LGPL names "GPL" throughout its own text, so matching the body
+    would flag every wheel that ships any license file at all.
 
     Args:
         dist: An installed distribution as yielded by ``metadata.distributions()``.
 
     Returns:
-        One ``"<file>: <declared license>"`` string per declaration found, across
-        every bundled license file. Files that are absent or unreadable are skipped:
-        a missing document is not evidence of a copyleft one.
+        One ``"<file>: <declared license>"`` string per declaration found, across every bundled license file. Files
+        that are absent or unreadable are skipped: a missing document is not evidence of a copyleft one.
 
     Examples:
         >>> callable(bundled_license_indicators)  # a real call needs an installed distribution
@@ -479,10 +439,9 @@ def bundled_license_indicators(dist: metadata.Distribution) -> list[str]:
 def _license_documents(dist: metadata.Distribution) -> list[tuple[str, str]]:
     """Return ``(filename, text)`` for every ``License-File`` the distribution ships and this can read.
 
-    Wheels built to PEP 639 file the documents under ``licenses/``; older ones drop
-    them beside ``METADATA``. Both spellings are tried before giving up, and a document
-    that is absent or unreadable is skipped — what that absence *means* is the caller's
-    to decide, and the two callers decide it oppositely (see the module docstring).
+    Wheels built to PEP 639 file the documents under ``licenses/``; older ones drop them beside ``METADATA``. Both
+    spellings are tried before giving up, and a document that is absent or unreadable is skipped — what that absence
+    *means* is the caller's to decide, and the two callers decide it oppositely (see the module docstring).
     """
     meta = cast(Message, dist.metadata)
     found: list[tuple[str, str]] = []
@@ -501,18 +460,17 @@ def _license_documents(dist: metadata.Distribution) -> list[tuple[str, str]]:
 def recognize_license_text(text: str) -> str | None:
     """Identify a license from the opening lines of its own text.
 
-    Reached only for a distribution that declares no license field at all, where
-    identification is the verdict: an unrecognized document is a finding, so this
-    never has to decide that a text is *forbidden* — only whether it is one of the
-    permissive texts :data:`PERMISSIVE_TEXTS` names.
+    Reached only for a distribution that declares no license field at all, where identification is the verdict:
+    an unrecognized document is a finding, so this never has to decide that a text is *forbidden* — only whether
+    it is one of the permissive texts :data:`PERMISSIVE_TEXTS` names.
 
     Args:
         text: The full contents of a shipped license document.
 
     Returns:
-        The SPDX-style identifier of the first entry whose phrase appears in the
-        document's first :data:`LICENSE_HEADER_LINES` lines, or ``None`` when no
-        entry matches — including for every copyleft text, none of which is listed.
+        The SPDX-style identifier of the first entry whose phrase appears in the document's first
+        :data:`LICENSE_HEADER_LINES` lines, or ``None`` when no entry matches — including for every copyleft text,
+        none of which is listed.
 
     Examples:
         >>> recognize_license_text("                    Apache License\\n   Version 2.0, January 2004\\n")
@@ -532,17 +490,15 @@ def recognize_license_text(text: str) -> str | None:
 def unreadable_license_reason(dist: metadata.Distribution) -> str | None:
     """Say why a distribution's license cannot be read, or ``None`` when it can.
 
-    The check the three copyleft surfaces cannot perform, because each of them
-    matches a forbidden pattern against a declaration and a distribution declaring
-    nothing matches nothing.
+    The check the three copyleft surfaces cannot perform, because each of them matches a forbidden pattern against
+    a declaration and a distribution declaring nothing matches nothing.
 
     Args:
         dist: An installed distribution as yielded by ``metadata.distributions()``.
 
     Returns:
-        A sentence naming what was missing or which document could not be
-        identified, or ``None`` when a license field exists or a shipped document
-        was recognized.
+        A sentence naming what was missing or which document could not be identified, or ``None`` when a license field
+        exists or a shipped document was recognized.
 
     Examples:
         >>> callable(unreadable_license_reason)  # a real call needs an installed distribution
@@ -565,10 +521,9 @@ def unreadable_license_reason(dist: metadata.Distribution) -> str | None:
 def _ships_inadmissible_prose(dist: metadata.Distribution) -> bool:
     """Whether an unidentified license document names a forbidden license in its header.
 
-    Only ever consulted for a distribution :func:`unreadable_license_reason` already
-    reported, so no recognized permissive text reaches this — which matters, because
-    MPL-2.0's body names the GNU General Public License and would flag itself. The
-    header is what a license uses to name itself.
+    Only ever consulted for a distribution :func:`unreadable_license_reason` already reported, so no recognized
+    permissive text reaches this — which matters, because MPL-2.0's body names the GNU General Public License and
+    would flag itself. The header is what a license uses to name itself.
     """
     return any(
         inadmissible_license("\n".join(text.splitlines()[:LICENSE_HEADER_LINES])) is not None
@@ -579,21 +534,19 @@ def _ships_inadmissible_prose(dist: metadata.Distribution) -> bool:
 def library_stem(filename: str) -> str | None:
     """Reduce a shipped filename to the native library it identifies.
 
-    Matching is on the stem rather than the whole filename because the same library
-    is spelled several ways across platforms and rebuilt under a new version tag every
-    release: ``libx264.165.dylib``, ``libx264.so.164`` and ``x264-165.dll`` are one
-    entry in :data:`COPYLEFT_BINARIES`, not three that go stale. The wheel repair tools
-    add a spelling of their own — see :data:`AUDITWHEEL_GRAFT`, which is the difference
-    between this table working on Linux and only appearing to.
+    Matching is on the stem rather than the whole filename because the same library is spelled several ways across
+    platforms and rebuilt under a new version tag every release: ``libx264.165.dylib``, ``libx264.so.164`` and
+    ``x264-165.dll`` are one entry in :data:`COPYLEFT_BINARIES`, not three that go stale. The wheel repair tools
+    add a spelling of their own — see :data:`AUDITWHEEL_GRAFT`, which is the difference between this table working
+    on Linux and only appearing to.
 
     Args:
         filename: The base name of a file a distribution ships, with no directory part.
 
     Returns:
-        The lowercased stem with any ``lib`` prefix, version tag and repair-tool hash
-        removed, or ``None`` when the file is not a native library, or when the stem is
-        empty (``lib.cpython-311-darwin.so``, which shapely ships, is a Python extension
-        module named ``lib`` rather than a library called nothing).
+        The lowercased stem with any ``lib`` prefix, version tag and repair-tool hash removed, or ``None`` when
+        the file is not a native library, or when the stem is empty (``lib.cpython-311-darwin.so``, which shapely
+        ships, is a Python extension module named ``lib`` rather than a library called nothing).
 
     Examples:
         >>> library_stem("libx264.165.dylib")
@@ -616,12 +569,10 @@ def library_stem(filename: str) -> str | None:
 def _shipped_libraries(dist: metadata.Distribution) -> list[tuple[str, str]]:
     """Return ``(path, library stem)`` for every native library a distribution ships.
 
-    Reads the distribution's ``RECORD`` through ``Distribution.files``, so what is
-    scanned is what the wheel declared it installed. A distribution without a
-    ``RECORD`` reports no files and is invisible here. From Python 3.12 on, ``files``
-    also drops any recorded path missing from disk, so what is scanned is the
-    intersection of recorded and present — no narrower for a normal install, where the
-    binaries a wheel records are the binaries it unpacked.
+    Reads the distribution's ``RECORD`` through ``Distribution.files``, so what is scanned is what the wheel declared
+    it installed. A distribution without a ``RECORD`` reports no files and is invisible here. From Python 3.12
+    on, ``files`` also drops any recorded path missing from disk, so what is scanned is the intersection of recorded
+    and present — no narrower for a normal install, where the binaries a wheel records are the binaries it unpacked.
     """
     found = []
     for path in dist.files or ():
@@ -634,8 +585,8 @@ def _shipped_libraries(dist: metadata.Distribution) -> list[tuple[str, str]]:
 def _copyleft_libraries(dist: metadata.Distribution) -> list[tuple[str, str]]:
     """Return ``(library stem, description)`` for each known-copyleft binary shipped.
 
-    The single place a binary finding is formatted, so the audit's report and its
-    allowlist decision cannot describe the same file two different ways.
+    The single place a binary finding is formatted, so the audit's report and its allowlist decision cannot describe
+    the same file two different ways.
     """
     found = []
     for path, stem in _shipped_libraries(dist):
@@ -648,19 +599,18 @@ def _copyleft_libraries(dist: metadata.Distribution) -> list[tuple[str, str]]:
 def bundled_binary_indicators(dist: metadata.Distribution) -> list[str]:
     """Collect the known-copyleft native libraries a distribution ships.
 
-    The third surface, reading neither the metadata fields nor the license documents
-    but the wheel's own file list: a vendored binary can arrive with no license
-    paperwork of any kind, which is how a GPL x264 passes both other checks.
+    The third surface, reading neither the metadata fields nor the license documents but the wheel's own file list:
+    a vendored binary can arrive with no license paperwork of any kind, which is how a GPL x264 passes both other
+    checks.
 
     Args:
         dist: An installed distribution as yielded by ``metadata.distributions()``.
 
     Returns:
-        One ``"<path>: <library> (<license>)"`` string per shipped file whose name
-        matches :data:`COPYLEFT_BINARIES`, allowlist notwithstanding — the allowlist
-        is applied by :func:`find_binary_violations`, so this stays a report of what
-        is actually there. Empty for a distribution shipping no listed library, which
-        is nearly all of them.
+        One ``"<path>: <library> (<license>)"`` string per shipped file whose name matches :data:`COPYLEFT_BINARIES`,
+        allowlist notwithstanding — the allowlist is applied by :func:`find_binary_violations`, so this stays
+        a report of what is actually there. Empty for a distribution shipping no listed library, which is nearly
+        all of them.
 
     Examples:
         >>> callable(bundled_binary_indicators)  # a real call needs an installed distribution
@@ -672,9 +622,9 @@ def bundled_binary_indicators(dist: metadata.Distribution) -> list[str]:
 def find_binary_violations(dists: list[metadata.Distribution]) -> list[tuple[str, str]]:
     """Return (distribution name, offending shipped binary) pairs.
 
-    The counterpart of :func:`find_bundled_violations` for a vendored library that
-    documents itself nowhere: the wheel's declared license is permissive, the license
-    files it ships say nothing about it, and only the filename gives it away.
+    The counterpart of :func:`find_bundled_violations` for a vendored library that documents itself nowhere: the
+    wheel's declared license is permissive, the license files it ships say nothing about it, and only the filename
+    gives it away.
 
     Args:
         dists: Distributions to audit.
@@ -702,10 +652,9 @@ def find_binary_violations(dists: list[metadata.Distribution]) -> list[tuple[str
 def find_bundled_violations(dists: list[metadata.Distribution]) -> list[tuple[str, str]]:
     """Return (distribution name, offending bundled declaration) pairs.
 
-    The counterpart of :func:`find_copyleft_violations` for vendored code: a wheel
-    may declare a permissive license for itself and ship a native library under a
-    forbidden one, which the metadata fields never mention. Recognizes the same
-    classes the declared check does, through :func:`inadmissible_license`.
+    The counterpart of :func:`find_copyleft_violations` for vendored code: a wheel may declare a permissive license
+    for itself and ship a native library under a forbidden one, which the metadata fields never mention. Recognizes
+    the same classes the declared check does, through :func:`inadmissible_license`.
 
     Args:
         dists: Distributions to audit.
@@ -723,9 +672,8 @@ def find_bundled_violations(dists: list[metadata.Distribution]) -> list[tuple[st
     for dist in dists:
         name = cast(Message, dist.metadata).get("Name") or "<unknown>"
         for declaration in bundled_license_indicators(dist):
-            # The exception is tested before the allowlist, not after, so that a
-            # package listed for one vendored library is not silently excused for
-            # every other one it ships. numpy is the live case: libgfortran passes
+            # The exception is tested before the allowlist, not after, so that a package listed for one vendored
+            # library is not silently excused for every other one it ships. numpy is the live case: libgfortran passes
             # here on the GCC exception, and only libquadmath reaches the allowlist.
             if LICENSE_EXCEPTIONS.search(declaration):
                 continue
@@ -739,11 +687,10 @@ def _root_requirements(pyproject: Path) -> dict[str, list[str]]:
     """Read the requirement strings each tier starts from.
 
     Raises:
-        ValueError: If a dependency group uses a ``{include-group = ...}`` entry.
-            The walk below would silently drop it and under-attribute everything it
-            reaches, which downgrades a package's tier without saying so; this
-            repository uses no such entry today, and the check is what makes adding
-            one a visible decision rather than a silent hole.
+        ValueError: If a dependency group uses a ``{include-group = ...}`` entry. The walk below would silently drop
+            it and under-attribute everything it reaches, which downgrades a package's tier without saying so; this
+            repository uses no such entry today, and the check is what makes adding one a visible decision
+            rather than a silent hole.
     """
     data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     groups = data.get("dependency-groups", {})
@@ -765,10 +712,9 @@ def _requested(raw: str) -> tuple[NormalizedName, frozenset[str]]:
 def _reachable(roots: list[str], installed: Mapping[NormalizedName, metadata.Distribution]) -> set[NormalizedName]:
     """Walk the installed requirement graph from a tier's roots.
 
-    Extras are carried through the walk rather than dropped: a requirement gated on
-    ``extra == "foo"`` is reached exactly when the parent was requested with ``foo``,
-    and dropping every extra-markered requirement instead left 19 of 105 distributions
-    unattributed when this was first measured.
+    Extras are carried through the walk rather than dropped: a requirement gated on ``extra == "foo"`` is reached
+    exactly when the parent was requested with ``foo``, and dropping every extra-markered requirement instead left
+    19 of 105 distributions unattributed when this was first measured.
     """
     seen: set[NormalizedName] = set()
     queue = [_requested(raw) for raw in roots]
@@ -799,12 +745,10 @@ def dependency_tiers(dists: list[metadata.Distribution], pyproject: Path = PYPRO
         pyproject: The project metadata declaring the roots of each tier.
 
     Returns:
-        Canonical distribution name to tier name. Only distributions a group reaches
-        *without* the shipped closure reaching them appear under a group's tier, so a
-        package both depend on is attributed to :data:`TIER_SHIPPED`. Distributions
-        the walk never reaches are absent, and callers treat absence as
-        :data:`TIER_SHIPPED` — a gap in the resolver must fail loudly rather than
-        quietly demote something the wheel republishes.
+        Canonical distribution name to tier name. Only distributions a group reaches *without* the shipped closure
+        reaching them appear under a group's tier, so a package both depend on is attributed to :data:`TIER_SHIPPED`.
+        Distributions the walk never reaches are absent, and callers treat absence as :data:`TIER_SHIPPED` — a gap in
+        the resolver must fail loudly rather than quietly demote something the wheel republishes.
 
     Examples:
         >>> dependency_tiers([])  # nothing installed, nothing to attribute
@@ -830,12 +774,11 @@ def find_unreadable_licenses(
             as :data:`TIER_SHIPPED`.
 
     Returns:
-        ``(failures, flags)``, each a list of ``(distribution name, reason)``, excluding
-        anything in :data:`UNREADABLE_ALLOWLIST`. A distribution is a failure when the
-        shipped closure reaches it, when no tier reaches it at all, or when the only
-        license document it ships is forbidden prose — the last case ignores the tier,
-        because an AGPL or SSPL dependency is a failure wherever it sits. The reason carries the
-        tier, and an unattributed package says so rather than reading as a base one.
+        ``(failures, flags)``, each a list of ``(distribution name, reason)``, excluding anything in
+        :data:`UNREADABLE_ALLOWLIST`. A distribution is a failure when the shipped closure reaches it, when no tier
+        reaches it at all, or when the only license document it ships is forbidden prose — the last case ignores
+        the tier, because an AGPL or SSPL dependency is a failure wherever it sits. The reason carries the tier,
+        and an unattributed package says so rather than reading as a base one.
 
     Examples:
         >>> find_unreadable_licenses([], {})
@@ -849,9 +792,9 @@ def find_unreadable_licenses(
         if reason is None or canonicalize_name(name) in allowed:
             continue
         attributed = tiers.get(canonicalize_name(name))
-        # Spelled apart from a genuine base attribution, because the two are the same
-        # verdict for opposite reasons: one says the wheel republishes this package, the
-        # other says the walk never found it and is failing loudly rather than guessing.
+        # Spelled apart from a genuine base attribution, because the two are the same verdict for opposite reasons:
+        # one says the wheel republishes this package, the other says the walk never found it and is failing loudly
+        # rather than guessing.
         tier = attributed or f"unattributed, treated as {TIER_SHIPPED}"
         if attributed == TIER_SHIPPED or attributed is None or _ships_inadmissible_prose(dist):
             failures.append((name, f"{reason} ({tier})"))
@@ -863,16 +806,15 @@ def find_unreadable_licenses(
 def find_copyleft_violations(dists: list[metadata.Distribution]) -> list[tuple[str, str]]:
     """Return (distribution name, offending license string) pairs.
 
-    Named for the GPL family it was written against and no longer confined to it:
-    since WP-168 it reports whatever :func:`inadmissible_license` recognizes, which
-    is the copyleft family plus the source-available and non-commercial classes.
+    Named for the GPL family it was written against and no longer confined to it: since WP-168 it reports whatever
+    :func:`inadmissible_license` recognizes, which is the copyleft family plus the source-available and non-commercial
+    classes.
 
     Args:
         dists: Distributions to audit.
 
     Returns:
-        One tuple per violating distribution, the string carrying the class that
-        matched; empty when the tree is clean.
+        One tuple per violating distribution, the string carrying the class that matched; empty when the tree is clean.
 
     Examples:
         >>> find_copyleft_violations([])
@@ -911,22 +853,22 @@ def main() -> int:
     bundled = find_bundled_violations(dists)
     binaries = find_binary_violations(dists)
     unreadable, flagged = find_unreadable_licenses(dists, dependency_tiers(dists))
-    # Printed before any verdict, and on a passing run too: a package this audit
-    # cannot read is worth seeing whether or not its tier makes it fatal.
+    # Printed before any verdict, and on a passing run too: a package this audit cannot read is worth seeing whether
+    # or not its tier makes it fatal.
     for name, reason in sorted(flagged):
         print(f"license audit flag: {name} {reason} — not shipped, so not a failure")
     if declared or bundled or binaries:
         _report_copyleft(declared, bundled, binaries)
         return 1
     if unreadable:
-        # A separate header, because filing these under the copyleft one would report
-        # a license nobody could read as a license somebody read and rejected.
+        # A separate header, because filing these under the copyleft one would report a license nobody could read as a
+        # license somebody read and rejected.
         print("LICENSE AUDIT FAILED — licenses that could not be read:")
         for name, reason in sorted(unreadable):
             print(f"  {name}: {reason}")
         return 1
-    # The binary count is reported rather than kept internal: a scan that silently
-    # stopped seeing files would otherwise pass exactly as loudly as a clean tree.
+    # The binary count is reported rather than kept internal: a scan that silently stopped seeing files
+    # would otherwise pass exactly as loudly as a clean tree.
     shipped = sum(len(_shipped_libraries(dist)) for dist in dists)
     print(
         f"license audit clean: {len(dists)} distributions, {shipped} shipped binaries, "

@@ -101,8 +101,8 @@ def test_network_replay_accepts_all_supported_tasks_after_sync(task: str) -> Non
 def test_incompatible_options_are_explicit(kwargs: dict[str, object]) -> None:
     """The separate compiler path fails before training begins.
 
-    The whole message is matched, so it names the network-replay option and every task
-    it accepts: a dropped or added task, or the loss-replay message, would fail here.
+    The whole message is matched, so it names the network-replay option and every task it accepts: a dropped or
+    added task, or the loss-replay message, would fail here.
     """
     message = "capture_network=True requires task='detect', 'keypoints', 'obb' or 'segment', and compile_step=False"
     with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
@@ -188,8 +188,8 @@ def test_cpu_call_outside_recording_contract_runs_eager_and_retires(
 ) -> None:
     """Every CPU-reachable ineligible call returns the eager result, never records and retires the holder.
 
-    The BF16 gate and the non-CUDA storage check are indistinguishable without matching reason text, so
-    this pins what both promise a CPU-only merge gate: an unsupported call stays eager and builds no graph.
+    The BF16 gate and the non-CUDA storage check are indistinguishable without matching reason text, so this pins
+    what both promise a CPU-only merge gate: an unsupported call stays eager and builds no graph.
     """
     model = _module()
     holder = _NetworkCapture()
@@ -226,13 +226,12 @@ def test_retirement_warns_once_and_later_calls_stay_eager() -> None:
 def test_captured_signature_reflects_bindings_after_warmup_not_before() -> None:
     """A scalar flipped during warmup must certify what warmup actually left behind.
 
-    CUDA graph capture runs the network through its own warmup iterations before freezing
-    the replay, so a scalar module attribute mutated there (a "first call" flip, for one) is
-    part of what gets recorded. `_run` retains the original recording stamp to detect drift. Seeding `_ModuleMetadata`
-    from that stamp while retaining post-warmup bindings instead of a fresh matching
-    scalar snapshot would certify bindings the recording never actually saw,
-    and every later call matching the metadata's own (post-warmup) bindings would then return
-    that stale value forever, masking the real drift.
+    CUDA graph capture runs the network through its own warmup iterations before freezing the replay, so a scalar
+    module attribute mutated there (a "first call" flip, for one) is part of what gets recorded. `_run` retains
+    the original recording stamp to detect drift. Seeding `_ModuleMetadata` from that stamp while retaining
+    post-warmup bindings instead of a fresh matching scalar snapshot would certify bindings the recording never
+    actually saw, and every later call matching the metadata's own (post-warmup) bindings would then return that
+    stale value forever, masking the real drift.
     """
 
     class _FirstCallFlips(torch.nn.Module):
@@ -274,15 +273,13 @@ def test_captured_signature_reflects_bindings_after_warmup_not_before() -> None:
     assert torch.equal(network(images), warmup_output)
 
 
-def test_run_seeds_metadata_after_warmup_and_retires_scalar_drift(
-    dry_recording: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@patch.object(capture_module, "_ineligibility", lambda network, members=None: None)
+def test_run_seeds_metadata_after_warmup_and_retires_scalar_drift(dry_recording: MagicMock) -> None:
     """Warmup's scalar bindings must be compared against the original recording stamp on CPU."""
     model = _module()
     model.head.warmup_generation = 0
     holder = _NetworkCapture()
     images = torch.ones(2, 3, 64, 64)
-    monkeypatch.setattr(capture_module, "_ineligibility", lambda network, members=None: None)
 
     def warmup(network: torch.nn.Module, samples: object, device: torch.device) -> torch.nn.Module:
         """Leave changed scalar state behind at the recording boundary."""
@@ -672,10 +669,9 @@ def test_trainer_activates_once_per_fit_and_cleans_up(
 ) -> None:
     """The public automatic-optimisation loop records once, releases and records afresh on reuse.
 
-    ``16-mixed`` exercises Lightning's GradScaler-wrapped backward, the precision the
-    accepted detection recipe actually trains with (docs/model_cards/detection.md); the
-    scaler lives outside the recorded backbone/neck/head region, so it only changes the
-    magnitude of the incoming gradient the graph replays, never its shape or structure.
+    ``16-mixed`` exercises Lightning's GradScaler-wrapped backward, the precision the accepted detection recipe actually
+    trains with (docs/model_cards/detection.md); the scaler lives outside the recorded backbone/neck/head region,
+    so it only changes the magnitude of the incoming gradient the graph replays, never its shape or structure.
     """
     eager = _module()
     replay = _module(capture_network=True)
@@ -764,8 +760,8 @@ class _OverflowModule(DetectionLitModule):
 def test_fp16_scaler_recovers_after_overflow(accumulation: int, replay_spy: MagicMock) -> None:
     """An overflow skips one update, then eager and replay recover identical optimizer state.
 
-    The batches carry 0, 1 and many ground-truth boxes per image, and one is empty throughout: the count
-    varies per step while the recorded network input does not, which is why only the network replays.
+    The batches carry 0, 1 and many ground-truth boxes per image, and one is empty throughout: the count varies per
+    step while the recorded network input does not, which is why only the network replays.
     """
     torch.manual_seed(1)
     eager = _OverflowModule(depth=0.34, width=0.25, max_channels=64, num_classes=4)
@@ -811,8 +807,8 @@ def test_fp16_scaler_recovers_after_overflow(accumulation: int, replay_spy: Magi
 def test_two_epoch_replay_with_validation_and_ema_matches_eager(replay_spy: MagicMock) -> None:
     """Train, validate under the EMA shadow, train again: replay stays engaged and tracks eager bit for bit.
 
-    Validation swaps the shadow weights in and the live ones back in place, so the recording must survive
-    the eval phase and the second epoch's training must still replay it instead of retiring.
+    Validation swaps the shadow weights in and the live ones back in place, so the recording must survive the eval
+    phase and the second epoch's training must still replay it instead of retiring.
     """
     eager = _module()
     replay = _module(capture_network=True)
@@ -832,8 +828,8 @@ def test_two_epoch_replay_with_validation_and_ema_matches_eager(replay_spy: Magi
 def test_resume_from_checkpoint_with_replay_matches_eager(tmp_path: Path, replay_spy: MagicMock) -> None:
     """A fit resumed from a saved checkpoint records afresh and finishes where an eager resume does.
 
-    The fresh module restores weights, BatchNorm statistics and optimizer momentum from the file, none of
-    which may still alias a graph from the first fit.
+    The fresh module restores weights, BatchNorm statistics and optimizer momentum from the file, none of which may
+    still alias a graph from the first fit.
     """
     initial = _module().state_dict()
     loader = _loader([[1, 2], [0, 3]])
@@ -854,11 +850,10 @@ def test_resume_from_checkpoint_with_replay_matches_eager(tmp_path: Path, replay
 def test_load_state_dict_assign_retires_recording_and_matches_eager_gradients() -> None:
     """Assigning checkpoint tensors after recording leaves the graph on stale storage, so it must retire.
 
-    ``assign=True`` swaps every parameter for a new tensor; a surviving graph would keep reading and
-    writing the old ones, leaving the live parameters without gradients. The loss after the swap
-    reads all four outputs, so every parameter takes part eagerly and a missing gradient can only
-    come from a stale graph; a loss reading ``o2m_cls`` alone leaves the other stems at ``None``
-    on the eager reference too.
+    ``assign=True`` swaps every parameter for a new tensor; a surviving graph would keep reading and writing the old
+    ones, leaving the live parameters without gradients. The loss after the swap reads all four outputs, so every
+    parameter takes part eagerly and a missing gradient can only come from a stale graph; a loss reading ``o2m_cls``
+    alone leaves the other stems at ``None`` on the eager reference too.
     """
     eager = _module().cuda()
     replay = copy.deepcopy(eager)
@@ -909,8 +904,8 @@ def test_gradient_clipping_with_replay_matches_eager(
 def test_partial_batch_inside_accumulation_window_matches_eager(window: list[list[int]], replay_spy: MagicMock) -> None:
     """A short batch takes the eager route mid-window without corrupting the gradient already accumulated.
 
-    The eager route skips the gradient clone a replayed batch makes, so the window's running gradient must
-    still end up equal to the all-eager sum, wherever the short batch falls.
+    The eager route skips the gradient clone a replayed batch makes, so the window's running gradient must still end
+    up equal to the all-eager sum, wherever the short batch falls.
     """
     eager = _module()
     replay = _module(capture_network=True)
@@ -1001,8 +996,8 @@ def test_fit_exit_releases_recorded_network_and_graph_memory(
 ) -> None:
     """Completing or aborting a fit frees the recorded network and returns graph memory to the pre-fit level.
 
-    A first identical fit settles allocator workspaces that outlive any fit, so the baseline measures only what
-    a fit could leak: the weak reference must die and reserved bytes must not grow beyond allocator rounding.
+    A first identical fit settles allocator workspaces that outlive any fit, so the baseline measures only what a
+    fit could leak: the weak reference must die and reserved bytes must not grow beyond allocator rounding.
     """
     _fit_and_discard(module_class, expectation)
     baseline = _settled_reserved()

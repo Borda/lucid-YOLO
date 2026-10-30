@@ -39,8 +39,8 @@ pytestmark = pytest.mark.usefixtures("deterministic_kernels")
 def _fresh_backend_state(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give each test its own fused-launch decisions and restore the process-wide state afterwards.
 
-    The backend keeps verified and unavailable families for the whole process, so a test that
-    reads them would otherwise inherit what an earlier test on the same worker launched.
+    The backend keeps verified and unavailable families for the whole process, so a test that reads them would
+    otherwise inherit what an earlier test on the same worker launched.
     """
     monkeypatch.setattr(_cuda, "_STATE", _cuda._BackendState())
 
@@ -137,8 +137,8 @@ def _expected_families(
 ) -> set[str]:
     """Name the families a non-rotated run may launch, from the host alone.
 
-    A request on a host the fused backend cannot serve (below SM 8, ROCm, no host compiler,
-    no Triton) keeps every assignment native, so nothing is expected to launch there.
+    A request on a host the fused backend cannot serve (below SM 8, ROCm, no host compiler, no Triton) keeps every
+    assignment native, so nothing is expected to launch there.
 
     Examples:
         >>> _expected_families(False)
@@ -189,8 +189,8 @@ def test_cpu_stays_eager_and_copy_discards_recordings(graph_recordings: MagicMoc
 def test_eligible_rejects_global_module_hooks_before_unpacking_inputs(registration: str) -> None:
     """A registered global hook exits before the function unpacks its input tuple.
 
-    A single-element tuple would raise on the later unpacking line were the early
-    exit skipped, so a clean ``False`` here proves the hook check fired first.
+    A single-element tuple would raise on the later unpacking line were the early exit skipped, so a clean
+    ``False`` here proves the hook check fired first.
     """
 
     def observe(*args: object) -> None:
@@ -204,8 +204,8 @@ def test_eligible_rejects_global_module_hooks_before_unpacking_inputs(registrati
 def _host_recorder(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Exercise host bookkeeping with CPU autograd, without claiming CUDA replay coverage.
 
-    Only device eligibility, the stream handle, graph installation and its fence
-    are substituted. Assignment, scoring, tensor ownership and backward are real.
+    Only device eligibility, the stream handle, graph installation and its fence are substituted. Assignment,
+    scoring, tensor ownership and backward are real.
     """
     monkeypatch.setattr(capture_module, "_eligible", lambda inputs: True)
     monkeypatch.setattr(torch.cuda, "current_stream", lambda device: MagicMock(cuda_stream=1))
@@ -334,8 +334,8 @@ _FLOAT32_TINY = torch.finfo(torch.float32).tiny
 def test_source_signature_refuses_uncertified_settings(branch: str, field: str, value: object) -> None:
     """Invalid scalar policies cannot certify neutral padding, even without a CUDA runtime.
 
-    The next float below the smallest normal float32 is the first epsilon that can
-    flush to zero on the device, so it is refused while the smallest normal is not.
+    The next float below the smallest normal float32 is the first epsilon that can flush to zero on the device,
+    so it is refused while the smallest normal is not.
     """
     source = DualBranchLoss()
     setattr(getattr(source, branch), field, value)
@@ -365,9 +365,9 @@ def test_host_replaced_delegated_stage_keeps_native_route(
 ) -> None:
     """Replacing a stage reached through super() or a module global retires replay.
 
-    The surrogate filter calls its parent through ``super()`` and the recorded stages
-    call module helpers by global name, so neither shows in the instance attributes.
-    A replacement before or after the first recording must reach the native route.
+    The surrogate filter calls its parent through ``super()`` and the recorded stages call module helpers by global
+    name, so neither shows in the instance attributes. A replacement before or after the first recording must reach
+    the native route.
     """
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
@@ -395,9 +395,9 @@ _GUARDED_INPUTS = {"match_logits": 0, "match_boxes": 1, "unique_logits": 2, "uni
 def test_host_fallback_preserves_current_inputs(_host_recorder: MagicMock, case: str) -> None:
     """Existing recordings never hide empty, non-finite, reshaped or invalid current inputs.
 
-    The recorder is stubbed to run the real objective, so a replay is visible as a
-    call to the recorded forward. Capacity and recorder counts cannot tell a
-    fallback from a replay at the same capacity, hence the forward-call count.
+    The recorder is stubbed to run the real objective, so a replay is visible as a call to the recorded forward.
+    Capacity and recorder counts cannot tell a fallback from a replay at the same capacity, hence the
+    forward-call count.
     """
     holder, source = _LossCapture(), DualBranchLoss()
     holder.run(source, _LossInputs(*_inputs(3, device="cpu"))).total.backward()
@@ -426,9 +426,9 @@ def test_host_unpadded_nonfinite_inputs_replay_with_native_bits(
 ) -> None:
     """Anchor points, strides and alpha are never padded, so their non-finite values need no fallback.
 
-    Padded rows only meet predictions and target boxes in arithmetic. Anchor points
-    enter comparisons, strides scale each branch's own terms and alpha weights the two
-    branches, so replay and the native route must agree even when the values are infinite.
+    Padded rows only meet predictions and target boxes in arithmetic. Anchor points enter comparisons, strides
+    scale each branch's own terms and alpha weights the two branches, so replay and the native route must agree
+    even when the values are infinite.
     """
     holder, source = _LossCapture(), DualBranchLoss()
     holder.run(source, _LossInputs(*_inputs(3, device="cpu"))).total.backward()
@@ -456,12 +456,12 @@ def test_host_skipped_backward_resets_at_batch_start(_host_recorder: MagicMock) 
     assert _host_recorder.call_count == 1
 
 
+@patch.object(capture_module, "_BF16_SUPPORTED", False)
 def test_host_old_bf16_contract_stays_native(_host_recorder: MagicMock) -> None:
     """An unsupported BF16 runtime rejects replay before allocating a workspace."""
     holder, source = _LossCapture(), DualBranchLoss()
-    with patch.object(capture_module, "_BF16_SUPPORTED", False):
-        inputs = _inputs(1, device="cpu", dtype=torch.bfloat16)
-        _same(_native(source, inputs), holder.run(source, _LossInputs(*inputs)))
+    inputs = _inputs(1, device="cpu", dtype=torch.bfloat16)
+    _same(_native(source, inputs), holder.run(source, _LossInputs(*inputs)))
     _host_recorder.assert_not_called()
     assert holder._workspace is None and not holder._disabled
 
@@ -484,9 +484,9 @@ def test_unsupported_configurations_raise(kwargs: dict[str, object]) -> None:
 def test_later_retire_cause_stays_silent() -> None:
     """Only the first cause of a fit warns; a second retire leaves the retired holder as it is.
 
-    A second retire used to clear the holder again and repeat the warning, about a state nothing
-    could change any more. The network and segmentation-head holders already reported only their
-    first cause; the loss holder now shares that contract.
+    A second retire used to clear the holder again and repeat the warning, about a state nothing could change
+    any more. The network and segmentation-head holders already reported only their first cause; the loss holder
+    now shares that contract.
     """
     holder = _LossCapture()
     with pytest.warns(UserWarning, match=r"^capture_loss=True stays eager: first cause$") as record:
@@ -1082,8 +1082,8 @@ def test_constructor_valid_tiny_epsilon_keeps_native_loss(device: str, branch: s
     source, holder, inputs = DualBranchLoss(), _LossCapture(), _inputs(3, device=device)
     assigner = type(getattr(source, branch))(topk=getattr(source, branch).topk, eps=1e-50)
     setattr(source, branch, assigner)
-    # Real, nondegenerate boxes have finite IoU without the epsilon; a padded
-    # zero-area row would add 0/0 when the prediction also has zero area.
+    # Real, nondegenerate boxes have finite IoU without the epsilon; a padded zero-area row would add 0/0 when
+    # the prediction also has zero area.
     with torch.no_grad():
         inputs[1].zero_()
         inputs[3].zero_()
@@ -1131,10 +1131,9 @@ def _replay_matches_native(
 def _crowded(count: int, device: str) -> tuple[torch.Tensor, ...]:
     """Make targets covering more anchors than the one-to-many top-k, with zero-overlap ties.
 
-    Every target covers at least twelve of the sixteen anchors, against ``topk=10``.
-    Five anchors per image overlap each target; the rest predict a far box, so their
-    alignment is exactly zero and the tenth slot falls inside that tie. The right
-    edge of every second target lies exactly on an anchor column (edge-inclusive).
+    Every target covers at least twelve of the sixteen anchors, against ``topk=10``. Five anchors per image overlap
+    each target; the rest predict a far box, so their alignment is exactly zero and the tenth slot falls inside
+    that tie. The right edge of every second target lies exactly on an anchor column (edge-inclusive).
 
     Examples:
         >>> _crowded(4, "cpu")[5][0, :, 2].tolist()
@@ -1169,8 +1168,8 @@ def _emptied(count: int, device: str, rows: tuple[int, ...]) -> tuple[torch.Tens
 def test_replay_follows_live_branch_weight(replay_device: str) -> None:
     """One recording serves any branch weight, because ``alpha`` is a live input.
 
-    ``_inputs`` always carries 0.37, so a recording that baked the first weight in
-    would pass every fixed-weight case. Same predictions and targets, three weights.
+    ``_inputs`` always carries 0.37, so a recording that baked the first weight in would pass every fixed-weight case.
+    Same predictions and targets, three weights.
     """
     holder, source, totals = _LossCapture(), DualBranchLoss(), []
     for weight in (0.25, 0.5, 0.9):
@@ -1186,9 +1185,8 @@ def test_replay_follows_live_branch_weight(replay_device: str) -> None:
 def test_replay_matches_native_top_k_truncation_and_ties(replay_device: str) -> None:
     """Truncated candidate sets and zero-overlap ties rank the same under padded capacity.
 
-    More candidates than top-k, a tie across the top-k boundary and a fall from
-    capacity 128 to three real rows are the cases where a padded row could displace a
-    real anchor.
+    More candidates than top-k, a tie across the top-k boundary and a fall from capacity 128 to three real rows are
+    the cases where a padded row could displace a real anchor.
     """
     holder, source = _LossCapture(), DualBranchLoss()
     for count in (100, 3):
@@ -1209,8 +1207,8 @@ def test_replay_matches_native_top_k_truncation_and_ties(replay_device: str) -> 
 def test_images_without_targets_match_native(replay_device: str, rows: tuple[int, ...]) -> None:
     """An image without real targets beside a populated one, or every mask false with N > 0.
 
-    The native route keeps no foreground for those images; masked capacity must neither
-    add one nor change the populated image's assignment, weights or gradients.
+    The native route keeps no foreground for those images; masked capacity must neither add one nor change the
+    populated image's assignment, weights or gradients.
     """
     holder, source = _LossCapture(), DualBranchLoss()
     for count in (2, 5, 3, 9):
@@ -1247,8 +1245,8 @@ def _inference_with_grad() -> Iterator[None]:
 def test_eligible_rejects_unsupported_context_before_unpacking_inputs(context: object) -> None:
     """Autograd and compiler contexts exit before any input is read.
 
-    A single-element tuple would raise on the later unpacking line were the early exit
-    skipped, so a clean ``False`` proves that the context clause itself fired.
+    A single-element tuple would raise on the later unpacking line were the early exit skipped, so a clean ``False``
+    proves that the context clause itself fired.
     """
     with context():
         assert capture_module._eligible((torch.zeros(1),)) is False

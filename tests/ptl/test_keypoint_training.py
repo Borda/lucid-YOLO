@@ -1,40 +1,32 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the keypoint supervision wired into the training step (WP-132).
 
-Phase 12 built every keypoint component standalone and wired none of them into
-training: the head could build point stems, the RLE loss existed with zero call
-sites, and no ``task`` string reached either. That is the same shape of gap
-WP-088 closed for the oriented path, so these tests aim where its own do — at
-the **wiring** rather than at the components again:
+Phase 12 built every keypoint component standalone and wired none of them into training: the head could build point
+stems, the RLE loss existed with zero call sites, and no ``task`` string reached either. That is the same shape of gap
+WP-088 closed for the oriented path, so these tests aim where its own do — at the **wiring** rather than at the
+components again:
 
-* the point stems of **both** head branches, and the RLE flow's own parameters,
-  carry gradient after one step — the test that would have caught a term that is
-  computed and then discarded;
-* the keypoint gain has leverage on the total at exactly its weight, so a term
-  that is connected but weightless fails here;
-* at ``keypoint_gain=0`` the step reproduces a ``task="detect"`` step **bit for
-  bit** — the task adds and never disturbs (unlike ``"obb"``, which replaces),
-  and "the detection tests still pass" would not distinguish the two;
-* the RLE term gathers its targets by the *assignment*, not by positional order,
-  so an anchor cannot be supervised towards another instance's pose;
-* A66's visibility rule survives the padding path end to end: a point marked
-  ``v == 0`` moves the term by nothing at all, however far away it is put;
-* the keypoints module's state-dict keys are the detection module's plus the
-  point stems and the flow, so the stages stayed flat and accepted checkpoints
-  keep loading;
-* the WP-178 OKS term (A75) is off by default and, when switched on, enters the
-  total at exactly ``oks_gain`` times the logged pre-gain term — and adds no
-  checkpoint key, so the pinned state-dict set above still holds;
-* keypoints survive the loader's packed transport, including a batch mixing
-  annotated and instance-free images;
-* the datamodule hands ``HorizontalFlip`` the pairing the *dataset* derived from
-  its own annotation schema (A64) — the assertion whose absence let a mirrored
-  sample train with left and right identities swapped the wrong way, silently,
+* the point stems of **both** head branches, and the RLE flow's own parameters, carry gradient after one step — the
+  test that would have caught a term that is computed and then discarded;
+* the keypoint gain has leverage on the total at exactly its weight, so a term that is connected but weightless fails
+  here;
+* at ``keypoint_gain=0`` the step reproduces a ``task="detect"`` step **bit for bit** — the task adds and never
+  disturbs (unlike ``"obb"``, which replaces), and "the detection tests still pass" would not distinguish the two;
+* the RLE term gathers its targets by the *assignment*, not by positional order, so an anchor cannot be supervised
+  towards another instance's pose;
+* A66's visibility rule survives the padding path end to end: a point marked ``v == 0`` moves the term by nothing at
+  all, however far away it is put;
+* the keypoints module's state-dict keys are the detection module's plus the point stems and the flow, so the stages
+  stayed flat and accepted checkpoints keep loading;
+* the WP-178 OKS term (A75) is off by default and, when switched on, enters the total at exactly ``oks_gain`` times the
+  logged pre-gain term — and adds no checkpoint key, so the pinned state-dict set above still holds;
+* keypoints survive the loader's packed transport, including a batch mixing annotated and instance-free images;
+* the datamodule hands ``HorizontalFlip`` the pairing the *dataset* derived from its own annotation schema (A64) — the
+  assertion whose absence let a mirrored sample train with left and right identities swapped the wrong way, silently,
   since supplying no pairing is not an error but a wrong answer.
 
-The module is built at n-scale multipliers with a low channel cap and a 160-px
-input so the real stack runs in a couple of seconds on CPU. ``K`` is 3 rather
-than COCO's 17 for the same reason: the point axis is the one thing every shape
+The module is built at n-scale multipliers with a low channel cap and a 160-px input so the real stack runs in a couple
+of seconds on CPU. ``K`` is 3 rather than COCO's 17 for the same reason: the point axis is the one thing every shape
 here is generic over, and three points exercise it as well as seventeen.
 """
 
@@ -43,6 +35,7 @@ from __future__ import annotations
 import math
 import typing
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -76,18 +69,17 @@ _BATCH_SIZE = 2
 #: Loss gains the tiny module is built with.
 _BOX_GAIN, _CLS_GAIN, _L1_GAIN, _KEYPOINT_GAIN, _ALPHA = 7.5, 0.5, 6.0, 1.0, 0.5
 
-#: Relative tolerance on the keypoint term's leverage. The difference of two float32
-#: totals of order 1e3 resolves to ~1e-4, so a term recovered from that difference is
-#: good to a few parts in 1e6; this bounds the cancellation, not the arithmetic.
+#: Relative tolerance on the keypoint term's leverage. The difference of two float32 totals of order 1e3 resolves to
+#: ~1e-4, so a term recovered from that difference is good to a few parts in 1e6; this bounds the cancellation, not the
+#: arithmetic.
 _LEVERAGE_RTOL = 1e-3
 
 
 def _tiny_module(task: str = "keypoints", keypoint_loss: str = "rle", **overrides: float) -> DetectionLitModule:
     """Build an n-scale module with a low channel cap for fast CPU tests.
 
-    ``keypoint_loss`` is spelled out rather than left to ``overrides`` because it is
-    the one non-numeric knob here, and its default repeats the module's own so every
-    caller predating WP-135 builds exactly what it did before.
+    ``keypoint_loss`` is spelled out rather than left to ``overrides`` because it is the one non-numeric knob here, and
+    its default repeats the module's own so every caller predating WP-135 builds exactly what it did before.
 
     Examples:
         >>> module = _tiny_module()
@@ -142,9 +134,8 @@ class TestHeadConstruction:
     def test_builds_point_stems_on_both_branches(self) -> None:
         """A keypoints module builds keypoint stems on the one-to-one *and* one-to-many branches.
 
-        The one-to-one branch is what a NMS-free pose decode reads and the one-to-many
-        branch is what carries the dense training signal; a module that built only one
-        of them would train and then deploy different things.
+        The one-to-one branch is what a NMS-free pose decode reads and the one-to-many branch is what carries the dense
+        training signal; a module that built only one of them would train and then deploy different things.
         """
         module = _tiny_module()
 
@@ -155,10 +146,9 @@ class TestHeadConstruction:
     def test_carries_rle_flow_as_submodule(self) -> None:
         """The RLE flow is registered on the module, so it is optimized and checkpointed.
 
-        R14's flow is the one loss in the project holding parameters. Held anywhere but
-        the module tree it would never reach ``self.parameters()``, and the density the
-        loss is written around would stay at its initialisation for the whole run while
-        every loss value still looked ordinary.
+        R14's flow is the one loss in the project holding parameters. Held anywhere but the module tree it would never
+        reach ``self.parameters()``, and the density the loss is written around would stay at its initialisation for
+        the whole run while every loss value still looked ordinary.
         """
         module = _tiny_module()
 
@@ -170,13 +160,11 @@ class TestHeadConstruction:
     def test_other_tasks_refuse_point_count(self) -> None:
         """A non-keypoint task refuses ``num_keypoints`` rather than storing and ignoring it.
 
-        ``num_keypoints`` names a property of the *dataset*, and a config that carried it
-        over from a pose run used to be accepted in silence: no point stems were built —
-        which is right, and is what the accepted checkpoints depend on — but
-        ``save_hyperparameters`` still recorded a ``K`` the head has no stem to predict,
-        leaving a later reader a documented point schema and no points (audit L-25). The
-        refusal keeps the state-dict guarantee and drops the silence; the shape half is
-        pinned by ``test_task_state_dict_keeps_detection_keys``.
+        ``num_keypoints`` names a property of the *dataset*, and a config that carried it over from a pose run used to
+        be accepted in silence: no point stems were built — which is right, and is what the accepted checkpoints depend
+        on — but ``save_hyperparameters`` still recorded a ``K`` the head has no stem to predict, leaving a later
+        reader a documented point schema and no points (audit L-25). The refusal keeps the state-dict guarantee and
+        drops the silence; the shape half is pinned by ``test_task_state_dict_keeps_detection_keys``.
         """
         with pytest.raises(ValueError, match="meaningless for task='detect'"):
             DetectionLitModule(
@@ -186,10 +174,9 @@ class TestHeadConstruction:
     def test_task_requires_explicit_point_count(self) -> None:
         """``task="keypoints"`` without ``num_keypoints`` is refused at construction.
 
-        There is no defensible default: COCO person is 17 points and another pose schema
-        is not, so a fallback would be a silent claim about data the module never saw. The
-        failure it buys is a head built for the wrong ``K``, which surfaces far from its
-        cause.
+        There is no defensible default: COCO person is 17 points and another pose schema is not, so a fallback would be
+        a silent claim about data the module never saw. The failure it buys is a head built for the wrong ``K``, which
+        surfaces far from its cause.
         """
         with pytest.raises(ValueError, match="num_keypoints"):
             DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=1, task="keypoints")
@@ -198,29 +185,27 @@ class TestHeadConstruction:
 class TestKeypointLossSelection:
     """WP-135's ``keypoint_loss`` switch: which objective fills the slot, and what it costs.
 
-    R14 Table 7's "Laplace, learnable variance" row, wired as the second arm WP-125's
-    mechanism claim needs. What these pin is that the switch is genuinely *additive* --
-    the default reproduces the objective every existing config and checkpoint was built
-    with -- and that the ablation arm actually trains, since an arm that quietly failed
-    to would read as evidence for the flow rather than as a broken control.
+    R14 Table 7's "Laplace, learnable variance" row, wired as the second arm WP-125's mechanism claim needs. What these
+    pin is that the switch is genuinely *additive* -- the default reproduces the objective every existing config and
+    checkpoint was built with -- and that the ablation arm actually trains, since an arm that quietly failed to would
+    read as evidence for the flow rather than as a broken control.
     """
 
     def test_defaults_to_rle_objective(self) -> None:
         """A keypoints module built without ``keypoint_loss`` gets ``RLELoss``, as before WP-135.
 
-        The non-breaking half of an additive change, asserted rather than assumed: every
-        shipped config, every accepted figure and every checkpoint on disk was produced
-        under R14's full loss, and a default that had shifted would silently retrain a
-        different objective under the same recipe name.
+        The non-breaking half of an additive change, asserted rather than assumed: every shipped config, every accepted
+        figure and every checkpoint on disk was produced under R14's full loss, and a default that had shifted would
+        silently retrain a different objective under the same recipe name.
         """
         assert isinstance(_tiny_module().rle_loss, RLELoss)
 
     def test_selects_flow_free_ablation_when_asked(self) -> None:
         """``keypoint_loss="laplace_nll"`` puts a ``LaplaceNLLLoss`` in the slot instead.
 
-        The attribute keeps its ``rle_loss`` spelling under either objective because it
-        prefixes the loss's own state-dict keys and renaming it would stop every
-        pre-WP-135 keypoints checkpoint loading; the *type* is what changed.
+        The attribute keeps its ``rle_loss`` spelling under either objective because it prefixes the loss's own
+        state-dict keys and renaming it would stop every pre-WP-135 keypoints checkpoint loading; the *type* is what
+        changed.
         """
         module = _tiny_module(keypoint_loss="laplace_nll")
 
@@ -230,10 +215,9 @@ class TestKeypointLossSelection:
     def test_unknown_objective_refused_at_construction(self) -> None:
         """A misspelled ``keypoint_loss`` raises, naming both arms, rather than falling back.
 
-        The failure a silent fallback buys is the worst one this WP could ship: an
-        ablation run that reports itself as the ablation while training the very
-        objective it was supposed to control for, producing a comparison whose two arms
-        are the same arm.
+        The failure a silent fallback buys is the worst one this WP could ship: an ablation run that reports itself as
+        the ablation while training the very objective it was supposed to control for, producing a comparison whose two
+        arms are the same arm.
         """
         with pytest.raises(ValueError, match="keypoint_loss must be one of"):
             DetectionLitModule(
@@ -249,12 +233,10 @@ class TestKeypointLossSelection:
     def test_ablation_adds_no_parameters_to_model(self) -> None:
         """An ablation module's state dict is a detection module's plus the point stems only.
 
-        The structural difference between the two arms, stated where the model can see
-        it: RLE contributes flow tensors an optimizer must pick up and a checkpoint must
-        carry, the ablation contributes none at all. It also means an ablation module
-        draws no RNG for its loss, so its weights are bit-for-bit a same-seed detection
-        module's -- the construction-order caveat the module docstring states for the
-        flow does not apply to this arm.
+        The structural difference between the two arms, stated where the model can see it: RLE contributes flow tensors
+        an optimizer must pick up and a checkpoint must carry, the ablation contributes none at all. It also means an
+        ablation module draws no RNG for its loss, so its weights are bit-for-bit a same-seed detection module's -- the
+        construction-order caveat the module docstring states for the flow does not apply to this arm.
         """
         ablation = _tiny_module(keypoint_loss="laplace_nll")
         detection = _tiny_module(task="detect")
@@ -265,11 +247,10 @@ class TestKeypointLossSelection:
     def test_one_step_of_ablation_arm_trains_point_stems(self) -> None:
         """A ``laplace_nll`` step yields a finite scalar loss and gradient on both point stems.
 
-        The RLE path's own wiring test asserts gradient on the stems *and* on the flow;
-        this arm has no flow, so the stems are the whole of what the term has to move. A
-        term that computed and discarded them would leave the ablation run flat while
-        still logging an entirely ordinary loss curve -- and a flat arm reads as a large
-        effect for the flow.
+        The RLE path's own wiring test asserts gradient on the stems *and* on the flow; this arm has no flow, so the
+        stems are the whole of what the term has to move. A term that computed and discarded them would leave the
+        ablation run flat while still logging an entirely ordinary loss curve -- and a flat arm reads as a large effect
+        for the flow.
         """
         module = _tiny_module(keypoint_loss="laplace_nll")
         recorder = LogRecorder()
@@ -288,44 +269,61 @@ class TestKeypointLossSelection:
 class TestTrainingStep:
     """What one ``task="keypoints"`` step does to the total and to the gradients."""
 
-    def test_keypoint_gain_enters_total_at_weight(self) -> None:
-        """Zeroing ``keypoint_gain`` drops exactly ``gain * term`` from the total.
+    @pytest.mark.parametrize(
+        ("with_overrides", "without_overrides", "term", "weight"),
+        [
+            pytest.param({}, {"keypoint_gain": 0.0}, "train/keypoint", _KEYPOINT_GAIN, id="keypoint-gain"),
+            pytest.param({"oks_gain": 1.0}, {}, "train/oks", 1.0, id="oks-gain"),
+        ],
+    )
+    def test_gain_enters_total_at_weight(
+        self, with_overrides: dict[str, float], without_overrides: dict[str, float], term: str, weight: float
+    ) -> None:
+        """Switching a pose gain on adds exactly ``weight * term`` to the total (WP-132, WP-178).
 
-        A term that is wired but weightless is the Phase 12 gap wearing a disguise: the
-        gradient test above would still pass while the term contributed nothing to what the
-        optimizer minimises. The assertion is the *size* of the change rather than merely
-        its presence, so a term entering at some other weight fails here too.
+        A term that is wired but weightless is the Phase 12 gap wearing a disguise: the gradient test above would still
+        pass while the term contributed nothing to what the optimizer minimises. The assertion is the *size* of the
+        change rather than merely its presence, so a term entering at some other weight, or logged as something other
+        than what is added, fails here too. The RLE gain defaults to one, so the module that differs is the one with it
+        zeroed; the OKS gain defaults to zero (off), so the module that differs is the one with it set to one, and
+        ``train/oks`` is the logged pre-gain term.
         """
-        weighted = _tiny_module()
-        zeroed = _tiny_module(keypoint_gain=0.0)
-        zeroed.load_state_dict(weighted.state_dict())
+        weighted = _tiny_module(**with_overrides)
+        baseline = _tiny_module(**without_overrides)
+        baseline.load_state_dict(weighted.state_dict())
         recorder = LogRecorder()
         weighted.log = recorder  # type: ignore[method-assign]
         batch = _posed_batch()
 
         with_gain = weighted.training_step(batch, 0)
 
-        without_gain = zeroed.training_step(batch, 0)
-        dropped = float(with_gain.detach()) - float(without_gain.detach())
-        assert dropped != 0.0
-        assert dropped == pytest.approx(_KEYPOINT_GAIN * recorder.values["train/keypoint"], rel=_LEVERAGE_RTOL)
+        without_gain = baseline.training_step(batch, 0)
+        difference = float(with_gain.detach()) - float(without_gain.detach())
+        assert difference != 0.0
+        assert difference == pytest.approx(weight * recorder.values[term], rel=_LEVERAGE_RTOL)
 
-    def test_zero_gain_reproduces_detection_step_bit_for_bit(self) -> None:
-        """At ``keypoint_gain=0`` the total equals a ``task="detect"`` module's, exactly.
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            pytest.param({"keypoint_gain": 0.0}, id="keypoint-gain-zero"),
+            pytest.param({"keypoint_gain": 0.0, "oks_gain": 0.0}, id="keypoint-and-oks-gain-zero"),
+        ],
+    )
+    def test_zero_gains_reproduce_detection_step_bit_for_bit(self, overrides: dict[str, float]) -> None:
+        """With the pose gains at zero the total equals a ``task="detect"`` module's, exactly.
 
-        The decisive statement that this task **adds** rather than rearranges: ``"obb"``
-        moves two gains out of the dual loss and would fail this by construction, while
-        ``"keypoints"`` must leave every detection term precisely where it was. Equality is
-        asserted rather than approximated because the two steps run the same arithmetic on
-        the same weights in the same order — a tolerance here would hide exactly the small
-        perturbation the test exists to forbid.
+        The decisive statement that this task **adds** rather than rearranges: ``"obb"`` moves two gains out of the dual
+        loss and would fail this by construction, while ``"keypoints"`` must leave every detection term precisely where
+        it was. Equality is asserted rather than approximated because the two steps run the same arithmetic on the same
+        weights in the same order — a tolerance here would hide exactly the small perturbation the test exists to
+        forbid. The second case makes the OKS term explicit rather than left at its default: both pose terms are
+        computed either way, and both must vanish from the total without a rounding trace when their gains are zero.
 
-        The detection module's weights are copied *from* the pose module by name rather
-        than both being seeded alike: the pose head draws its point stems from the same RNG
-        stream, so a same-seed detection module's later parameters would legitimately
-        differ, and the test would then measure the seed rather than the objective.
+        The detection module's weights are copied *from* the pose module by name rather than both being seeded alike:
+        the pose head draws its point stems from the same RNG stream, so a same-seed detection module's later
+        parameters would legitimately differ, and the test would then measure the seed rather than the objective.
         """
-        posed = _tiny_module(keypoint_gain=0.0)
+        posed = _tiny_module(**overrides)
         detection = _tiny_module(task="detect")
         shared = set(detection.state_dict())
         detection.load_state_dict({key: value for key, value in posed.state_dict().items() if key in shared})
@@ -336,34 +334,11 @@ class TestTrainingStep:
         detection_total = detection.training_step((images, _boxes_only(targets)), 0)
         assert float(posed_total.detach()) == float(detection_total.detach())
 
-    def test_oks_gain_enters_total_at_weight(self) -> None:
-        """Switching ``oks_gain`` from its zero default to one adds exactly ``1.0 * oks`` (WP-178).
-
-        The same leverage check the RLE gain gets, run from the other side: the default
-        is *off*, so the module that differs is the one with the gain, and the size of the
-        change it makes must be the logged pre-gain OKS term times one. A term wired at
-        some other weight, or logged as something other than what is added, fails here.
-        """
-        weighted = _tiny_module(oks_gain=1.0)
-        default = _tiny_module()
-        default.load_state_dict(weighted.state_dict())
-        recorder = LogRecorder()
-        weighted.log = recorder  # type: ignore[method-assign]
-        batch = _posed_batch()
-
-        with_gain = weighted.training_step(batch, 0)
-
-        without_gain = default.training_step(batch, 0)
-        added = float(with_gain.detach()) - float(without_gain.detach())
-        assert added != 0.0
-        assert added == pytest.approx(1.0 * recorder.values["train/oks"], rel=_LEVERAGE_RTOL)
-
     def test_oks_term_logged_pre_gain_at_default_zero_gain(self) -> None:
         """A default module still logs a non-zero, finite ``train/oks`` it is not training on.
 
-        The reading a dose-response run against R1 Table 9's ``(24, 1)`` needs before it
-        moves the gain; a term logged only when weighted would give that run nothing to
-        compare against.
+        The reading a dose-response run against R1 Table 9's ``(24, 1)`` needs before it moves the gain; a term logged
+        only when weighted would give that run nothing to compare against.
         """
         module = _tiny_module()
 
@@ -373,31 +348,12 @@ class TestTrainingStep:
         assert math.isfinite(logged)
         assert 0.0 < logged <= 1.0  # 1 - OKS of an untrained head, bounded by construction
 
-    def test_zero_gains_reproduce_detection_step_bit_for_bit(self) -> None:
-        """At ``keypoint_gain=0`` **and** ``oks_gain=0`` the total is a ``task="detect"`` module's, exactly.
-
-        The test above with the OKS term made explicit rather than left at its default:
-        both pose terms are computed either way, and both must vanish from the total
-        without a rounding trace when their gains are zero.
-        """
-        posed = _tiny_module(keypoint_gain=0.0, oks_gain=0.0)
-        detection = _tiny_module(task="detect")
-        shared = set(detection.state_dict())
-        detection.load_state_dict({key: value for key, value in posed.state_dict().items() if key in shared})
-        images, targets = _posed_batch()
-
-        posed_total = posed.training_step((images, targets), 0)
-
-        detection_total = detection.training_step((images, _boxes_only(targets)), 0)
-        assert float(posed_total.detach()) == float(detection_total.detach())
-
     def test_oks_loss_built_for_keypoints_only_and_adds_no_checkpoint_key(self) -> None:
         """``oks_loss`` exists under ``"keypoints"`` with the metric's sigmas and no state-dict key.
 
-        Its sigma table is the ``val/oks_mAP`` evaluator's own, at the tiny head's ``K``
-        (A67's uniform value, since 3 is not COCO's 17), and it lives in a non-persistent
-        buffer so the pinned key set of ``test_task_state_dict_keeps_detection_keys``
-        is untouched.
+        Its sigma table is the ``val/oks_mAP`` evaluator's own, at the tiny head's ``K`` (A67's uniform value, since 3
+        is not COCO's 17), and it lives in a non-persistent buffer so the pinned key set of
+        ``test_task_state_dict_keeps_detection_keys`` is untouched.
         """
         posed = _tiny_module()
         detection = _tiny_module(task="detect")
@@ -410,8 +366,8 @@ class TestTrainingStep:
     def test_image_without_instances_beside_posed_image_trains(self) -> None:
         """``Targets.empty()``'s ``(0, 0, 2)`` points beside a posed image still give a real point term.
 
-        The empty image's point axis disagrees with the schema's, which is what the full
-        ``demo_keypoints`` run's validation tripped on; the training path must pad past it too.
+        The empty image's point axis disagrees with the schema's, which is what the full ``demo_keypoints`` run's
+        validation tripped on; the training path must pad past it too.
         """
         module = _tiny_module()
         recorder = LogRecorder()
@@ -426,11 +382,10 @@ class TestTrainingStep:
     def test_detection_batch_refused_rather_than_trained_on(self) -> None:
         """Point-free targets under ``task="keypoints"`` raise instead of training on nothing.
 
-        The silent-subset failure of this path, and the one it is most exposed to today: the
-        mosaic, the fused affine and mixup do not yet carry point channels, so an augmented
-        training run arrives here with boxes alone (the letterbox does carry them, so the
-        val loader is unaffected). Without the guard the RLE term would score zero points
-        forever while the loss curve looked entirely ordinary.
+        The silent-subset failure of this path, and the one it is most exposed to today: the mosaic, the fused affine
+        and mixup do not yet carry point channels, so an augmented training run arrives here with boxes alone (the
+        letterbox does carry them, so the val loader is unaffected). Without the guard the RLE term would score zero
+        points forever while the loss curve looked entirely ordinary.
         """
         module = _tiny_module()
         images, targets = _posed_batch()
@@ -441,9 +396,9 @@ class TestTrainingStep:
     def test_annotation_schema_of_wrong_width_refused(self) -> None:
         """A batch annotating a different ``K`` than the head predicts raises, naming both.
 
-        A head built for 17 points fed a 5-point annotation set is a misconfiguration, not a
-        broadcast: reading the first five points and inventing twelve is never the intended
-        behaviour, and every intermediate shape on the way there looks reasonable.
+        A head built for 17 points fed a 5-point annotation set is a misconfiguration, not a broadcast: reading the
+        first five points and inventing twelve is never the intended behaviour, and every intermediate shape on the way
+        there looks reasonable.
         """
         module = _tiny_module()
         images = torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE)
@@ -465,11 +420,10 @@ class TestVisibilityMasking:
         """Relocating a ``v == 0`` point across the canvas leaves the keypoint term identical.
 
         The end-to-end statement of A66, from ``Targets.keypoint_vis`` through
-        :func:`~lucid_yolo.ptl.module.pad_keypoints` and the positive gather into the loss.
-        A coordinate marked unlabeled is not a coordinate a human ever placed, so training
-        against it optimizes towards an arbitrary number — and the failure is invisible in
-        the loss curve, because the term stays perfectly finite either way. Moving the point
-        by 500 px makes any leak enormous rather than marginal.
+        :func:`~lucid_yolo.ptl.module.pad_keypoints` and the positive gather into the loss. A coordinate marked
+        unlabeled is not a coordinate a human ever placed, so training against it optimizes towards an arbitrary number
+        — and the failure is invisible in the loss curve, because the term stays perfectly finite either way. Moving
+        the point by 500 px makes any leak enormous rather than marginal.
         """
         visibility = torch.tensor([[2, 0, 2]])
         target = _posed_targets(1, visibility=visibility)
@@ -493,10 +447,9 @@ class TestVisibilityMasking:
     def test_padding_rows_arrive_unlabeled(self) -> None:
         """Padding an instance-ragged batch marks every padded point ``v == 0``.
 
-        The padding is inert in the loss by the *same* rule that excludes a genuinely
-        unlabeled point, rather than by a second mechanism that could later disagree with
-        it. A padding row filled with a visible zero coordinate would supervise anchors
-        towards the canvas corner.
+        The padding is inert in the loss by the *same* rule that excludes a genuinely unlabeled point, rather than by a
+        second mechanism that could later disagree with it. A padding row filled with a visible zero coordinate would
+        supervise anchors towards the canvas corner.
         """
         targets = [_posed_targets(2), _posed_targets(1)]
 
@@ -514,8 +467,8 @@ class TestPadKeypoints:
     def test_pads_to_batch_maximum_on_instance_axis(self) -> None:
         """Every image is padded to the batch's largest instance count, keeping its own rows.
 
-        The instance axis is shared with ``boxes`` and ``labels`` (WP-120), which is the only
-        reason the assignment computed on the boxes may be reused to gather point targets.
+        The instance axis is shared with ``boxes`` and ``labels`` (WP-120), which is the only reason the assignment
+        computed on the boxes may be reused to gather point targets.
         """
         first, second = _posed_targets(2), _posed_targets(1)
 
@@ -528,8 +481,8 @@ class TestPadKeypoints:
     def test_count_mismatch_hard_error(self) -> None:
         """An image whose point-set count differs from its instance count raises, naming the image.
 
-        Whichever way such a batch were reconciled, some anchor would end up supervised
-        towards another instance's pose — so there is no reading of it to fall back on.
+        Whichever way such a batch were reconciled, some anchor would end up supervised towards another instance's pose
+        — so there is no reading of it to fall back on.
         """
         with pytest.raises(ValueError, match="image 0 carries 1 instances but 0 keypoint sets"):
             pad_keypoints([Targets(boxes=torch.zeros(1, 4), labels=torch.zeros(1, dtype=torch.int64))])
@@ -537,8 +490,8 @@ class TestPadKeypoints:
     def test_images_disagreeing_on_point_count_refused(self) -> None:
         """Two images annotating different ``K`` raise rather than padding to the wider one.
 
-        No single head predicts both counts, so padding the narrower image would invent
-        points and marking them ``v == 0`` would quietly train a partial schema.
+        No single head predicts both counts, so padding the narrower image would invent points and marking them ``v ==
+        0`` would quietly train a partial schema.
         """
         wide = _posed_targets(1)
         narrow = Targets(
@@ -554,8 +507,8 @@ class TestPadKeypoints:
     def test_all_empty_batch_pads_to_zero_point_axis(self) -> None:
         """A batch holding no instances yields zero-width tensors rather than raising.
 
-        The finite no-ground-truth case :func:`~lucid_yolo.ptl.module.pad_targets` already
-        has; the step's own zero-positive branch is what keeps this shape away from the loss.
+        The finite no-ground-truth case :func:`~lucid_yolo.ptl.module.pad_targets` already has; the step's own
+        zero-positive branch is what keeps this shape away from the loss.
         """
         coords, visibility = pad_keypoints([Targets.empty(), Targets.empty()])
 
@@ -589,15 +542,14 @@ def _keypoint_context(anchor_points: Tensor, strides: Tensor, gt_keypoints: Tens
 def test_keypoint_term_follows_assignment_not_positive_order() -> None:
     """Positive ``k``'s points are scored against ``gt_index[k]``, not against instance ``k``.
 
-    The decisive pairing test, and the one no loss value can stand in for: pairing an anchor
-    with the wrong instance produces a perfectly finite, perfectly plausible number. Each
-    positive is given the raw offsets that decode *exactly* onto the instance its ``gt_index``
-    names, so the assignment pairing must reproduce the loss of a flawless prediction while
-    the naive positional pairing — the same two point sets, merely swapped — must not.
+    The decisive pairing test, and the one no loss value can stand in for: pairing an anchor with the wrong instance
+    produces a perfectly finite, perfectly plausible number. Each positive is given the raw offsets that decode
+    *exactly* onto the instance its ``gt_index`` names, so the assignment pairing must reproduce the loss of a flawless
+    prediction while the naive positional pairing — the same two point sets, merely swapped — must not.
 
-    The reference is the module's own loss evaluated at zero residual rather than a
-    hand-computed constant, because the flow's contribution at initialisation is a property
-    of the seeded weights and asserting a number for it would be asserting the seed.
+    The reference is the module's own loss evaluated at zero residual rather than a hand-computed constant, because the
+    flow's contribution at initialisation is a property of the seeded weights and asserting a number for it would be
+    asserting the seed.
     """
     module = _tiny_module()
     anchor_points = torch.tensor([[8.0, 8.0], [24.0, 8.0], [8.0, 24.0], [24.0, 24.0]])
@@ -605,8 +557,8 @@ def test_keypoint_term_follows_assignment_not_positive_order() -> None:
     first = torch.tensor([[40.0, 16.0], [56.0, 24.0], [16.0, 48.0]])
     second = torch.tensor([[96.0, 88.0], [72.0, 32.0], [120.0, 64.0]])
     gt_keypoints = torch.stack([first, second]).unsqueeze(0)  # (1, 2, K, 2)
-    # Anchor 0 is told to predict instance 1's points and anchor 2 instance 0's, matching the
-    # gt_index below; anchors 1 and 3 are negatives whose values are never gathered.
+    # Anchor 0 is told to predict instance 1's points and anchor 2 instance 0's, matching the gt_index below; anchors 1
+    # and 3 are negatives whose values are never gathered.
     wanted = torch.stack([second, torch.zeros_like(first), first, torch.zeros_like(first)]).unsqueeze(0)
     raw_points = (wanted - anchor_points.view(1, 4, 1, 2)) / strides.view(1, 4, 1, 1)
     raw_sigma = torch.zeros_like(raw_points)
@@ -645,9 +597,9 @@ class TestLoaderTransport:
     def test_keypoints_survive_packed_transport(self) -> None:
         """Packing and unpacking a posed batch returns the point channels tensor-for-tensor.
 
-        Without this the ``keypoint_targets`` flag would be the worst kind of dead code: the
-        reader would parse the points and the transport would drop them, leaving a run that
-        trains on nothing while every shape downstream still looks right.
+        Without this the ``keypoint_targets`` flag would be the worst kind of dead code: the reader would parse the
+        points and the transport would drop them, leaving a run that trains on nothing while every shape downstream
+        still looks right.
         """
         targets = [_posed_targets(2), _posed_targets(1)]
         images = torch.rand(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
@@ -661,10 +613,9 @@ class TestLoaderTransport:
     def test_instance_free_image_packs_beside_annotated_one(self) -> None:
         """A batch mixing posed and empty images packs, and each side restores to its own form.
 
-        The empty image's canonical ``(0, 0, 2)`` point tensor disagrees with the batch's
-        ``K`` on an axis ``torch.cat`` compares, so this is the case a naive concatenation
-        fails on — and it is the ordinary case, since an image with no annotated object is
-        common in every real split.
+        The empty image's canonical ``(0, 0, 2)`` point tensor disagrees with the batch's ``K`` on an axis
+        ``torch.cat`` compares, so this is the case a naive concatenation fails on — and it is the ordinary case, since
+        an image with no annotated object is common in every real split.
         """
         targets = [_posed_targets(2), Targets.empty()]
         images = torch.rand(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
@@ -678,8 +629,7 @@ class TestLoaderTransport:
     def test_detection_batch_carries_no_point_axis(self) -> None:
         """A batch with no point annotations packs a zero-width keypoint axis, costing nothing.
 
-        The transport is shared by every task, so the pose channels must not make a detection
-        batch bigger than it was.
+        The transport is shared by every task, so the pose channels must not make a detection batch bigger than it was.
         """
         targets = _boxes_only([_posed_targets(2), _posed_targets(1)])
         images = torch.rand(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
@@ -692,8 +642,8 @@ class TestLoaderTransport:
     def test_differing_point_counts_refused_naming_both(self) -> None:
         """Two images whose point sets disagree on ``K`` are refused with both counts named.
 
-        No single head predicts both, so the batch cannot pack. The refusal is the same ``K``
-        read ``Targets.concat`` makes, not a shape error from inside ``torch.cat``.
+        No single head predicts both, so the batch cannot pack. The refusal is the same ``K`` read ``Targets.concat``
+        makes, not a shape error from inside ``torch.cat``.
         """
         five_points = Targets(
             boxes=torch.tensor([[0.0, 0.0, 8.0, 8.0]]),
@@ -708,9 +658,9 @@ class TestLoaderTransport:
             collate_detection(list(zip(images, targets, strict=True)))
 
 
-#: The animal fixture's own left/right swap, as named by its 16-point category schema
-#: (``front_elbow_left``/``front_elbow_right`` and the three limb pairs after it). Written
-#: out here rather than recomputed, so the test states the answer it expects.
+#: The animal fixture's own left/right swap, as named by its 16-point category schema (``front_elbow_left``/
+#: ``front_elbow_right`` and the three limb pairs after it). Written out here rather than recomputed, so the test
+#: states the answer it expects.
 _ANIMAL_FLIP_PAIRS = [(8, 9), (10, 11), (12, 13), (14, 15)]
 #: Small letterbox side keeping the datamodule construction cheap.
 _DM_IMG_SIZE = 64
@@ -745,12 +695,11 @@ class TestFlipPairWiring:
     def test_dataset_schema_reaches_flip(self, keypoints_fixture_dir: Path) -> None:
         """The train pipeline's ``HorizontalFlip`` is constructed with the reader's derived pairs.
 
-        This is the assertion whose absence let the bug sit unnoticed. The flip fires at
-        ``fliplr=0.5`` on every training sample, and constructing it with no pairs is not a
-        crash or a shape error — it mirrors coordinates while leaving identities in place, so
-        every ``front_elbow_left`` in a mirrored sample is supervised toward the point
-        ``front_elbow_right`` now occupies. That trains, converges to a left/right-confused
-        head, and no gate in the repo reports it. Only checking the value arrives can.
+        This is the assertion whose absence let the bug sit unnoticed. The flip fires at ``fliplr=0.5`` on every
+        training sample, and constructing it with no pairs is not a crash or a shape error — it mirrors coordinates
+        while leaving identities in place, so every ``front_elbow_left`` in a mirrored sample is supervised toward the
+        point ``front_elbow_right`` now occupies. That trains, converges to a left/right-confused head, and no gate in
+        the repo reports it. Only checking the value arrives can.
         """
         datamodule = _keypoint_datamodule(keypoints_fixture_dir)
 
@@ -761,10 +710,9 @@ class TestFlipPairWiring:
     def test_detection_run_passes_no_pairing(self, keypoints_fixture_dir: Path) -> None:
         """Without ``keypoint_targets`` the flip receives ``None`` and only mirrors coordinates.
 
-        The same fixture read as plain detection carries no point channel for a swap to act
-        on. ``None`` has to keep meaning "mirror the coordinates, swap nothing" rather than
-        becoming an error, since that is also the correct answer for any genuinely
-        symmetry-free keypoint schema.
+        The same fixture read as plain detection carries no point channel for a swap to act on. ``None`` has to keep
+        meaning "mirror the coordinates, swap nothing" rather than becoming an error, since that is also the correct
+        answer for any genuinely symmetry-free keypoint schema.
         """
         datamodule = _keypoint_datamodule(keypoints_fixture_dir, keypoint_targets=False)
 
@@ -775,11 +723,10 @@ class TestFlipPairWiring:
     def test_points_survive_full_train_pipeline(self, keypoints_fixture_dir: Path) -> None:
         """A fully augmented training sample still carries one point set per surviving box.
 
-        Every geometric stage on this path — mosaic, the fused affine, mixup, copy-paste,
-        the flip — rebuilds its ``Targets``, and each rebuild is a place the point channel
-        can be silently dropped. The affine's omission is what broke the keypoint gate, and
-        the symptom appeared only later, at ``pad_keypoints``. Asserting on the assembled
-        sample catches the next such omission at its own stage.
+        Every geometric stage on this path — mosaic, the fused affine, mixup, copy-paste, the flip — rebuilds its
+        ``Targets``, and each rebuild is a place the point channel can be silently dropped. The affine's omission is
+        what broke the keypoint gate, and the symptom appeared only later, at ``pad_keypoints``. Asserting on the
+        assembled sample catches the next such omission at its own stage.
         """
         datamodule = _keypoint_datamodule(keypoints_fixture_dir)
         datamodule.setup("fit")
@@ -793,21 +740,19 @@ class TestFlipPairWiring:
 class TestBoxFrameNormalization:
     """A71: the frame the RLE residual is formed in.
 
-    ``decode_keypoints`` emits absolute input pixels and R14 bounds ``sigma_hat`` into
-    ``(0, 1)`` with a sigmoid, so scoring the two together unmodified makes the smallest
-    expressible residual for a 40 px error equal to 40. These pin the mapping itself and
-    the property that motivated it — that what the loss actually receives on a real batch
-    is ``O(1)`` and not ``O(10^3)``.
+    ``decode_keypoints`` emits absolute input pixels and R14 bounds ``sigma_hat`` into ``(0, 1)`` with a sigmoid, so
+    scoring the two together unmodified makes the smallest expressible residual for a 40 px error equal to 40. These pin
+    the mapping itself and the property that motivated it — that what the loss actually receives on a real batch is
+    ``O(1)`` and not ``O(10^3)``.
     """
 
     def test_annotations_resolve_at_runtime(self) -> None:
         """The public export's annotations resolve, so annotation-reading callers see ``Tensor``.
 
-        ``typing.get_type_hints`` evaluates the postponed annotations against the defining
-        module's globals; a ``Tensor`` imported for type checking only would leave the name
-        unbound there and raise ``NameError`` for every caller that reads them (a doc
-        generator, a runtime type checker), which the function did not do while it lived in
-        :mod:`lucid_yolo.ptl.module`.
+        ``typing.get_type_hints`` evaluates the postponed annotations against the defining module's globals; a
+        ``Tensor`` imported for type checking only would leave the name unbound there and raise ``NameError`` for every
+        caller that reads them (a doc generator, a runtime type checker), which the function did not do while it lived
+        in :mod:`lucid_yolo.ptl.module`.
         """
         hints = typing.get_type_hints(lucid_yolo.ptl.normalize_keypoints_to_box)
 
@@ -825,8 +770,8 @@ class TestBoxFrameNormalization:
     def test_each_axis_uses_own_extent(self) -> None:
         """Width normalizes ``x`` and height normalizes ``y``, not one shared object scale.
 
-        The distinction is invisible on a square box and is the whole content of the
-        choice on an elongated one, so the box here is deliberately 4:1.
+        The distinction is invisible on a square box and is the whole content of the choice on an elongated one, so the
+        box here is deliberately 4:1.
         """
         points = torch.tensor([[[45.0, 10.0]]])
         boxes = torch.tensor([[5.0, 0.0, 85.0, 20.0]])  # 80 wide, 20 tall
@@ -838,9 +783,8 @@ class TestBoxFrameNormalization:
     def test_point_outside_box_leaves_unit_square(self) -> None:
         """A70's off-canvas points must stay representable rather than being clipped here.
 
-        This function is a change of frame and nothing else: a point the affine pushed
-        outside its box normalizes to a value outside ``[0, 1]``, which is the honest
-        answer and the one the loss is expected to cope with.
+        This function is a change of frame and nothing else: a point the affine pushed outside its box normalizes to a
+        value outside ``[0, 1]``, which is the honest answer and the one the loss is expected to cope with.
         """
         points = torch.tensor([[[-30.0, 60.0]]])
         boxes = torch.tensor([[0.0, 0.0, 10.0, 10.0]])
@@ -852,8 +796,8 @@ class TestBoxFrameNormalization:
     def test_degenerate_box_floors_at_one_pixel_instead_of_dividing_by_zero(self) -> None:
         """A zero-extent box returns a finite number, not an infinity.
 
-        A sub-pixel box carries no pose to normalize by. The floor is not a correctness
-        claim about such a box, only a refusal to answer a finite annotation with ``inf``.
+        A sub-pixel box carries no pose to normalize by. The floor is not a correctness claim about such a box, only a
+        refusal to answer a finite annotation with ``inf``.
         """
         points = torch.tensor([[[7.0, 3.0]]])
         boxes = torch.tensor([[5.0, 3.0, 5.0, 3.0]])
@@ -866,10 +810,9 @@ class TestBoxFrameNormalization:
     def test_residual_loss_receives_order_one(self) -> None:
         """The property the frame exists for, measured where it broke: on a real step.
 
-        Un-normalized, this batch's median residual is in the hundreds and the flow
-        overflows within two steps. The assertion is deliberately loose — the claim is an
-        order of magnitude, not a value — because a tight bound here would pin the head's
-        initialization rather than the frame.
+        Un-normalized, this batch's median residual is in the hundreds and the flow overflows within two steps. The
+        assertion is deliberately loose — the claim is an order of magnitude, not a value — because a tight bound here
+        would pin the head's initialization rather than the frame.
         """
         residuals: list[Tensor] = []
         module = _tiny_module()
@@ -880,11 +823,8 @@ class TestBoxFrameNormalization:
                 residuals.append(((mu_gt - mu_hat) / torch.sigmoid(sigma_raw)).detach().abs())
             return original(self, mu_hat, sigma_raw, mu_gt, visibility)
 
-        RLELoss.forward = record  # type: ignore[method-assign]
-        try:
+        with patch.object(RLELoss, "forward", record):
             module.training_step(_posed_batch(), 0)
-        finally:
-            RLELoss.forward = original  # type: ignore[method-assign]
 
         assert residuals, "the keypoint term never reached the loss"
         assert float(torch.cat([r.reshape(-1) for r in residuals]).median()) < 10.0
@@ -893,23 +833,19 @@ class TestBoxFrameNormalization:
 class TestKeypointValidation:
     """``val/oks_mAP`` (WP-137): the epoch-level keypoint metric det/seg/obb already had.
 
-    Phase 12 wired keypoints into training (WP-132) and into the standalone
-    ``lucid-eval`` report (WP-134), but never into the training loop's own
-    per-epoch validation — a ``task="keypoints"`` module logged ``val/mAP``
-    for its box branch alone, the same number a plain detection module logs,
-    with no signal at all for the branch the task exists to train. These tests
-    aim at that wiring, the same target this file's own docstring states for
-    every other class here: the components (:func:`~lucid_yolo.eval.coco_eval.evaluate_keypoints`,
-    :func:`~lucid_yolo.eval.coco_eval.gather_keypoints`) are already covered where
-    they live.
+    Phase 12 wired keypoints into training (WP-132) and into the standalone ``lucid-eval`` report (WP-134), but never
+    into the training loop's own per-epoch validation — a ``task="keypoints"`` module logged ``val/mAP`` for its box
+    branch alone, the same number a plain detection module logs, with no signal at all for the branch the task exists
+    to train. These tests aim at that wiring, the same target this file's own docstring states for every other class
+    here: the components (:func:`~lucid_yolo.eval.coco_eval.evaluate_keypoints`,
+    :func:`~lucid_yolo.eval.coco_eval.gather_keypoints`) are already covered where they live.
     """
 
     def test_validation_step_accumulates_and_logs_val_oks_map(self) -> None:
         """One validation step feeds both buffers; epoch end logs and clears them.
 
-        Mirrors :attr:`DetectionLitModule._val_rotated`'s own accumulate-then-
-        score-once shape (WP-088): OKS is one whole-document matching, not a
-        per-batch running average, so there is nothing to update incrementally.
+        Mirrors :attr:`DetectionLitModule._val_rotated`'s own accumulate-then-score-once shape (WP-088): OKS is one
+        whole-document matching, not a per-batch running average, so there is nothing to update incrementally.
         """
         module = _tiny_module()
         module.eval()
@@ -931,9 +867,9 @@ class TestKeypointValidation:
     def test_validation_step_accepts_image_without_instances(self) -> None:
         """An image with no person beside a posed one is scored, not a crash in the host transfer.
 
-        A COCO keypoint loader answers an image without annotations with ``Targets.empty()``, whose
-        ``(0, 0, 2)`` keypoints disagree with the batch's point count. The full ``demo_keypoints`` run
-        met exactly that batch in its validation sanity check.
+        A COCO keypoint loader answers an image without annotations with ``Targets.empty()``, whose ``(0, 0, 2)``
+        keypoints disagree with the batch's point count. The full ``demo_keypoints`` run met exactly that batch in its
+        validation sanity check.
         """
         module = _tiny_module()
         module.eval()
@@ -948,12 +884,11 @@ class TestKeypointValidation:
         assert stored == [(0, 0, 2), (1, _NUM_KEYPOINTS, 2)]
         assert math.isfinite(module.log.values["val/oks_mAP"])
 
-    def test_val_map_stays_beside_val_oks_map_not_replaced_by_it(self) -> None:
+    def test_val_map_stays_beside_val_oks_map(self) -> None:
         """A keypoints module logs both ``val/mAP`` and ``val/oks_mAP``, unlike ``"obb"``.
 
-        The box branch of a keypoints module is a real, orthogonal detector (the
-        person category), so its mAP answers a different question than OKS does —
-        the ``"segment"`` relationship to ``val/mAP``, not ``"obb"``'s WP-102
+        The box branch of a keypoints module is a real, orthogonal detector (the person category), so its mAP answers a
+        different question than OKS does — the ``"segment"`` relationship to ``val/mAP``, not ``"obb"``'s WP-102
         replacement of it.
         """
         module = _tiny_module()
@@ -967,34 +902,28 @@ class TestKeypointValidation:
         assert "val/mAP" in module.log.values
         assert "val/oks_mAP" in module.log.values
 
-    def test_sigma_choice_matches_coco_schema_only_at_seventeen_points(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize(
+        ("num_keypoints", "expected_sigmas"),
+        [
+            pytest.param(_NUM_KEYPOINTS, (SYMBOL_KEYPOINT_OKS_SIGMA,) * _NUM_KEYPOINTS, id="uniform-below-seventeen"),
+            pytest.param(len(COCO_KEYPOINT_OKS_SIGMAS), COCO_KEYPOINT_OKS_SIGMAS, id="coco-table-at-seventeen"),
+        ],
+    )
+    @patch.object(validation_metrics, "evaluate_keypoints", return_value={"AP_all": 0.0})
+    def test_sigma_choice_matches_coco_schema_only_at_seventeen_points(
+        self, evaluate_keypoints: MagicMock, num_keypoints: int, expected_sigmas: tuple[float, ...]
+    ) -> None:
         """17 points draws COCO's own table; any other count draws A67's uniform sigma.
 
-        ``num_keypoints == 17`` is the only count that could mean COCO's human
-        schema; every other count is this project's own dataset (WP-121b's
-        animal fixtures, R21's symbol schema), for which no per-point table has
-        ever been measured (A67) — the same choice ``scripts/overfit_micro.py``
-        already makes for its own 7-point fixture, now read from one place.
+        ``num_keypoints == 17`` is the only count that could mean COCO's human schema; every other count is this
+        project's own dataset (WP-121b's animal fixtures, R21's symbol schema), for which no per-point table has ever
+        been measured (A67) — the same choice ``scripts/overfit_micro.py`` already makes for its own 7-point fixture,
+        now read from one place.
         """
-        captured: dict[str, object] = {}
-
-        def _record_sigmas(preds: object, targets: object, sigmas: object = None, **kwargs: object) -> dict[str, float]:
-            del preds, targets, kwargs
-            captured["sigmas"] = sigmas
-            return {"AP_all": 0.0}
-
-        monkeypatch.setattr(validation_metrics, "evaluate_keypoints", _record_sigmas)
-        module = _tiny_module()  # built at _NUM_KEYPOINTS == 3
+        module = tiny_module(task="keypoints", num_keypoints=num_keypoints)
+        module.log = LogRecorder()  # type: ignore[method-assign]
         module._val_keypoints.update([], [], [])
 
         module._log_oks_map()
 
-        assert tuple(captured["sigmas"]) == (SYMBOL_KEYPOINT_OKS_SIGMA,) * _NUM_KEYPOINTS
-
-        module = tiny_module(task="keypoints", num_keypoints=len(COCO_KEYPOINT_OKS_SIGMAS))
-        module.log = LogRecorder()
-        module._val_keypoints.update([], [], [])
-
-        module._log_oks_map()
-
-        assert tuple(captured["sigmas"]) == COCO_KEYPOINT_OKS_SIGMAS
+        assert tuple(evaluate_keypoints.call_args.kwargs["sigmas"]) == expected_sigmas

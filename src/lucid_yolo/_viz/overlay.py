@@ -1,75 +1,60 @@
 # SPDX-License-Identifier: Apache-2.0
 """Draw a checkpoint's predictions, and the ground truth beside them (WP-067, WP-152, WP-189).
 
-A checkpoint, an image, and a figure showing what the model actually answered — boxes
-for a ``detect`` checkpoint, boxes and instance masks for a ``segment`` one, rotated
-quadrilaterals for an ``obb`` one, boxes with their point sets for a ``keypoints`` one.
-The prediction itself is not recomputed here in any form:
-:func:`~lucid_yolo.predict.predict_image`,
-:func:`~lucid_yolo.predict.predict_segmentation`,
-:func:`~lucid_yolo.predict.predict_oriented` and
-:func:`~lucid_yolo.predict.predict_keypoints` answer, and this module draws their answer.
+A checkpoint, an image, and a figure showing what the model actually answered — boxes for a ``detect`` checkpoint,
+boxes and instance masks for a ``segment`` one, rotated quadrilaterals for an ``obb`` one, boxes with their point sets
+for a ``keypoints`` one. The prediction itself is not recomputed here in any form:
+:func:`~lucid_yolo.predict.predict_image`, :func:`~lucid_yolo.predict.predict_segmentation`,
+:func:`~lucid_yolo.predict.predict_oriented` and :func:`~lucid_yolo.predict.predict_keypoints` answer, and this module
+draws their answer.
 
-Four drawing functions rather than one that switches, because the four answers are four
-different shapes and the split is the one the library already makes: a ``(N, 6)``
-A9 tuple, that tuple beside a row-aligned mask stack, a ``(N, 7)`` A45 tuple whose
-box columns are a centre and two extents rather than corners, and that A9 tuple beside a
-``(N, K, 2)`` point stack. Each takes an
-already-computed prediction and an image array, so a drawing can be asserted without an
-inference — which is what makes the geometry below testable at all.
+Four drawing functions rather than one that switches, because the four answers are four different shapes and the
+split is the one the library already makes: a ``(N, 6)`` A9 tuple, that tuple beside a row-aligned mask stack, a
+``(N, 7)`` A45 tuple whose box columns are a centre and two extents rather than corners, and that A9 tuple beside a
+``(N, K, 2)`` point stack. Each takes an already-computed prediction and an image array, so a drawing can be asserted
+without an inference — which is what makes the geometry below testable at all.
 
-**A rotated box is drawn as a rotated polygon.** The A45 tuple's first four columns look
-like an ``xyxy`` box and are not one, so the tempting ``[:, :4]`` slice draws a plausible
-upright rectangle that is not the object the model reported — the exact misreading
-:func:`~lucid_yolo.predict.predict_oriented` warns about, and one that survives review
+**A rotated box is drawn as a rotated polygon.** The A45 tuple's first four columns look like an ``xyxy`` box and are
+not one, so the tempting ``[:, :4]`` slice draws a plausible upright rectangle that is not the object the model
+reported — the exact misreading :func:`~lucid_yolo.predict.predict_oriented` warns about, and one that survives review
 because the picture looks right. The corners come from
-:func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons`, the same function the oriented
-report and the DOTA tile writer state an object with, so a drawn ring and a written ring
-are the same four points.
+:func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons`, the same function the oriented report and the DOTA tile
+writer state an object with, so a drawn ring and a written ring are the same four points.
 
-**Colour is a function of the class index alone.** A palette walked in encounter order
-would give the same class two colours in two pictures — and two classes the same colour
-in one — which is exactly what a reader comparing two predictions is not expecting. Class
-``k`` is always :func:`class_color`'s ``k``.
+**Colour is a function of the class index alone.** A palette walked in encounter order would give the same class two
+colours in two pictures — and two classes the same colour in one — which is exactly what a reader comparing two
+predictions is not expecting. Class ``k`` is always :func:`class_color`'s ``k``.
 
-**Ground truth is dashed and never filled** (:func:`draw_ground_truth`). A prediction and
-its label share a picture in the notebooks, and the two have to be tellable apart at a
-glance without a legend: predictions are solid outlines and translucent masks, labels
-are dashed outlines and hollow markers, in the same class colours. The label geometry is
-what :class:`~lucid_yolo.data.coco.CocoDetectionDataset` yields — the reader the
-training path uses — so a drawn label is the target the model trained against, not a
-second parse of the JSON.
+**Ground truth is dashed and never filled** (:func:`draw_ground_truth`). A prediction and its label share a picture in
+the notebooks, and the two have to be tellable apart at a glance without a legend: predictions are solid outlines and
+translucent masks, labels are dashed outlines and hollow markers, in the same class colours. The label geometry is what
+:class:`~lucid_yolo.data.coco.CocoDetectionDataset` yields — the reader the training path uses — so a drawn label is the
+target the model trained against, not a second parse of the JSON.
 
-This is not ``scripts/dump_debug_grid.py`` re-spelled. That one rasterizes *ground truth*
-through the augmentation pipeline into a contact sheet, in one colour, to answer whether
-the augmentation is sane; this one draws *predictions* on one picture, coloured by class
-and labelled by score, to answer what a checkpoint sees. Neither's drawing code is usable
-from the other: theirs is tensor-in, tensor-out raster compositing, and this one emits
-matplotlib artists, which is what makes it assertable without golden images.
+This is not ``scripts/dump_debug_grid.py`` re-spelled. That one rasterizes *ground truth* through the augmentation
+pipeline into a contact sheet, in one colour, to answer whether the augmentation is sane; this one draws *predictions*
+on one picture, coloured by class and labelled by score, to answer what a checkpoint sees. Neither's drawing code is
+usable from the other: theirs is tensor-in, tensor-out raster compositing, and this one emits matplotlib artists, which
+is what makes it assertable without golden images.
 
-Nothing here selects a backend. ``matplotlib.use("Agg")`` is a process-wide setting
-that switches a notebook *away* from its inline display, so the headless choice belongs
-to ``scripts/draw_predictions.py`` and the test session that need it, not to a module a
-notebook imports.
+Nothing here selects a backend. ``matplotlib.use("Agg")`` is a process-wide setting that switches a notebook *away*
+from its inline display, so the headless choice belongs to ``scripts/draw_predictions.py`` and the test session that
+need it, not to a module a notebook imports.
 
 Assumptions:
-    ``RenderOptions.task`` defaults to **the checkpoint's own task**, as ``lucid-predict``
-    reads it, rather than being required. A named task selects an entry point, and the
-    library then refuses a checkpoint that does not match it by name (a ``segment``
-    checkpoint drawn as ``detect`` would answer plausibly with its mask branch unread),
-    so the option can narrow the choice and cannot silently mislead.
+    ``RenderOptions.task`` defaults to **the checkpoint's own task**, as ``lucid-predict`` reads it, rather than being
+    required. A named task selects an entry point, and the library then refuses a checkpoint that does not match it by
+    name (a ``segment`` checkpoint drawn as ``detect`` would answer plausibly with its mask branch unread), so the
+    option can narrow the choice and cannot silently mislead.
 
-    Labels are contiguous class **indices**, not names: a checkpoint carries
-    ``num_classes`` and no names, and a single image carries no annotation file to map
-    them through. A caller who knows the dataset owns that mapping, exactly as they do for
-    ``lucid-predict``'s report.
+    Labels are contiguous class **indices**, not names: a checkpoint carries ``num_classes`` and no names, and a single
+    image carries no annotation file to map them through. A caller who knows the dataset owns that mapping, exactly as
+    they do for ``lucid-predict``'s report.
 
-    The confidence cut is applied with a strict ``>``, the comparison
-    :func:`~lucid_yolo.predict.predict_image` filters its own rows with. The drawing
-    functions repeat it because they also accept a tuple that was never filtered — one
-    read back from a report written at ``--conf_threshold 0`` — and two surfaces that
-    disagree about whether a score *equal* to the threshold is in the picture would be
-    worse than either answer.
+    The confidence cut is applied with a strict ``>``, the comparison :func:`~lucid_yolo.predict.predict_image` filters
+    its own rows with. The drawing functions repeat it because they also accept a tuple that was never filtered — one
+    read back from a report written at ``--conf_threshold 0`` — and two surfaces that disagree about whether a score
+    *equal* to the threshold is in the picture would be worse than either answer.
 """
 
 from __future__ import annotations
@@ -118,15 +103,13 @@ if TYPE_CHECKING:
     ImageArray = NDArray[np.uint8]
 
 
-#: Class palette: ten qualitative hues indexed by class id, so the colour of class ``k``
-#: is a property of ``k`` and of nothing else in the picture. Classes past the tenth
-#: repeat a hue rather than fading into a continuous ramp — a reader can tell two adjacent
-#: hues apart, which is the property a sequential colormap loses at the tenth class.
+#: Class palette: ten qualitative hues indexed by class id, so the colour of class ``k`` is a property of ``k`` and of
+#: nothing else in the picture. Classes past the tenth repeat a hue rather than fading into a continuous ramp — a
+#: reader can tell two adjacent hues apart, which is the property a sequential colormap loses at the tenth class.
 _PALETTE = matplotlib.colormaps["tab10"]
 
-#: Opacity of an instance mask overlay. High enough to read as a filled region, low enough
-#: that the object under it stays visible — the mask is being checked *against* the
-#: picture, so hiding the picture defeats the figure.
+#: Opacity of an instance mask overlay. High enough to read as a filled region, low enough that the object under it
+#: stays visible — the mask is being checked *against* the picture, so hiding the picture defeats the figure.
 _MASK_ALPHA = 0.45
 
 #: Outline width in points for a box, a rotated polygon, and the label's own frame.
@@ -136,47 +119,44 @@ _OUTLINE_WIDTH = 1.6
 _LABEL_FONT_SIZE = 7.0
 _LABEL_PAD = 0.2
 
-#: Relative luminance above which a class colour needs black text rather than white
-#: (ITU-R BT.601 weights). Half of ``tab10`` is light enough to swallow white text.
+#: Relative luminance above which a class colour needs black text rather than white (ITU-R BT.601 weights).
+#: Half of ``tab10`` is light enough to swallow white text.
 _LUMINANCE_WEIGHTS = (0.299, 0.587, 0.114)
 _LIGHT_COLOUR_LUMINANCE = 0.6
 
-#: Figure width in inches; the height follows the image's own aspect ratio, so a drawn
-#: box has the shape it has in the picture rather than the shape a fixed canvas gives it.
+#: Figure width in inches; the height follows the image's own aspect ratio, so a drawn box has the shape it has in the
+#: picture rather than the shape a fixed canvas gives it.
 _FIGURE_WIDTH = 7.5
 
-#: Panel geometry of a :func:`show_predictions` grid, in inches per column and per row.
-#: Each panel keeps its image's aspect inside that cell (``imshow`` never stretches), so
-#: the cell is a budget rather than a shape.
+#: Panel geometry of a :func:`show_predictions` grid, in inches per column and per row. Each panel keeps its image's
+#: aspect inside that cell (``imshow`` never stretches), so the cell is a budget rather than a shape.
 _GRID_COLUMN_WIDTH, _GRID_ROW_HEIGHT = 5.0, 4.0
 
-#: Column count of the A45 oriented tuple ``[cx, cy, w, h, theta, score, class]``: the
-#: five box columns, then the two the A9 tuple also ends with.
+#: Column count of the A45 oriented tuple ``[cx, cy, w, h, theta, score, class]``: the five box columns, then the two
+#: the A9 tuple also ends with.
 _RBOX_WIDTH = RBOX_COLUMNS + 2
 
-#: Column index of an oriented row's score and class, which sit two columns right of the
-#: A9 tuple's because the box is a centre, two extents and an angle rather than corners.
+#: Column index of an oriented row's score and class, which sit two columns right of the A9 tuple's because the box is
+#: a centre, two extents and an angle rather than corners.
 _RBOX_SCORE_COLUMN = RBOX_COLUMNS
 _RBOX_LABEL_COLUMN = RBOX_COLUMNS + 1
 
-#: Confidence cut the drawing functions default to: draw every row handed over. The rows
-#: :mod:`lucid_yolo.predict` returns are already filtered, and a strict ``>`` against zero
-#: still drops the score-zero padding rows a report written at ``--conf_threshold 0``
-#: carries.
+#: Confidence cut the drawing functions default to: draw every row handed over. The rows :mod:`lucid_yolo.predict`
+#: returns are already filtered, and a strict ``>`` against zero still drops the score-zero padding rows a report
+#: written at ``--conf_threshold 0`` carries.
 _DRAW_EVERYTHING = 0.0
 
-#: Radius in pixels of a drawn keypoint marker. Fixed rather than scaled to the box: a
-#: pose figure is read by whether a point sits on its feature, and a marker that grew with
-#: the object would hide exactly the small-object error worth seeing.
+#: Radius in pixels of a drawn keypoint marker. Fixed rather than scaled to the box: a pose figure is read by whether
+#: a point sits on its feature, and a marker that grew with the object would hide exactly the small-object error
+#: worth seeing.
 _KEYPOINT_RADIUS = 2.0
 
 #: Line width of a skeleton edge, thinner than a box edge so the two read apart.
 _SKELETON_WIDTH = 1.0
 
-#: How ground truth is drawn apart from a prediction: dashed where a prediction is solid,
-#: and never filled. The dash pattern is matplotlib's named ``"--"``; a marker is a ring
-#: rather than a disc. Both are the property the notebooks read — same colour, other
-#: line style — so a reader can tell the two layers apart without a legend.
+#: How ground truth is drawn apart from a prediction: dashed where a prediction is solid, and never filled. The dash
+#: pattern is matplotlib's named ``"--"``; a marker is a ring rather than a disc. Both are the property the notebooks
+#: read — same colour, other line style — so a reader can tell the two layers apart without a legend.
 _GROUND_TRUTH_LINESTYLE = "--"
 _GROUND_TRUTH_LINEWIDTH = 1.2
 
@@ -184,9 +164,9 @@ _GROUND_TRUTH_LINEWIDTH = 1.2
 def class_color(label: int) -> tuple[float, float, float]:
     """Return the RGB colour class ``label`` is always drawn in.
 
-    A pure function of the class index, which is the whole point: two figures drawn from
-    two checkpoints of the same dataset use the same colour for the same class, and a
-    class missing from one image does not shift the colours of the classes around it.
+    A pure function of the class index, which is the whole point: two figures drawn from two checkpoints of the same
+    dataset use the same colour for the same class, and a class missing from one image does not shift the colours of
+    the classes around it.
 
     Args:
         label: Contiguous class index. Indices past the palette's length wrap around.
@@ -210,9 +190,9 @@ def class_color(label: int) -> tuple[float, float, float]:
 def _figure_size(image: ImageArray) -> tuple[float, float]:
     """Return the figure size in inches for an image of a given shape.
 
-    The width is fixed and the height follows the image's aspect, so the drawn geometry is
-    never stretched: a square box on a 2:1 picture has to come out square, or every
-    judgement a reader makes about the shape of a prediction is made about the canvas.
+    The width is fixed and the height follows the image's aspect, so the drawn geometry is never stretched: a square box
+    on a 2:1 picture has to come out square, or every judgement a reader makes about the shape of a prediction is made
+    about the canvas.
 
     Examples:
         ```pycon
@@ -229,10 +209,9 @@ def _figure_size(image: ImageArray) -> tuple[float, float]:
 def _show_image(image: ImageArray, axes: Axes | None) -> Axes:
     """Draw ``image`` as the bottom layer and return the axes holding it.
 
-    Every public drawing function starts here, so ``axes.images[0]`` is the picture and
-    anything after it is an overlay this module added. A caller supplying its own axes
-    (a grid of predictions, say) gets the image drawn into it for the same reason: an
-    annotation without its picture is not a figure.
+    Every public drawing function starts here, so ``axes.images[0]`` is the picture and anything after it is an overlay
+    this module added. A caller supplying its own axes (a grid of predictions, say) gets the image drawn into it for the
+    same reason: an annotation without its picture is not a figure.
     """
     target = plt.subplots(figsize=_figure_size(image))[1] if axes is None else axes
     target.imshow(image)
@@ -243,10 +222,9 @@ def _show_image(image: ImageArray, axes: Axes | None) -> Axes:
 def _require_width(detections: Tensor, width: int, drawer: str) -> None:
     """Refuse a detection tensor whose row is not the tuple ``drawer`` draws.
 
-    The guard exists because the two tuples are assignment-compatible and visually
-    plausible in each other's place: an A45 row's first four columns are a centre and two
-    extents, which :func:`draw_detections` would draw as corners — a rectangle in the
-    wrong place, at the wrong size, with no error and nothing in the figure to show it.
+    The guard exists because the two tuples are assignment-compatible and visually plausible in each other's place: an
+    A45 row's first four columns are a centre and two extents, which :func:`draw_detections` would draw as corners —
+    a rectangle in the wrong place, at the wrong size, with no error and nothing in the figure to show it.
     """
     if detections.ndim != 2 or int(detections.shape[1]) != width:
         raise ValueError(
@@ -316,8 +294,7 @@ def draw_detections(
             pixels, as :func:`~lucid_yolo.predict.predict_image` returns them.
         conf_threshold: Rows scoring at or below this are not drawn. Defaults to drawing
             every row handed over, since a prediction has already been filtered once.
-        axes: Draw into these axes instead of a new figure's; the image is drawn into them
-            either way.
+        axes: Draw into these axes instead of a new figure's; the image is drawn into them either way.
 
     Returns:
         The axes drawn into: the image as ``images[0]``, then one rectangle patch and one
@@ -346,9 +323,9 @@ def draw_detections(
 def _overlay_mask(axes: Axes, mask: Tensor, label: int) -> None:
     """Lay one instance mask over the image as a translucent patch of its class colour.
 
-    One overlay per instance rather than one composited layer for all of them: masks
-    routinely touch, and a single layer would answer "some instance covers this pixel"
-    where the question a segmentation figure is read to answer is "*which* instance".
+    One overlay per instance rather than one composited layer for all of them: masks routinely touch, and a single
+    layer would answer "some instance covers this pixel" where the question a segmentation figure is read to answer is
+    "*which* instance".
     """
     red, green, blue = class_color(label)
     overlay = np.zeros((*mask.shape, 4), dtype=np.float32)
@@ -365,11 +342,9 @@ def draw_segmentation(
 ) -> Axes:
     """Draw an instance-segmentation prediction: its masks, then its boxes.
 
-    Boxes and masks are filtered by **one** row mask, computed once, because they are only
-    meaningful row-aligned — the pairing
-    :class:`~lucid_yolo.predict.SegmentedPrediction` exists to protect. Two filters, or
-    one filter applied twice, is how a mask ends up drawn on its neighbour: a plausible
-    figure that no shape check catches.
+    Boxes and masks are filtered by **one** row mask, computed once, because they are only meaningful row-aligned — the
+    pairing :class:`~lucid_yolo.predict.SegmentedPrediction` exists to protect. Two filters, or one filter applied
+    twice, is how a mask ends up drawn on its neighbour: a plausible figure that no shape check catches.
 
     Args:
         image: The **original** image as ``(height, width, 3)`` 8-bit RGB.
@@ -415,10 +390,9 @@ def draw_segmentation(
 def _require_masks(prediction: SegmentedPrediction, image: ImageArray) -> None:
     """Refuse a mask stack that is not one mask per detection on the image's own grid.
 
-    Both halves are drawing-fatal in the same silent way. A count mismatch pairs mask
-    ``n`` with box ``n`` for as long as the shorter stack lasts and shifts every pairing
-    after it; a grid mismatch is stretched by ``imshow`` onto the image's extent, which
-    lands a mask over a neighbouring object at a plausible size.
+    Both halves are drawing-fatal in the same silent way. A count mismatch pairs mask ``n`` with box ``n`` for as long
+    as the shorter stack lasts and shifts every pairing after it; a grid mismatch is stretched by ``imshow`` onto the
+    image's extent, which lands a mask over a neighbouring object at a plausible size.
     """
     rows = int(prediction.detections.shape[0])
     if int(prediction.masks.shape[0]) != rows:
@@ -438,9 +412,8 @@ def _require_masks(prediction: SegmentedPrediction, image: ImageArray) -> None:
 def _draw_polygons(axes: Axes, detections: Tensor) -> None:
     """Outline every A45 row as the rotated quadrilateral it describes.
 
-    The corners are :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons`', computed for
-    the whole stack in one call, so ring ``n`` is row ``n``'s own rectangle and no corner
-    arithmetic is stated a second time in this repository.
+    The corners are :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons`', computed for the whole stack in one call,
+    so ring ``n`` is row ``n``'s own rectangle and no corner arithmetic is stated a second time in this repository.
     """
     rings = rboxes_to_polygons(detections[:, :RBOX_COLUMNS])
     for row, ring in zip(detections, rings, strict=True):
@@ -449,9 +422,8 @@ def _draw_polygons(axes: Axes, detections: Tensor) -> None:
         axes.add_patch(
             Polygon(corners, closed=True, fill=False, edgecolor=class_color(label), linewidth=_OUTLINE_WIDTH)
         )
-        # The topmost corner rather than a fixed one: which corner leads the ring is a
-        # function of the heading, so anchoring on ring[0] would put the label under the
-        # box for half the angles a canonical theta can take.
+        # The topmost corner rather than a fixed one: which corner leads the ring is a function of the heading, so
+        # anchoring on ring[0] would put the label under the box for half the angles a canonical theta can take.
         highest = int(corners[:, 1].argmin())
         _draw_label(
             axes, (float(corners[highest, 0]), float(corners[highest, 1])), label, float(row[_RBOX_SCORE_COLUMN])
@@ -466,10 +438,9 @@ def draw_oriented(
 ) -> Axes:
     """Draw an A45 oriented tuple as rotated quadrilaterals over its image.
 
-    Never as upright rectangles: the four box columns are ``[cx, cy, w, h, theta]``, and
-    drawing their axis-aligned envelope would show a rectangle the model never predicted,
-    at a size the heading does not imply. The whole point of an oriented figure is the
-    heading, so the polygon is the only honest artist for it.
+    Never as upright rectangles: the four box columns are ``[cx, cy, w, h, theta]``, and drawing their axis-aligned
+    envelope would show a rectangle the model never predicted, at a size the heading does not imply. The whole point of
+    an oriented figure is the heading, so the polygon is the only honest artist for it.
 
     Args:
         image: The **original** image as ``(height, width, 3)`` 8-bit RGB.
@@ -512,16 +483,15 @@ def draw_keypoints(
 ) -> Axes:
     """Draw a keypoint prediction: each detection's box, its points, and any skeleton edges.
 
-    Boxes and point sets are filtered by **one** row mask, computed once, for the reason
-    :func:`draw_segmentation` gives: the two are only meaningful row-aligned, and a pose
-    drawn on the neighbouring object is a plausible figure no shape check catches.
+    Boxes and point sets are filtered by **one** row mask, computed once, for the reason :func:`draw_segmentation`
+    gives: the two are only meaningful row-aligned, and a pose drawn on the neighbouring object is a plausible figure no
+    shape check catches.
 
-    ``skeleton`` is a caller argument with no default edges, and deliberately so. Which
-    points connect to which is dataset metadata, exactly as the left/right flip pairs are
-    (A64): the head predicts ``K`` points and knows nothing about what they mean, so
-    baking COCO's human topology in here would make a figure of a 15-point letter
-    skeleton or a 12-point animal one silently wrong. With no skeleton the points are
-    drawn on their own, which is the honest figure for a schema nobody has named.
+    ``skeleton`` is a caller argument with no default edges, and deliberately so. Which points connect to which is
+    dataset metadata, exactly as the left/right flip pairs are (A64): the head predicts ``K`` points and knows nothing
+    about what they mean, so baking COCO's human topology in here would make a figure of a 15-point letter skeleton
+    or a 12-point animal one silently wrong. With no skeleton the points are drawn on their own, which is the honest
+    figure for a schema nobody has named.
 
     Args:
         image: The **original** image as ``(height, width, 3)`` 8-bit RGB.
@@ -619,9 +589,9 @@ def _dashed_boxes(axes: Axes, targets: Targets) -> None:
 def _dashed_polygons(axes: Axes, targets: Targets) -> None:
     """Outline each instance ring dashed; an image with no rings falls back to its boxes.
 
-    The reader collapses ``polygons`` to ``[]`` the moment one instance of the image has
-    no usable ring, and then every box is COCO's ``bbox`` — so the fallback draws what
-    the segmentation path trained against on that image, which is the box.
+    The reader collapses ``polygons`` to ``[]`` the moment one instance of the image has no usable ring, and then every
+    box is COCO's ``bbox`` — so the fallback draws what the segmentation path trained against on that image, which is
+    the box.
     """
     if not targets.polygons:
         _dashed_boxes(axes, targets)
@@ -640,10 +610,9 @@ def _dashed_rotated(axes: Axes, targets: Targets) -> None:
 def _hollow_points(axes: Axes, targets: Targets) -> None:
     """Draw each labelled point set as hollow rings over its dashed box, visible points only.
 
-    A point with visibility ``0`` is unlabelled — COCO writes ``(0, 0, 0)`` for it — so
-    drawing it would put a ring at the image origin for every point the annotator never
-    placed. The prediction draws every one of its ``K`` points because it has no
-    visibility to consult; the label has one and uses it.
+    A point with visibility ``0`` is unlabelled — COCO writes ``(0, 0, 0)`` for it — so drawing it would put a ring at
+    the image origin for every point the annotator never placed. The prediction draws every one of its ``K`` points
+    because it has no visibility to consult; the label has one and uses it.
     """
     _dashed_boxes(axes, targets)
     for points, visibility, label in zip(targets.keypoints, targets.keypoint_vis, targets.labels, strict=True):
@@ -660,9 +629,8 @@ def _hollow_points(axes: Axes, targets: Targets) -> None:
             )
 
 
-#: Which ground-truth drawer serves which task. The keys are the four task names, as plain
-#: strings so the refusal lists their spellings, and a task with no drawer is refused by
-#: name rather than drawn as boxes.
+#: Which ground-truth drawer serves which task. The keys are the four task names, as plain strings so the refusal lists
+#: their spellings, and a task with no drawer is refused by name rather than drawn as boxes.
 _GROUND_TRUTH_DRAWERS: dict[str, Callable[[Axes, Targets], None]] = {
     Task.DETECT.value: _dashed_boxes,
     Task.SEGMENT.value: _dashed_polygons,
@@ -674,12 +642,11 @@ _GROUND_TRUTH_DRAWERS: dict[str, Callable[[Axes, Targets], None]] = {
 def draw_ground_truth(axes: Axes, targets: Targets, task: str) -> Axes:
     """Draw one image's labels into ``axes``, dashed and unfilled, in the task's own geometry.
 
-    What is drawn is what the task trains against: ``detect`` outlines the boxes,
-    ``segment`` the instance rings (or the boxes, on an image the reader gave no rings),
-    ``obb`` the rotated quadrilaterals through the same corner function the predicted
-    rings use, and ``keypoints`` the boxes with a hollow ring at every labelled point.
-    Nothing is filled and no score is written — a label has none — so a prediction drawn
-    solid over the same axes stays distinguishable from its target.
+    What is drawn is what the task trains against: ``detect`` outlines the boxes, ``segment`` the instance rings (or the
+    boxes, on an image the reader gave no rings), ``obb`` the rotated quadrilaterals through the same corner function
+    the predicted rings use, and ``keypoints`` the boxes with a hollow ring at every labelled point. Nothing is filled
+    and no score is written — a label has none — so a prediction drawn solid over the same axes stays distinguishable
+    from its target.
 
     Args:
         axes: Axes already holding the picture, typically the ones a ``draw_*`` function
@@ -720,11 +687,10 @@ def draw_ground_truth(axes: Axes, targets: Targets, task: str) -> Axes:
 def load_ground_truth(annotations: Path, task: str) -> dict[str, Targets]:
     """Read a COCO annotation file into per-image targets keyed by image file name.
 
-    The reader is :class:`~lucid_yolo.data.coco.CocoDetectionDataset`, the same one the
-    training path uses, in the reading mode the task needs — ``oriented`` for ``obb`` so
-    each four-point ring becomes a rotated box, ``keypoints`` for ``keypoints`` so each
-    annotation's points come through. Nothing is parsed a second time here: the file
-    name index and the precomputed targets are the dataset's own.
+    The reader is :class:`~lucid_yolo.data.coco.CocoDetectionDataset`, the same one the training path uses, in the
+    reading mode the task needs — ``oriented`` for ``obb`` so each four-point ring becomes a rotated box, ``keypoints``
+    for ``keypoints`` so each annotation's points come through. Nothing is parsed a second time here: the file name
+    index and the precomputed targets are the dataset's own.
 
     Args:
         annotations: A COCO ``instances`` or ``person_keypoints`` JSON file.
@@ -762,9 +728,8 @@ def load_ground_truth(annotations: Path, task: str) -> dict[str, Targets]:
 class RenderOptions:
     """What the caller asked for, before any checkpoint has been read.
 
-    Frozen and named rather than a bag of parameters threaded through four renderers:
-    the values arrive together from one parse, travel together, and none of them is
-    meaningful to change halfway through a render.
+    Frozen and named rather than a bag of parameters threaded through four renderers: the values arrive together from
+    one parse, travel together, and none of them is meaningful to change halfway through a render.
 
     Attributes:
         task: Which entry point to draw through, or ``None`` to read the checkpoint's own
@@ -806,10 +771,9 @@ class RenderOptions:
 class _Run:
     """One prediction's arguments, after the checkpoint has answered what it is.
 
-    :class:`RenderOptions` carries what a caller asked for, including the two questions
-    only a loaded checkpoint can settle — which task, and therefore which letterbox side.
-    Resolving them once into this pair keeps the four renderers free of a defaulting rule
-    each, which is how the oriented path would end up drawn at 640 px.
+    :class:`RenderOptions` carries what a caller asked for, including the two questions only a loaded checkpoint can
+    settle — which task, and therefore which letterbox side. Resolving them once into this pair keeps the four
+    renderers free of a defaulting rule each, which is how the oriented path would end up drawn at 640 px.
     """
 
     image: Path
@@ -830,9 +794,8 @@ def _render_detect(module: DetectionLitModule, run: _Run, image: ImageArray, axe
         conf_threshold=run.conf_threshold,
         device=run.device,
     )
-    # The drawing threshold is left at its default: these rows have already been filtered
-    # by `predict_image` at exactly this cut, and restating it here would put one number
-    # in two places for no second effect.
+    # The drawing threshold is left at its default: these rows have already been filtered by `predict_image` at exactly
+    # this cut, and restating it here would put one number in two places for no second effect.
     return draw_detections(image, detections, axes=axes)
 
 
@@ -875,9 +838,9 @@ def _render_keypoints(module: DetectionLitModule, run: _Run, image: ImageArray, 
     return draw_keypoints(image, prediction, skeleton=run.skeleton, axes=axes)
 
 
-#: Which entry point draws which task. The keys are also the script's ``--task`` choices,
-#: so the flag cannot offer a task no renderer serves, and adding one is a single entry.
-#: Plain strings, for the same reason as :data:`_GROUND_TRUTH_DRAWERS`.
+#: Which entry point draws which task. The keys are also the script's ``--task`` choices, so the flag cannot offer a
+#: task no renderer serves, and adding one is a single entry. Plain strings, for the same reason as
+#: :data:`_GROUND_TRUTH_DRAWERS`.
 _RENDERERS: dict[str, Callable[[DetectionLitModule, _Run, ImageArray, Axes | None], Axes]] = {
     Task.DETECT.value: _render_detect,
     Task.SEGMENT.value: _render_segment,
@@ -885,8 +848,8 @@ _RENDERERS: dict[str, Callable[[DetectionLitModule, _Run, ImageArray, Axes | Non
     Task.KEYPOINTS.value: _render_keypoints,
 }
 
-#: The tasks a checkpoint can be drawn through, in a stable order — what a CLI offers as
-#: its ``--task`` choices, read off the renderer table rather than restated.
+#: The tasks a checkpoint can be drawn through, in a stable order — what a CLI offers as its ``--task`` choices, read
+#: off the renderer table rather than restated.
 DRAWABLE_TASKS: tuple[str, ...] = tuple(sorted(_RENDERERS))
 
 
@@ -894,10 +857,9 @@ def _read_image_array(path: Path) -> ImageArray:
     """Read an image file as ``(height, width, 3)`` 8-bit RGB.
 
     The same decode the evaluation path uses — ``read_image(..., ImageReadMode.RGB)``, per
-    :func:`~lucid_yolo.eval.annotations.read_letterboxed_image` — so the pixels drawn under
-    a prediction are the pixels the prediction was made from. What is deliberately *not*
-    reused is the letterboxing that follows it: predictions come back in original-image
-    coordinates (A10), so the original image is the frame they are drawn on.
+    :func:`~lucid_yolo.eval.annotations.read_letterboxed_image` — so the pixels drawn under a prediction are the pixels
+    the prediction was made from. What is deliberately *not* reused is the letterboxing that follows it: predictions
+    come back in original-image coordinates (A10), so the original image is the frame they are drawn on.
     """
     raw = read_image(str(path), ImageReadMode.RGB)
     array: ImageArray = raw.permute(1, 2, 0).numpy()
@@ -935,11 +897,10 @@ def predict_and_draw(
 ) -> Axes:
     """Predict one image with a loaded module and draw the answer over the picture.
 
-    The half of the script's ``render_prediction`` that is not a file write: the task is
-    read off the module (or taken from ``options``), the letterbox side and device are
-    settled, the image is decoded once for the drawing, and the task's renderer predicts
-    and draws. The axes are titled with the image's name, the task and the decode path
-    unless ``options.title`` says otherwise.
+    The half of the script's ``render_prediction`` that is not a file write: the task is read off the module (or taken
+    from ``options``), the letterbox side and device are settled, the image is decoded once for the drawing, and the
+    task's renderer predicts and draws. The axes are titled with the image's name, the task and the decode path unless
+    ``options.title`` says otherwise.
 
     Args:
         module: An eval-mode module, as :func:`~lucid_yolo.eval.checkpoint.load_eval_module`
@@ -983,10 +944,9 @@ def show_predictions(
 ) -> Figure:
     """Draw one checkpoint's predictions over several images, one panel each, for a notebook.
 
-    The checkpoint is loaded once and every panel predicts through the same module. With
-    ``annotations`` given, each image's labels are drawn dashed under the same axes, so
-    the panel reads as prediction against target; an image the file does not name is an
-    error rather than a panel quietly missing its labels. Images are matched to their
+    The checkpoint is loaded once and every panel predicts through the same module. With ``annotations`` given, each
+    image's labels are drawn dashed under the same axes, so the panel reads as prediction against target; an image the
+    file does not name is an error rather than a panel quietly missing its labels. Images are matched to their
     annotations by file name, which is how COCO names them.
 
     Args:

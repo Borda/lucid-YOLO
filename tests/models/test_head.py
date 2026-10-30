@@ -1,58 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-022 dual detection head (test_head.py).
 
-Covers :class:`lucid_yolo.models.DualDetectionHead` and its helpers: that both the
-one-to-one and one-to-many branches emit dense ``(B, 8400, nc)`` scores and
-``(B, 8400, 4)`` raw ltrb distances at a 640 input; that :func:`o2o_topk` reduces
-the one-to-one branch to a valid ``(B, 300, 6)`` detection tuple; that the dense
-anchor axis aligns position-for-position with
-:func:`~lucid_yolo.assign.grid.make_anchor_points`; that :func:`decode_ltrb` matches
-a hand-computed box; that the two branches own disjoint parameters and both
-receive gradient; and that a small 128-pixel forward runs clean.
+Covers :class:`lucid_yolo.models.DualDetectionHead` and its helpers: that both the one-to-one and one-to-many branches
+emit dense ``(B, 8400, nc)`` scores and ``(B, 8400, 4)`` raw ltrb distances at a 640 input; that :func:`o2o_topk`
+reduces the one-to-one branch to a valid ``(B, 300, 6)`` detection tuple; that the dense anchor axis aligns
+position-for-position with :func:`~lucid_yolo.assign.grid.make_anchor_points`; that :func:`decode_ltrb` matches a
+hand-computed box; that the two branches own disjoint parameters and both receive gradient; and that a small 128-pixel
+forward runs clean.
 """
 
 from __future__ import annotations
 
 import pytest
 import torch
+from head_pyramid_helpers import STRIDES, feature_sizes, neck_features
 
 from lucid_yolo.assign.grid import make_anchor_points
 from lucid_yolo.models import DualDetectionHead, DualHeadOutput, decode_ltrb, o2o_topk
 from lucid_yolo.models.heads.detect import _flatten_level
 
-_STRIDES = [8, 16, 32]
 _N_SCALE_CHANNELS = (64, 128, 256)
 
 
-def _feature_sizes(input_size: int) -> list[tuple[int, int]]:
-    """Return the per-level ``(H, W)`` cell counts for a square input.
-
-    Examples:
-        >>> _feature_sizes(640)
-        [(80, 80), (40, 40), (20, 20)]
-    """
-    return [(input_size // stride, input_size // stride) for stride in _STRIDES]
-
-
-def _make_features(input_size: int, channels: tuple[int, int, int], batch: int = 2) -> tuple[torch.Tensor, ...]:
-    """Build random neck-style feature maps at strides 8/16/32.
-
-    Examples:
-        >>> features = _make_features(640, (64, 128, 256))
-        >>> [f.shape for f in features]
-        [torch.Size([2, 64, 80, 80]), torch.Size([2, 128, 40, 40]), torch.Size([2, 256, 20, 20])]
-    """
-    return tuple(
-        torch.randn(batch, ch, height, width)
-        for ch, (height, width) in zip(channels, _feature_sizes(input_size), strict=True)
-    )
-
-
 def test_dual_head_shapes() -> None:
-    """Both branches emit dense (B, 8400, nc) scores and (B, 8400, 4) ltrb boxes."""
+    """Both branches emit dense (B, 8400, nc) scores and (B, 8400, 4) ltrb boxes.
+
+    A 640-pixel input at strides 8/16/32 yields 80^2 + 40^2 + 20^2 = 8400 anchors; a branch that dropped a level or
+    kept the per-level layout would still forward cleanly and only show up as a wrong anchor axis here.
+    """
     batch, num_classes = 2, 80
     head = DualDetectionHead(in_channels=_N_SCALE_CHANNELS, num_classes=num_classes).eval()
-    features = _make_features(640, _N_SCALE_CHANNELS, batch=batch)
+    features = neck_features(640, _N_SCALE_CHANNELS, batch=batch)
 
     with torch.no_grad():
         out = head(features)
@@ -68,8 +46,8 @@ def test_o2o_topk_detection_tuple() -> None:
     """o2o_topk yields (B, 300, 6) with sigmoid scores in [0, 1] and valid classes."""
     batch, num_classes = 2, 80
     head = DualDetectionHead(in_channels=_N_SCALE_CHANNELS, num_classes=num_classes).eval()
-    features = _make_features(640, _N_SCALE_CHANNELS, batch=batch)
-    anchor_points, strides = make_anchor_points(_feature_sizes(640), _STRIDES)
+    features = neck_features(640, _N_SCALE_CHANNELS, batch=batch)
+    anchor_points, strides = make_anchor_points(feature_sizes(640), STRIDES)
 
     with torch.no_grad():
         out = head(features)
@@ -85,7 +63,11 @@ def test_o2o_topk_detection_tuple() -> None:
 
 
 def test_o2o_topk_returns_all_when_fewer_than_k() -> None:
-    """When the anchor count is below k every anchor is returned."""
+    """When the anchor count is below k every anchor is returned.
+
+    Three anchors against ``k=300`` is the tiny-canvas case: the selection must clamp ``k`` to the available anchors
+    instead of raising from ``topk`` or padding with invented rows.
+    """
     scores = torch.tensor([[[2.0, -1.0], [-3.0, 0.5], [0.1, 0.2]]])  # (1, 3, 2)
     boxes = torch.zeros(1, 3, 4)
     detections = o2o_topk(scores, boxes, k=300)
@@ -106,14 +88,18 @@ def test_anchor_order_agreement() -> None:
     expected_index = level_offset + row * width + col
     assert int(dense[0, :, 0].argmax()) == expected_index, "spike must land at the row-major flattened index"
 
-    anchor_points, _ = make_anchor_points(feature_sizes, _STRIDES)
-    stride = _STRIDES[level]
+    anchor_points, _ = make_anchor_points(feature_sizes, STRIDES)
+    stride = STRIDES[level]
     expected_point = torch.tensor([(col + 0.5) * stride, (row + 0.5) * stride])
     assert torch.allclose(anchor_points[expected_index], expected_point), "anchor grid must share the flatten order"
 
 
 def test_decode_ltrb_hand_case() -> None:
-    """decode_ltrb reproduces a hand-computed xyxy box from known ltrb distances."""
+    """decode_ltrb reproduces a hand-computed xyxy box from known ltrb distances.
+
+    One anchor at (10, 10) with stride 2 and four distinct distances makes each corner's arithmetic explicit, so a
+    swapped left/top or right/bottom pair or a missing stride scale changes a specific corner.
+    """
     distances = torch.tensor([[[1.0, 2.0, 3.0, 4.0]]])  # (1, 1, 4) ltrb
     anchor_points = torch.tensor([[10.0, 10.0]])  # centre (10, 10)
     strides = torch.tensor([2.0])
@@ -126,7 +112,11 @@ def test_decode_ltrb_hand_case() -> None:
 
 
 def test_branch_parameters_disjoint() -> None:
-    """The one-to-one and one-to-many branches share no parameters."""
+    """The one-to-one and one-to-many branches share no parameters.
+
+    The dual head's defining invariant: a parameter shared between the branches would let the training-only
+    one-to-many supervision write directly into the branch that ships.
+    """
     head = DualDetectionHead(in_channels=(16, 32, 64), num_classes=4)
     o2o_ids = {id(param) for param in head.o2o.parameters()}
     o2m_ids = {id(param) for param in head.o2m.parameters()}
@@ -136,9 +126,13 @@ def test_branch_parameters_disjoint() -> None:
 
 
 def test_gradient_flows_through_both_branches() -> None:
-    """A loss over both branches produces gradient in each branch's stems."""
+    """A loss over both branches produces gradient in each branch's stems.
+
+    Sums every output of the dual head into one scalar and backpropagates, so a branch detached from the graph (for
+    example by an accidental ``detach`` or ``no_grad`` in its stems) shows up as missing or all-zero gradients.
+    """
     head = DualDetectionHead(in_channels=(16, 32, 64), num_classes=4)
-    features = _make_features(128, (16, 32, 64), batch=1)
+    features = neck_features(128, (16, 32, 64), batch=1)
 
     out = head(features)
     loss = out.o2m_cls.sum() + out.o2m_box.sum() + out.o2o_cls.sum() + out.o2o_box.sum()
@@ -153,7 +147,7 @@ def test_gradient_flows_through_both_branches() -> None:
 def test_small_input_forward() -> None:
     """A 128-pixel forward runs clean with A = 16*16 + 8*8 + 4*4 = 336 anchors."""
     head = DualDetectionHead(in_channels=(16, 32, 64), num_classes=4).eval()
-    features = _make_features(128, (16, 32, 64), batch=1)
+    features = neck_features(128, (16, 32, 64), batch=1)
 
     with torch.no_grad():
         out = head(features)
@@ -165,7 +159,7 @@ def test_small_input_forward() -> None:
 def test_cls_bias_prior_init() -> None:
     """Class outputs start at the RetinaNet prior pi=0.01 (A30, R24 section 5.1)."""
     head = DualDetectionHead(in_channels=(16, 32, 64), num_classes=4).eval()
-    features = _make_features(128, (16, 32, 64), batch=1)
+    features = neck_features(128, (16, 32, 64), batch=1)
 
     with torch.no_grad():
         out = head(features)

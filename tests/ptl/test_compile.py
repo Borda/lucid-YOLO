@@ -1,22 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the opt-in compiled detection objective (WP-184).
 
-``compile_step=True`` compiles :meth:`~lucid_yolo.ptl.module.DetectionLitModule._detect_objective`
-— forward, both decodes, assignment and the dual loss — as one region on a CUDA
-accelerator under ``task="detect"``. No GPU runs here, so what is proved on CPU is
-the property the speed-up rests on and the one a later edit breaks silently: the
-region traces as **one** Dynamo graph with **zero** breaks, on a batch with ground
-truths and on a batch with none (the ``tal.py`` empty-batch branch), with
-``capture_scalar_outputs`` as :meth:`setup` sets it and — since the only scalar
-read in the region was :func:`~lucid_yolo.assign.tal._check_labels`, now skipped
-under tracing — with it off as well. The ``setup`` decision is exercised through
-the same mocked CUDA accelerator ``test_memory_format.py`` uses: the wrapper is
-installed once and a second ``setup`` keeps it, and a task other than ``detect`` is
-refused by name; the off-CUDA refusal is ``test_module.py``'s, beside the loss it leaves
-unchanged.
+``compile_step=True`` compiles :meth:`~lucid_yolo.ptl.module.DetectionLitModule._detect_objective` — forward, both
+decodes, assignment and the dual loss — as one region on a CUDA accelerator under ``task="detect"``. No GPU runs here,
+so what is proved on CPU is the property the speed-up rests on and the one a later edit breaks silently: the region
+traces as **one** Dynamo graph with **zero** breaks, on a batch with ground truths and on a batch with none (the
+``tal.py`` empty-batch branch), with ``capture_scalar_outputs`` as :meth:`setup` sets it and — since the only scalar
+read in the region was :func:`~lucid_yolo.assign.tal._check_labels`, now skipped under tracing — with it off as well.
+The ``setup`` decision is exercised through the same mocked CUDA accelerator ``test_memory_format.py`` uses: the wrapper
+is installed once and a second ``setup`` keeps it, and a task other than ``detect`` is refused by name; the off-CUDA
+refusal is ``test_module.py``'s, beside the loss it leaves unchanged.
 
-Every test runs under a fixture that resets Dynamo and restores the process-global
-config flag, so nothing here leaks into the rest of the suite.
+Every test runs under a fixture that resets Dynamo and restores the process-global config flag, so nothing here leaks
+into the rest of the suite.
 """
 
 from __future__ import annotations
@@ -166,9 +162,9 @@ class TestDetectObjectiveTracesAsOneGraph:
     def test_tensor_alpha_blends_exactly_as_eager_float(self, alpha: float) -> None:
         """The region's tensor-``alpha`` total is bit-equal to the loss called with the float attribute alone.
 
-        ``0.8`` is the schedule's first value and the one a ``float32`` scalar would
-        put one ulp off (``1 - 0.8`` rounds differently in single than in double);
-        the ``float64`` tensor and the in-loss casts keep the goldens' bit-exactness.
+        ``0.8`` is the schedule's first value and the one a ``float32`` scalar would put one ulp off (``1 - 0.8``
+        rounds differently in single than in double); the ``float64`` tensor and the in-loss casts keep the goldens'
+        bit-exactness.
         """
         module = _module()
         module.alpha = alpha
@@ -198,12 +194,10 @@ class TestAlphaScheduleDoesNotRecompile:
     def test_three_alpha_values_compile_region_once(self) -> None:
         """Stepping at ``alpha`` 0.8, 0.1 and 0.5 adds no compiled frame after the first, and each total tracks alpha.
 
-        Read as a float attribute inside the region, Dynamo guarded on ``0.8`` and
-        recompiled at ``0.1`` — once here on CPU, where it then unspecialises the
-        float, and every epoch on the A100 run that found it. The count is checked
-        after each later value, not only at the end, so a recompile at either
-        change is caught; the ``0.1`` total is compared bit-for-bit to eager at
-        ``0.1``, so a stale traced ``0.8`` cannot pass either.
+        Read as a float attribute inside the region, Dynamo guarded on ``0.8`` and recompiled at ``0.1`` — once here
+        on CPU, where it then unspecialises the float, and every epoch on the A100 run that found it. The count is
+        checked after each later value, not only at the end, so a recompile at either change is caught; the ``0.1``
+        total is compared bit-for-bit to eager at ``0.1``, so a stale traced ``0.8`` cannot pass either.
         """
         module = _module(compile_step=True)
         module.log = MagicMock()  # type: ignore[method-assign]
@@ -310,9 +304,8 @@ class TestFusedAssignmentUnderCompile:
     def test_compiled_fit_warns_once(self) -> None:
         """CUDA plus ``detect`` installs the wrapper, so the inert fusion request is reported once.
 
-        The mocked CUDA accelerator is what makes ``setup`` compile on CPU. A ``validate`` setup
-        after the fit keeps the same wrapper; repeating the warning there would report one
-        configuration twice.
+        The mocked CUDA accelerator is what makes ``setup`` compile on CPU. A ``validate`` setup after the fit keeps
+        the same wrapper; repeating the warning there would report one configuration twice.
         """
         module = _module(compile_step=True, fused_assignment=True)
         module._trainer = _cuda_trainer()
@@ -331,8 +324,7 @@ class TestFusedAssignmentUnderCompile:
     def test_cuda_fit_without_inert_fusion_raises_no_warning(self, compile_step: bool, fused_assignment: bool) -> None:
         """An eager objective keeps the fusion request, and a compiled one without it has nothing to report.
 
-        Both run the CUDA ``fit`` setup under an error filter, so any warning, the new one
-        included, fails the test.
+        Both run the CUDA ``fit`` setup under an error filter, so any warning, the new one included, fails the test.
         """
         module = _module(compile_step=compile_step, fused_assignment=fused_assignment)
         module._trainer = _cuda_trainer()
@@ -346,8 +338,8 @@ class TestFusedAssignmentUnderCompile:
     def test_refused_compile_reports_only_refusal(self) -> None:
         """Off CUDA the objective stays eager, so the fusion request still applies and is not reported.
 
-        Only the existing compile refusal is raised: the new warning follows whether the
-        wrapper was installed, not whether ``compile_step`` was requested.
+        Only the existing compile refusal is raised: the new warning follows whether the wrapper was installed,
+        not whether ``compile_step`` was requested.
         """
         module = _module(compile_step=True, fused_assignment=True)
 
@@ -373,11 +365,10 @@ class TestCompiledStepOverChangingShapes:
     def test_matches_eager_through_shared_step(self, counts: tuple[int, ...]) -> None:
         """A compiled objective steps every shape to the eager total, marks and all.
 
-        ``mark_dynamic`` is the enforcing form: a marked dim the traced code then pins
-        to a constant raises ``ConstraintViolationError`` at the call. The ``eager``
-        backend traces the region exactly as Inductor would without lowering it, so
-        the ``N`` pin ``F.one_hot`` used to make and the ``B`` pin an unmarked ground
-        truth made are both caught here on CPU.
+        ``mark_dynamic`` is the enforcing form: a marked dim the traced code then pins to a constant raises
+        ``ConstraintViolationError`` at the call. The ``eager`` backend traces the region exactly as Inductor would
+        without lowering it, so the ``N`` pin ``F.one_hot`` used to make and the ``B`` pin an unmarked ground truth made
+        are both caught here on CPU.
         """
         module = _module(compile_step=True)
         module.log = MagicMock()  # type: ignore[method-assign]

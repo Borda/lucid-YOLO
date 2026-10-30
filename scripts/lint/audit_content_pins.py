@@ -1,21 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """Content-pin audit: tracked files that must, or must not, carry a literal string.
 
-Each pin is a structural claim about a file's text rather than about what the code does
-when run, so it belongs to a hook rather than to pytest. Three pins live here, each moved
-out of a unit test that read the file as text:
+Each pin is a structural claim about a file's text rather than about what the code does when run, so it belongs
+to a hook rather than to pytest. Three pins live here, each moved out of a unit test that read the file as text:
 
-* ``src/lucid_yolo/decode/topk_e2e.py`` names no suppression operator, IoU helper or
-  ``torchvision`` (case-insensitive). The score-based top-k decoder is defined by having
-  no non-maximum suppression; a helper import or call creeping in would leave every
-  functional test green while the module stopped being what its name claims.
+* ``src/lucid_yolo/decode/topk_e2e.py`` names no suppression operator, IoU helper or ``torchvision``
+  (case-insensitive). The score-based top-k decoder is defined by having no non-maximum suppression; a helper import
+  or call creeping in would leave every functional test green while the module stopped being what its name claims.
 * No packaged recipe under ``src/lucid_yolo/configs/`` pins ``trainer.deterministic``.
   The CLI picks the accelerator-aware default (strict everywhere, ``warn_only`` on MPS),
   and a recipe hard-coding it overrides that on the one backend that cannot honour it.
-* Every packaged recipe that is not a detection one (``det_*``) states ``task:``.
-  ``det_nano_smoke.yaml`` is a ``default_config_files`` entry for every run subcommand and
-  jsonargparse merges per key, so a recipe omitting ``model.task`` inherits ``detect`` and
-  trains a detector under its own name.
+* Every packaged recipe that is not a detection one (``det_*``) states ``task:``. ``det_nano_smoke.yaml`` is a
+  ``default_config_files`` entry for every run subcommand and jsonargparse merges per key, so a recipe omitting
+  ``model.task`` inherits ``detect`` and trains a detector under its own name.
 
 Examples:
     Command-line usage (exit status is the process return code)::

@@ -1,17 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for Small-Target-Aware Label Assignment (STAL, WP-026).
 
-STAL modifies only the candidate-filtering step of the Task-Aligned Assigner:
-a per-ground-truth surrogate box (centre preserved, each dimension below
-``s_min`` inflated to ``s_ref``) drives the centre-inside test, while scoring,
-targets, and regression keep the original box. The three DoD tests here cover
-that contract directly: a sub-8x8 ground truth that vanilla TAL leaves with
-zero candidates gains candidates under STAL (the Phase-3 gate scenario); the
-surrogate helper clamps each dimension independently without moving centres;
-and STAL's returned targets and weights derive from the original box, never the
-surrogate. All expected values are computed by hand from the technical
-specification section 3.3.3 (Eq. 4-6) and section 4, never lifted from a
-reference implementation.
+STAL modifies only the candidate-filtering step of the Task-Aligned Assigner: a per-ground-truth surrogate box (centre
+preserved, each dimension below ``s_min`` inflated to ``s_ref``) drives the centre-inside test, while scoring, targets,
+and regression keep the original box. The three DoD tests here cover that contract directly: a sub-8x8 ground truth
+that vanilla TAL leaves with zero candidates gains candidates under STAL (the Phase-3 gate scenario); the surrogate
+helper clamps each dimension independently without moving centres; and STAL's returned targets and weights derive from
+the original box, never the surrogate. All expected values are computed by hand from the technical specification
+section 3.3.3 (Eq. 4-6) and section 4, never lifted from a reference implementation.
 """
 
 import pytest
@@ -37,10 +33,9 @@ def _tiny_gt_scene(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Assemble a single-image scene around the 6x6 tiny GT on a 4x4 stride-8 grid.
 
-    Anchor centres are x, y in {4, 12, 20, 28}; none lies inside the 6x6 GT box
-    ``[5, 5, 11, 11]``. Class-0 scores are 0.9 at every candidate anchor; the
-    caller supplies the ``(1, 16, 4)`` predicted boxes so each test controls the
-    IoU against the original ground truth.
+    Anchor centres are x, y in {4, 12, 20, 28}; none lies inside the 6x6 GT box ``[5, 5, 11, 11]``. Class-0 scores are
+    0.9 at every candidate anchor; the caller supplies the ``(1, 16, 4)`` predicted boxes so each test controls the IoU
+    against the original ground truth.
 
     Examples:
         >>> points, scores, boxes, gt_boxes, gt_labels, gt_mask = _tiny_gt_scene(torch.zeros(1, 16, 4))
@@ -148,15 +143,13 @@ def test_targets_unchanged() -> None:
 def test_surrogate_sizes_disable_inflation_rejected(parameter: str, value: float) -> None:
     """``s_min`` and ``s_ref`` are validated at construction, naming the parameter.
 
-    The surrogate is the whole of STAL, and both of its sizes accept values that switch
-    it off rather than tune it. A threshold at or below zero — or a ``nan`` one, which no
-    dimension ever compares below — inflates nothing, so the class silently becomes the
-    plain assigner it subclasses; an infinite threshold inflates *everything*, filtering
-    a large ground truth on a footprint that is not its own. A zero, negative, or ``nan``
-    replacement leaves the inflated ground truth with no candidates at all, and an
-    infinite one makes every anchor in the image a candidate for it. Only ``topk``,
-    ``alpha``, ``beta`` and ``eps`` were checked before, so each of these constructed an
-    assigner that then mis-assigned quietly for the rest of the run.
+    The surrogate is the whole of STAL, and both of its sizes accept values that switch it off rather than tune it. A
+    threshold at or below zero — or a ``nan`` one, which no dimension ever compares below — inflates nothing, so the
+    class silently becomes the plain assigner it subclasses; an infinite threshold inflates *everything*, filtering a
+    large ground truth on a footprint that is not its own. A zero, negative, or ``nan`` replacement leaves the inflated
+    ground truth with no candidates at all, and an infinite one makes every anchor in the image a candidate for it.
+    Only ``topk``, ``alpha``, ``beta`` and ``eps`` were checked before, so each of these constructed an assigner that
+    then mis-assigned quietly for the rest of the run.
     """
     with pytest.raises(ValueError, match=rf"^{parameter} must be finite"):
         SmallTargetAssigner(topk=4, **{parameter: value})
@@ -165,11 +158,10 @@ def test_surrogate_sizes_disable_inflation_rejected(parameter: str, value: float
 def test_replacement_below_threshold_rejected() -> None:
     """``s_ref < s_min`` raises, because a replacement under the threshold shrinks the box.
 
-    A dimension lying between the two sizes is replaced by a *smaller* one, so the
-    surrogate sits strictly inside the original ground truth and the subclass hands the
-    base assigner fewer candidates than the untouched box would have had on its own —
-    the exact opposite of what STAL exists for, on exactly the targets it exists for,
-    and with nothing at the call site to show for it.
+    A dimension lying between the two sizes is replaced by a *smaller* one, so the surrogate sits strictly inside the
+    original ground truth and the subclass hands the base assigner fewer candidates than the untouched box would have
+    had on its own — the exact opposite of what STAL exists for, on exactly the targets it exists for, and with nothing
+    at the call site to show for it.
     """
     with pytest.raises(ValueError, match=r"^s_ref must be >= s_min, got 4\.0 < 8\.0$"):
         SmallTargetAssigner(topk=4, s_min=8.0, s_ref=4.0)
@@ -178,12 +170,11 @@ def test_replacement_below_threshold_rejected() -> None:
 def test_replacement_equal_to_threshold_accepted() -> None:
     """``s_ref == s_min`` constructs and still inflates; the boundary is usable, not refused.
 
-    The check refuses the values that disable or invert the inflation, not every unusual
-    one. At ``s_ref == s_min`` every dimension the surrogate touches is below ``s_min`` by
-    definition and so is still strictly widened: the 6x6 ground truth of this module
-    becomes the 8x8 box ``[4, 4, 12, 12]``, whose corners are exactly the four stride-8
-    anchor centres vanilla TAL leaves it without. Refusing the boundary would reject a
-    conservative but coherent recipe — raise every side to at least the smallest stride.
+    The check refuses the values that disable or invert the inflation, not every unusual one. At ``s_ref == s_min``
+    every dimension the surrogate touches is below ``s_min`` by definition and so is still strictly widened: the 6x6
+    ground truth of this module becomes the 8x8 box ``[4, 4, 12, 12]``, whose corners are exactly the four stride-8
+    anchor centres vanilla TAL leaves it without. Refusing the boundary would reject a conservative but coherent recipe
+    — raise every side to at least the smallest stride.
     """
     pred_boxes = _TINY_GT.expand(1, 16, 4).contiguous()  # every pred == the GT box, IoU 1.0
     points, scores, boxes, gt_boxes, gt_labels, gt_mask = _tiny_gt_scene(pred_boxes)

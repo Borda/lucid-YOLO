@@ -107,10 +107,9 @@ def _forward_segmentation_output(model: DetectionLitModule, images: torch.Tensor
 def _objective_from_output(output: SegmentOutput, masks_used: bool) -> torch.Tensor:
     """Build the squared-error objective from an already-computed forward output.
 
-    A squared term is even: it cannot distinguish a prediction from its sign-flip,
-    and the chain rule propagates that same blindness to every upstream gradient.
-    Callers that need to detect a corrupted replay output compare the raw tensors
-    in ``output`` directly (:func:`_assert_predictions_match`), never only this loss.
+    A squared term is even: it cannot distinguish a prediction from its sign-flip, and the chain rule propagates that
+    same blindness to every upstream gradient. Callers that need to detect a corrupted replay output compare the raw
+    tensors in ``output`` directly (:func:`_assert_predictions_match`), never only this loss.
 
     Examples:
         >>> callable(_objective_from_output)
@@ -167,12 +166,10 @@ def _assert_predictions_match(native: SegmentOutput, replay: SegmentOutput, mask
 def test_predictions_match_catches_sign_flip_squared_objective_cannot() -> None:
     """A squared loss is even, so a sign-flipped prediction leaves it and every upstream gradient unchanged.
 
-    ``x.square()`` equals ``(-x).square()``, and the chain rule carries that same
-    cancellation back through any parameter the flipped tensor depends on: a replay
-    bug that returns ``-prediction`` instead of ``prediction`` would pass both the
-    loss comparison and :func:`_assert_state_and_gradients` undetected. Only a direct
-    comparison of the raw prediction tensors, as :func:`_assert_predictions_match`
-    performs, can see it.
+    ``x.square()`` equals ``(-x).square()``, and the chain rule carries that same cancellation back through any
+    parameter the flipped tensor depends on: a replay bug that returns ``-prediction`` instead of ``prediction`` would
+    pass both the loss comparison and :func:`_assert_state_and_gradients` undetected. Only a direct comparison of the
+    raw prediction tensors, as :func:`_assert_predictions_match` performs, can see it.
     """
     output = _forward_segmentation_output(_module(), torch.randn(1, 3, 64, 64))
     flipped = dataclasses.replace(output, detect=dataclasses.replace(output.detect, o2m_cls=-output.detect.o2m_cls))
@@ -220,9 +217,9 @@ def test_default_and_cpu_fallback_preserve_checkpoint_keys() -> None:
 def test_incompatible_configuration_is_explicit(kwargs: dict[str, object]) -> None:
     """The request is never silently interpreted as another task's replay option.
 
-    The refusal comes from the shared replay-option validator, before any stage is built
-    or a hyperparameter recorded, as for the sibling capture flags. Its message names why
-    the compiler is refused while the segment objective still runs eager.
+    The refusal comes from the shared replay-option validator, before any stage is built or a hyperparameter recorded,
+    as for the sibling capture flags. Its message names why the compiler is refused while the segment objective still
+    runs eager.
     """
     options = {"depth": 0.34, "width": 0.25, "max_channels": 64, "num_classes": 4, "task": "segment"}
     options.update(kwargs)
@@ -249,9 +246,8 @@ def test_copy_and_pickle_drop_all_transient_state() -> None:
 def test_later_retire_cause_stays_silent() -> None:
     """Only the first cause of a fit is reported; the holder is already native afterwards.
 
-    A second retire in the same fit would repeat a warning about a state nothing can
-    change any more, so it must not warn at all. Matches
-    ``test_network_capture_guards.py::TestRetireWarning`` for the sibling detection-network
+    A second retire in the same fit would repeat a warning about a state nothing can change any more, so it must not
+    warn at all. Matches ``test_network_capture_guards.py::TestRetireWarning`` for the sibling detection-network
     recorder's identical disabled-guard contract.
     """
     holder = _SegmentHeadCapture(True)
@@ -317,14 +313,14 @@ def test_runner_refusal_names_cause_and_retires(alter: Callable[[DetectionLitMod
     assert record[0].filename == __file__
 
 
-def test_unreadable_precision_policy_retires_with_torch_text(monkeypatch: pytest.MonkeyPatch) -> None:
+@patch("lucid_yolo.ptl.segment_head_capture._precision_signature", refuse_precision_query)
+def test_unreadable_precision_policy_retires_with_torch_text() -> None:
     """A precision query torch refuses retires with torch's own error text after the cause.
 
     Losing that text leaves a user unable to tell a mixed legacy/new precision API from any other reason the
     prediction groups went native. Matches the sibling recorder's
     ``test_network_capture_guards.py::TestPrecisionPolicy`` contract.
     """
-    monkeypatch.setattr("lucid_yolo.ptl.segment_head_capture._precision_signature", refuse_precision_query)
     module = _module(capture_segment_heads=True)
     _attach(module)
     holder = module._segment_head_capture
@@ -426,57 +422,58 @@ def test_cuda_outputs_gradients_updates_and_unused_masks_are_exact(
     replay._segment_head_capture.clear()
 
 
+def _stub_group(adapter: MagicMock, **state: object) -> _RecordedGroup:
+    """Build a recorded group around a mock ``adapter`` with a matching signature and no reached span.
+
+    Examples:
+        >>> _stub_group(MagicMock(), pending_backward=True).pending_backward
+        True
+    """
+    group = _RecordedGroup.__new__(_RecordedGroup)
+    group.signature = "matching"
+    group.spans = MagicMock(reached_by=MagicMock(return_value=False))
+    group.adapter = adapter
+    for name, value in state.items():
+        setattr(group, name, value)
+    return group
+
+
+@patch("lucid_yolo.ptl.segment_head_capture._input_signature", new=lambda *_, **__: "matching")
 def test_recorded_group_run_replays_when_nothing_forces_native() -> None:
     """``run`` calls the graphed adapter, not ``.eager``, once the recorded signature matches.
 
-    The CUDA tests above only assert ``len(entries) == 16`` and bit-identical output and
-    gradients. Both still hold if this method's native/pending/signature guard were broken
-    so every reuse silently fell back to ``.eager`` -- that branch is the exact native
-    computation, so it cannot diverge from the native arm it is compared against. This
-    isolates the guard with a mock adapter so a future regression that always, or never,
-    takes the fallback fails here, on CPU, without a recorded CUDA graph.
+    The CUDA tests above only assert ``len(entries) == 16`` and bit-identical output and gradients. Both still hold if
+    this method's native/pending/signature guard were broken so every reuse silently fell back to ``.eager`` -- that
+    branch is the exact native computation, so it cannot diverge from the native arm it is compared against. This
+    isolates the guard with a mock adapter so a future regression that always, or never, takes the fallback fails here,
+    on CPU, without a recorded CUDA graph.
     """
-    group = _RecordedGroup.__new__(_RecordedGroup)
-    group.pending_backward = False
-    group.parameters = ()
-    group.signature = "matching"
-    group.spans = MagicMock(reached_by=MagicMock(return_value=False))
-    group.adapter = MagicMock(return_value=(torch.zeros(1),))
+    group = _stub_group(MagicMock(return_value=(torch.zeros(1),)), pending_backward=False, parameters=())
     inputs = (object(),)
-    with patch("lucid_yolo.ptl.segment_head_capture._input_signature", return_value="matching"):
-        group.run(inputs)
+    group.run(inputs)
     group.adapter.assert_called_once_with(*inputs)
     group.adapter.eager.assert_not_called()
 
 
+@patch("lucid_yolo.ptl.segment_head_capture._input_signature", new=lambda *_, **__: "matching")
 def test_recorded_group_run_stays_native_when_backward_pending() -> None:
     """``run`` calls ``.eager``, not the graphed adapter, while a prior backward is pending."""
-    group = _RecordedGroup.__new__(_RecordedGroup)
-    group.pending_backward = True
-    group.signature = "matching"
-    group.spans = MagicMock(reached_by=MagicMock(return_value=False))
-    group.adapter = MagicMock(eager=MagicMock(return_value=(torch.zeros(1),)))
+    group = _stub_group(MagicMock(eager=MagicMock(return_value=(torch.zeros(1),))), pending_backward=True)
     inputs = (object(),)
-    with patch("lucid_yolo.ptl.segment_head_capture._input_signature", return_value="matching"):
-        group.run(inputs)
+    group.run(inputs)
     group.adapter.eager.assert_called_once_with(inputs)
     group.adapter.assert_not_called()
 
 
+@patch("lucid_yolo.ptl.segment_head_capture._input_signature", new=lambda *_, **__: "matching")
 def test_recorded_group_output_without_backward_node_never_holds() -> None:
     """A replay of a fully frozen group has no backward to wait for, so nothing is held.
 
     The mocked adapter returns a tensor with no ``grad_fn``, so no backward hook can ever register and
     release the group; holding it would force every later forward of the fit native.
     """
-    group = _RecordedGroup.__new__(_RecordedGroup)
-    group.pending_backward = False
-    group.parameters = ()
-    group.signature = "matching"
-    group.spans = MagicMock(reached_by=MagicMock(return_value=False))
-    group.adapter = MagicMock(return_value=(torch.ones(3),))
-    with patch("lucid_yolo.ptl.segment_head_capture._input_signature", return_value="matching"):
-        group.run((object(),))
+    group = _stub_group(MagicMock(return_value=(torch.ones(3),)), pending_backward=False, parameters=())
+    group.run((object(),))
     assert not group.pending_backward
 
 
@@ -715,9 +712,8 @@ def test_cuda_contract_changes_retire_and_keep_native_observability(change: str)
 def test_cuda_fit_replays_through_real_optimizer_callbacks_and_validation() -> None:
     """Replay the real segmentation objective across validation under automatic MuSGD and EMA.
 
-    Observe actual CUDA graph launches after the first recording and again after
-    validation, so cached entries alone cannot make a permanent native fallback
-    pass. Other recorder options stay off to isolate the prediction graphs.
+    Observe actual CUDA graph launches after the first recording and again after validation, so cached entries alone
+    cannot make a permanent native fallback pass. Other recorder options stay off to isolate the prediction graphs.
 
     Examples:
         >>> callable(test_cuda_fit_replays_through_real_optimizer_callbacks_and_validation)
@@ -975,13 +971,11 @@ def test_lazy_negative_parameter_view_is_not_certified_with_unchanged_storage() 
 def test_recorded_group_synchronizes_before_buffer_restore() -> None:
     """A warmup failure synchronizes the device before the BatchNorm snapshot is copied back.
 
-    A prediction group warms up on its own side stream via
-    ``torch.cuda.make_graphed_callables``, the same primitive
-    :class:`~lucid_yolo.ptl.network_capture._NetworkCapture` uses. Without the
-    drain, the restore on the current stream can race BatchNorm writes the
-    failed warmup left queued; this is the same hazard
-    ``test_network_capture_guards.py::TestFailedRecording`` covers for the
-    sibling detection-network recording, exercised here for a prediction group.
+    A prediction group warms up on its own side stream via ``torch.cuda.make_graphed_callables``, the same primitive
+    :class:`~lucid_yolo.ptl.network_capture._NetworkCapture` uses. Without the drain, the restore on the current stream
+    can race BatchNorm writes the failed warmup left queued; this is the same hazard
+    ``test_network_capture_guards.py::TestFailedRecording`` covers for the sibling detection-network recording,
+    exercised here for a prediction group.
     """
     stage = _build_box_stem(16).cuda().train()
     images = torch.randn(1, 16, 8, 8, device="cuda")

@@ -1,137 +1,118 @@
 # SPDX-License-Identifier: Apache-2.0
 """Merge overlapping-tile detections back onto whole source images (WP-107).
 
-The step WP-063 deferred, WP-088's scope never took up and 0.3.0 shipped without. Until
-this module existed every oriented figure this project published was **per tile**: an
-object crossing a 1024 px seam was counted once in each tile that saw it, and a per-tile
-score never pays the duplicate-detection cost a whole-image score charges. A per-tile
-number is therefore comparable to nothing outside this repository, and R1 Tables 10-11
-are whole-image numbers.
+The step WP-063 deferred, WP-088's scope never took up and 0.3.0 shipped without. Until this module existed every
+oriented figure this project published was **per tile**: an object crossing a 1024 px seam was counted once in each
+tile that saw it, and a per-tile score never pays the duplicate-detection cost a whole-image score charges. A
+per-tile number is therefore comparable to nothing outside this repository, and R1 Tables 10-11 are whole-image
+numbers.
 
 The merge rule: **core ownership**
-    Each tile owns a *core* — the rectangle of source-image coordinates lying closer to
-    that tile's window than to any neighbouring window. A detection survives the merge
-    if and only if its centre, mapped into source-image coordinates, lies in the core of
-    the tile that produced it. Everything else is discarded, before anything is scored.
+    Each tile owns a *core* — the rectangle of source-image coordinates lying closer to that tile's window than to
+    any neighbouring window. A detection survives the merge if and only if its centre, mapped into source-image
+    coordinates, lies in the core of the tile that produced it. Everything else is discarded, before anything is
+    scored.
 
-    The cores are built from the recorded windows alone (:func:`core_bounds`): on each
-    axis the boundary between two neighbouring windows is placed at the **midpoint of
-    their overlap band**, and the outer bounds run to infinity. They therefore *partition
-    the plane*: every point of every source image lies in the core of exactly one tile,
-    so an object contributes at most one detection however many tiles saw it.
+    The cores are built from the recorded windows alone (:func:`core_bounds`): on each axis the boundary between
+    two neighbouring windows is placed at the **midpoint of their overlap band**, and the outer bounds run to
+    infinity. They therefore *partition the plane*: every point of every source image lies in the core of exactly one
+    tile, so an object contributes at most one detection however many tiles saw it.
 
 Why this rule, given that the architecture is suppression-free
-    R1's whole claim for the one-to-one branch is that it needs no NMS. Two overlapping
-    tiles that both see one object emit two detections at full confidence and there is no
-    suppression stage to remove either, so the merge is where a duplicate rule has to be
-    stated — and stating it as a suppression step would quietly reintroduce, at the seam,
-    exactly what the architecture exists to avoid.
+    R1's whole claim for the one-to-one branch is that it needs no NMS. Two overlapping tiles that both see one
+    object emit two detections at full confidence and there is no suppression stage to remove either, so the merge
+    is where a duplicate rule has to be stated — and stating it as a suppression step would quietly reintroduce,
+    at the seam, exactly what the architecture exists to avoid.
 
-    Core ownership is not suppression, in the strict sense that matters here. A detection
-    is kept or dropped by **where it is**, decided by the tiling geometry before the model
-    runs: it is never compared against another detection, never ranked by confidence, and
-    is dropped whether or not the neighbouring tile detected anything at all. Run the
-    model twice with different weights and the same detection is owned by the same tile.
-    That is an ownership assignment over a partition of the image, and it composes with a
-    suppression-free detector without borrowing anything from one.
+    Core ownership is not suppression, in the strict sense that matters here. A detection is kept or dropped by
+    **where it is**, decided by the tiling geometry before the model runs: it is never compared against another
+    detection, never ranked by confidence, and is dropped whether or not the neighbouring tile detected anything at
+    all. Run the model twice with different weights and the same detection is owned by the same tile. That is an
+    ownership assignment over a partition of the image, and it composes with a suppression-free detector without
+    borrowing anything from one.
 
-    It also matches the protocol that produced the tiles. With overlap ``v``, a tile's
-    core ends ``v / 2`` inside its own window on every side (the boundary sits at the
-    middle of the overlap band, and the band is ``v`` wide), so **every object whose
-    circumradius is at most ``v / 2`` is wholly visible to the tile that owns its
-    centre**. R18 chose stride 512 on a 1024 patch precisely so that objects are seen
-    whole somewhere; core ownership is the merge that cashes that guarantee in.
+    It also matches the protocol that produced the tiles. With overlap ``v``, a tile's core ends ``v / 2`` inside
+    its own window on every side (the boundary sits at the middle of the overlap band, and the band is ``v`` wide),
+    so **every object whose circumradius is at most ``v / 2`` is wholly visible to the tile that owns its centre**.
+    R18 chose stride 512 on a 1024 patch precisely so that objects are seen whole somewhere; core ownership is the
+    merge that cashes that guarantee in.
 
 What it costs, stated plainly
-    1. **One shot per object.** Whole-image recall is the *owning* tile's recall, not the
-       union of every tile's. If the owner misses an object its neighbour detected, the
-       image misses it. That is the price of refusing a confidence-ranked union, and it
-       is a real cost: this merge can only lower the number a per-tile score reports.
-    2. **Objects wider than the overlap are unreliable under any tile-local rule.** They
-       are truncated in every tile that sees them, so no ownership assignment recovers
-       the whole object, and the same width bound is what admits the two residual failure
-       modes below. DOTA has such objects — bridges, harbours, soccer fields.
-    3. **Localization jitter at a core boundary can double a detection.** Two tiles
-       detecting one object whose centre sits within a pixel or two of a core boundary
-       may place their centres on opposite sides of it and both survive. The boundary
-       lies ``v / 2`` from either seam, where both tiles see the object with the most
-       context they will ever have, so the two centres agree closely; the mode is
-       bounded and rare, not absent.
+    1. **One shot per object.** Whole-image recall is the *owning* tile's recall, not the union of every tile's. If
+       the owner misses an object its neighbour detected, the image misses it. That is the price of refusing a
+       confidence-ranked union, and it is a real cost: this merge can only lower the number a per-tile score reports.
+    2. **Objects wider than the overlap are unreliable under any tile-local rule.** They are truncated in every
+       tile that sees them, so no ownership assignment recovers the whole object, and the same width bound is what
+       admits the two residual failure modes below. DOTA has such objects — bridges, harbours, soccer fields.
+    3. **Localization jitter at a core boundary can double a detection.** Two tiles detecting one object whose
+       centre sits within a pixel or two of a core boundary may place their centres on opposite sides of it and both
+       survive. The boundary lies ``v / 2`` from either seam, where both tiles see the object with the most context
+       they will ever have, so the two centres agree closely; the mode is bounded and rare, not absent.
 
 Ground truth, and why it is reconstructed by the same rule
-    Whole-image ground truth is assembled from the tiles' own annotations — each mapped
-    into source coordinates by its window origin, then passed through the identical
-    ownership filter. No second policy, no IoU threshold, no dedup heuristic.
+    Whole-image ground truth is assembled from the tiles' own annotations — each mapped into source coordinates by
+    its window origin, then passed through the identical ownership filter. No second policy, no IoU threshold, no
+    dedup heuristic.
 
-    That is exact rather than approximate for the instances that matter, and the argument
-    is R18's own 0.7 rule. A part at or above the threshold keeps *the original
-    annotation, translated*: every tile holding an object at ``U >= 0.7`` reports the same
-    source-coordinate centre, the cores partition the plane, so exactly one of those
-    copies is kept — double-counting a non-difficult ground truth is structurally
-    impossible, not merely unlikely. A clipped copy has a centre displaced towards its own
-    tile's interior and is by construction flagged *difficult* (``U < 0.7``), which under
-    A48 puts it in the discard class: it stays out of the recall denominator, and A48's
-    non-difficult-first precedence stops it shadowing a real target. So such a straggler
-    can never cost a true positive or a recall point.
+    That is exact rather than approximate for the instances that matter, and the argument is R18's own 0.7 rule. A
+    part at or above the threshold keeps *the original annotation, translated*: every tile holding an object at
+    ``U >= 0.7`` reports the same source-coordinate centre, the cores partition the plane, so exactly one of those
+    copies is kept — double-counting a non-difficult ground truth is structurally impossible, not merely unlikely.
+    A clipped copy has a centre displaced towards its own tile's interior and is by construction flagged *difficult*
+    (``U < 0.7``), which under A48 puts it in the discard class: it stays out of the recall denominator, and A48's
+    non-difficult-first precedence stops it shadowing a real target. So such a straggler can never cost a true
+    positive or a recall point.
 
-    It is **not** neutral, and this is the merge's one flattering residual. A detection
-    that finds a straggler is discarded rather than counted, where against the true
-    whole-image annotation set — which has no straggler in it — the same detection would
-    have been a false positive. Discarding false positives raises precision. The effect is
-    bounded to objects wider than the overlap (nothing narrower can displace a clipped
-    centre across a core boundary — the same width bound as the two costs above), it is
-    the discard R18's devkit applies to difficult instances by design rather than
-    something invented here, and it is measured in
-    ``tests/eval/test_tile_merge.py::TestGroundTruthReconstruction``: on that fixture the
-    absorption is worth 0.165 of ``map_50``. A report quoting a whole-image figure quotes
-    one that errs upward by that mechanism and by no other.
+    It is **not** neutral, and this is the merge's one flattering residual. A detection that finds a straggler is
+    discarded rather than counted, where against the true whole-image annotation set — which has no straggler in
+    it — the same detection would have been a false positive. Discarding false positives raises precision. The
+    effect is bounded to objects wider than the overlap (nothing narrower can displace a clipped centre across a
+    core boundary — the same width bound as the two costs above), it is the discard R18's devkit applies to difficult
+    instances by design rather than something invented here, and it is measured in
+    ``tests/eval/test_tile_merge.py::TestGroundTruthReconstruction``: on that fixture the absorption is worth
+    0.165 of ``map_50``. A report quoting a whole-image figure quotes one that errs upward by that mechanism and by
+    no other.
 
-    The alternative — reading the original whole-image label files — is more faithful and
-    was rejected on coupling: the evaluation would need the source dataset root beside the
-    tiled one, and a dataset-specific label parser on a path whose whole layout (WP-094)
-    is deliberately dataset-agnostic. A53 put ``source_image`` and ``window`` on every
-    tile record for exactly this reason, and they are sufficient.
+    The alternative — reading the original whole-image label files — is more faithful and was rejected on coupling:
+    the evaluation would need the source dataset root beside the tiled one, and a dataset-specific label parser on
+    a path whose whole layout (WP-094) is deliberately dataset-agnostic. A53 put ``source_image`` and ``window`` on
+    every tile record for exactly this reason, and they are sufficient.
 
 Alternatives considered and rejected
-    - **Centre-in-tile ownership** (keep a detection whose centre lies inside its own
-      window). Ambiguous where it matters: in the overlap band a centre lies inside two or
-      four windows, so it needs a tie-break, and every tie-break is either this module's
-      partition or a suppression rule wearing a different name.
-    - **Interior-only acceptance by a fixed margin** (drop detections within ``m`` pixels
-      of a tile edge). Not a partition: a band of the source image is owned by no tile
-      when ``m`` exceeds the overlap and by two when it does not, so it either invents
-      blind strips or leaves the duplicates it was meant to remove.
-    - **Confidence-ranked dedup by rotated IoU.** This is NMS at the seam. It is a
-      defensible engineering answer and it would score higher than this module does, by
-      taking the union of the tiles' recalls rather than the owner's. It is not taken
-      because the number is meant to be an honest measurement of a suppression-free
-      pipeline, and a pipeline that runs NMS on its output is not one. It also needs an
-      IoU threshold no source states.
-    - **Weighted box fusion.** Averages duplicate boxes into a consensus box. It needs the
-      same clustering threshold NMS does, and then emits geometry no forward pass
-      produced — a box whose provenance is the merge rather than the model.
+    - **Centre-in-tile ownership** (keep a detection whose centre lies inside its own window). Ambiguous where it
+      matters: in the overlap band a centre lies inside two or four windows, so it needs a tie-break, and every
+      tie-break is either this module's partition or a suppression rule wearing a different name.
+    - **Interior-only acceptance by a fixed margin** (drop detections within ``m`` pixels of a tile edge). Not a
+      partition: a band of the source image is owned by no tile when ``m`` exceeds the overlap and by two when it
+      does not, so it either invents blind strips or leaves the duplicates it was meant to remove.
+    - **Confidence-ranked dedup by rotated IoU.** This is NMS at the seam. It is a defensible engineering answer
+      and it would score higher than this module does, by taking the union of the tiles' recalls rather than the
+      owner's. It is not taken because the number is meant to be an honest measurement of a suppression-free
+      pipeline, and a pipeline that runs NMS on its output is not one. It also needs an IoU threshold no source
+      states.
+    - **Weighted box fusion.** Averages duplicate boxes into a consensus box. It needs the same clustering threshold
+      NMS does, and then emits geometry no forward pass produced — a box whose provenance is the merge rather than
+      the model.
 
 Detection cap (A47, and the deviation this path makes)
     ``MAX_DETECTIONS = 300`` is per *evaluation unit*, and it is 300 because that is what
-    :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` emits per forward pass. A whole
-    source image is many forward passes, so the merged pipeline can emit ``300 x tiles``
-    detections for it and re-capping the merged image at 300 would measure a truncation
-    rather than the model — a dense DOTA image carries far more than 300 instances. The
-    whole-image path therefore scores with the cap **off**
-    (``evaluate_rotated_map(..., max_detections=None)``); the per-tile cap still applies,
-    at emission, where A47 put it. The per-tile path is untouched.
+    :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` emits per forward pass. A whole source image is many
+    forward passes, so the merged pipeline can emit ``300 x tiles`` detections for it and re-capping the merged
+    image at 300 would measure a truncation rather than the model — a dense DOTA image carries far more than 300
+    instances. The whole-image path therefore scores with the cap **off**
+    (``evaluate_rotated_map(..., max_detections=None)``); the per-tile cap still applies, at emission, where A47
+    put it. The per-tile path is untouched.
 
 Coordinates
-    Detections arrive in the letterboxed frame the model saw. They are returned to tile
-    pixels by :func:`~lucid_yolo.decode.common.rboxes_to_letterboxed_original` — the
-    existing exact inverse, which is the only definition of the letterbox geometry this
-    path touches — and the tile's window origin is then added as a plain translation.
-    Nothing here computes a pad, a ratio or a corner. Ground truth needs no inverse at
-    all: the annotations are in tile pixels already, so only the translation applies.
+    Detections arrive in the letterboxed frame the model saw. They are returned to tile pixels by
+    :func:`~lucid_yolo.decode.common.rboxes_to_letterboxed_original` — the existing exact inverse, which is the only
+    definition of the letterbox geometry this path touches — and the tile's window origin is then added as a plain
+    translation. Nothing here computes a pad, a ratio or a corner. Ground truth needs no inverse at all: the
+    annotations are in tile pixels already, so only the translation applies.
 
-Provenance: R18 sec. 4 (the crop protocol and the 0.7 rule the reconstruction rests on),
-R1 sec. 3.2.1 (the suppression-free branch this must not undo), R1 Tables 10-11 (the
-whole-image figures a merged number is finally comparable to).
+Provenance: R18 sec. 4 (the crop protocol and the 0.7 rule the reconstruction rests on), R1 sec. 3.2.1 (the
+suppression-free branch this must not undo), R1 Tables 10-11 (the whole-image figures a merged number is finally
+comparable to).
 Assumptions: A45, A46, A47, A48, A53.
 """
 
@@ -208,23 +189,19 @@ class TileWindow:
 class TileIndex:
     """One split's tiles: where each sat, and what it was annotated with.
 
-    The two tuples share one axis, and that axis is the order
-    :class:`~lucid_yolo.data.coco.CocoDetectionDataset` reads images in — ascending COCO
-    image id — so entry ``i`` describes the same tile the unshuffled val loader yields
-    ``i``-th. That positional correspondence is the whole coupling between this module and
-    the loader; nothing else about the loader is assumed.
+    The two tuples share one axis, and that axis is the order :class:`~lucid_yolo.data.coco.CocoDetectionDataset`
+    reads images in — ascending COCO image id — so entry ``i`` describes the same tile the unshuffled val loader
+    yields ``i``-th. That positional correspondence is the whole coupling between this module and the loader;
+    nothing else about the loader is assumed.
 
     It is also checked rather than assumed, at the one place that consumes it:
-    :func:`~lucid_yolo.eval.rotated_eval.score_split` compares each position's
-    :attr:`TileWindow.tile_id` against the val dataset's own
-    :attr:`~lucid_yolo.data.coco.CocoDetectionDataset.image_ids` at that position, and
-    each yielded tile's labels and difficult flags against :attr:`ground_truth` there.
-    The two catch different things and neither subsumes the other: the ids compare the
-    index against the dataset it is meant to describe, which a re-sorted or differently
-    built reader breaks even when the tiles involved carry identical annotations, while
-    the annotation sets are the only trace of the *loader's* own yield order, which
-    carries no ids. A split that fails either is refused instead of translating
-    detections by another tile's window origin.
+    :func:`~lucid_yolo.eval.rotated_eval.score_split` compares each position's :attr:`TileWindow.tile_id` against
+    the val dataset's own :attr:`~lucid_yolo.data.coco.CocoDetectionDataset.image_ids` at that position, and each
+    yielded tile's labels and difficult flags against :attr:`ground_truth` there. The two catch different things and
+    neither subsumes the other: the ids compare the index against the dataset it is meant to describe, which a
+    re-sorted or differently built reader breaks even when the tiles involved carry identical annotations, while the
+    annotation sets are the only trace of the *loader's* own yield order, which carries no ids. A split that fails
+    either is refused instead of translating detections by another tile's window origin.
 
     Attributes:
         windows: One :class:`TileWindow` per tile.
@@ -247,10 +224,9 @@ class TileIndex:
 def load_tile_index(ann_file: Path) -> TileIndex | None:
     """Read a tiled split's window provenance and per-tile ground truth.
 
-    Returns ``None`` — rather than raising — when the file is an ordinary COCO container
-    whose image records carry no ``source_image``/``window`` keys. Such a layout was not
-    written by ``lucid-data build-tiles``, so it has no tiles to merge and no whole-image
-    figure to report; the caller says so and reports the per-tile number alone.
+    Returns ``None`` — rather than raising — when the file is an ordinary COCO container whose image records carry
+    no ``source_image``/``window`` keys. Such a layout was not written by ``lucid-data build-tiles``, so it has no
+    tiles to merge and no whole-image figure to report; the caller says so and reports the per-tile number alone.
 
     Args:
         ann_file: A COCO ``instances_<split>.json`` written by
@@ -297,15 +273,13 @@ def load_tile_index(ann_file: Path) -> TileIndex | None:
 def core_bounds(windows: Sequence[TileWindow]) -> Tensor:
     """Build the core rectangle of every tile of **one** source image.
 
-    On each axis the boundary between neighbouring window strips is the midpoint of their
-    overlap band, and the outermost bounds are infinite. The result therefore partitions
-    the plane: every point lies in exactly one tile's core, including points outside the
-    source image, so a detection whose centre falls off the edge is owned rather than
-    silently dropped.
+    On each axis the boundary between neighbouring window strips is the midpoint of their overlap band, and the
+    outermost bounds are infinite. The result therefore partitions the plane: every point lies in exactly one tile's
+    core, including points outside the source image, so a detection whose centre falls off the edge is owned rather
+    than silently dropped.
 
-    A single window yields a single infinite core, which is what makes the whole-image
-    path an identity on a one-tile image: nothing can be disowned when one tile owns
-    everything.
+    A single window yields a single infinite core, which is what makes the whole-image path an identity on a one-tile
+    image: nothing can be disowned when one tile owns everything.
 
     Args:
         windows: The tiles of one source image, in any order. All are assumed to come from
@@ -352,9 +326,8 @@ def core_bounds(windows: Sequence[TileWindow]) -> Tensor:
 def in_core(centres: Tensor, core: Tensor) -> Tensor:
     """Test which centres a tile's core owns.
 
-    The low bounds are inclusive and the high bounds exclusive, which is what makes
-    neighbouring cores meet without overlapping: a centre exactly on a boundary belongs to
-    the tile on the far side, once.
+    The low bounds are inclusive and the high bounds exclusive, which is what makes neighbouring cores meet without
+    overlapping: a centre exactly on a boundary belongs to the tile on the far side, once.
 
     Args:
         centres: ``(N, 2)`` ``(x, y)`` centres in source-image pixels.
@@ -393,11 +366,10 @@ def tile_detections_to_source(
     """Map one tile's oriented detections from the letterboxed canvas into source pixels.
 
     Two steps, in this order and no others. The letterbox is undone by
-    :func:`~lucid_yolo.decode.common.rboxes_to_letterboxed_original`, the exact analytic
-    inverse that already owns that geometry; the window origin is then **added**, because
-    a tile offset is a translation and nothing more. Score-zero padding rows are dropped
-    before either step reaches the caller, so they cannot survive an ownership test as
-    zero-confidence detections parked at the window origin.
+    :func:`~lucid_yolo.decode.common.rboxes_to_letterboxed_original`, the exact analytic inverse that already owns
+    that geometry; the window origin is then **added**, because a tile offset is a translation and nothing more.
+    Score-zero padding rows are dropped before either step reaches the caller, so they cannot survive an ownership
+    test as zero-confidence detections parked at the window origin.
 
     Args:
         detections: ``(N, 7)`` A45 tuples ``[cx, cy, w, h, theta, score, class]`` for one
@@ -440,16 +412,14 @@ def merge_whole_images(
 ) -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]], list[str]]:
     """Assemble per-source-image predictions and ground truth from per-tile ones.
 
-    Both sides go through the same core-ownership filter (module docstring), so a
-    detection and the ground truth it should match are kept or dropped by one rule.
-    Every source image contributes an entry even when nothing of it survived, because
-    :func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map` aligns its two sequences by
+    Both sides go through the same core-ownership filter (module docstring), so a detection and the ground truth
+    it should match are kept or dropped by one rule. Every source image contributes an entry even when nothing of
+    it survived, because :func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map` aligns its two sequences by
     position: an image dropped from one side and not the other would shift the pairing.
 
-    A short ``tile_predictions`` is accepted, for the ``--limit`` path that stops
-    part-way through a split. Its prefix is merged and the trailing source image is
-    **dropped when incomplete** — scoring an image assembled from some of its tiles would
-    report a recall the pipeline never had a chance to attain.
+    A short ``tile_predictions`` is accepted, for the ``--limit`` path that stops part-way through a split. Its
+    prefix is merged and the trailing source image is **dropped when incomplete** — scoring an image assembled from
+    some of its tiles would report a recall the pipeline never had a chance to attain.
 
     Args:
         index: The split's :class:`TileIndex`.
@@ -635,12 +605,11 @@ def _translate(rboxes: Tensor, origin: tuple[int, int]) -> Tensor:
 def _axis_cores(spans: Sequence[tuple[int, int]], axis: str) -> dict[int, tuple[float, float]]:
     """Place one axis's core boundaries at the midpoints of the overlap bands.
 
-    The intervals are keyed on the window **start**, which is what makes the boundary a
-    property of the strip rather than of the individual tile — every tile of a row shares
-    one horizontal strip, and a uniform tiler emits exactly that. Two windows sharing a
-    start with *different* ends are a different tiling: one strip start would then need
-    two boundaries, and keying on the start alone would silently keep whichever span was
-    read last and partition the axis by it. That is refused rather than approximated.
+    The intervals are keyed on the window **start**, which is what makes the boundary a property of the strip rather
+    than of the individual tile — every tile of a row shares one horizontal strip, and a uniform tiler emits exactly
+    that. Two windows sharing a start with *different* ends are a different tiling: one strip start would then need
+    two boundaries, and keying on the start alone would silently keep whichever span was read last and partition
+    the axis by it. That is refused rather than approximated.
 
     Args:
         spans: One ``(start, end)`` pair per window on this axis, repeats included.

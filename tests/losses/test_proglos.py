@@ -1,16 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for the progressive dual-loss schedule (WP-035).
 
-Covers the DoD ``alpha(t)`` unit test reproducing R1 Eq. 3 exactly at
-``t in {0, E/2, E-1}`` for ``E in {2, 10, 100}`` (plus the hand-computed midpoint
-of an odd-``E`` run and the ``E == 1`` max-guard degenerate case), the
+Covers the DoD ``alpha(t)`` unit test reproducing R1 Eq. 3 exactly at ``t in {0, E/2, E-1}`` for ``E in {2, 10, 100}``
+(plus the hand-computed midpoint of an odd-``E`` run and the ``E == 1`` max-guard degenerate case), the
 monotone-non-increasing shape of the ramp across every epoch, the
-:class:`~lucid_yolo.losses.progressive.ProgressiveLossSchedule` delegating to the
-pure function, and the module wiring: a three-epoch ``Trainer`` run steps
-:attr:`~lucid_yolo.ptl.module.DetectionLitModule.alpha` through the exact schedule
-values ``[0.8, 0.45, 0.1]`` epoch by epoch, captured by a callback that reads
-``alpha`` on the first batch of each epoch (after the module's
-``on_train_epoch_start`` hook has run).
+:class:`~lucid_yolo.losses.progressive.ProgressiveLossSchedule` delegating to the pure function, and the module
+wiring: a three-epoch ``Trainer`` run steps :attr:`~lucid_yolo.ptl.module.DetectionLitModule.alpha` through the exact
+schedule values ``[0.8, 0.45, 0.1]`` epoch by epoch, captured by a callback that reads ``alpha`` on the first batch of
+each epoch (after the module's ``on_train_epoch_start`` hook has run).
 """
 
 from __future__ import annotations
@@ -62,9 +59,7 @@ def test_schedule_delegates_to_pure_function() -> None:
     assert schedule.alpha_at(5, 11) == pytest.approx(progressive_alpha(5, 11, 0.8, 0.1))
 
 
-@pytest.mark.parametrize(
-    "total_epochs", [pytest.param(2, id="E2"), pytest.param(10, id="E10"), pytest.param(101, id="E101")]
-)
+@pytest.mark.parametrize("total_epochs", [2, 10, 101])
 def test_alpha_monotone_non_increasing(total_epochs: int) -> None:
     """The per-epoch weight never increases from one epoch to the next."""
     values = [progressive_alpha(epoch, total_epochs) for epoch in range(total_epochs)]
@@ -125,10 +120,9 @@ def test_module_alpha_steps_through_schedule() -> None:
 class TestRampDomain:
     """The ramp is clamped at both ends, and a schedule with no epochs is refused (L-08).
 
-    The upper clamp and the ``total_epochs`` check are guards on inputs the training
-    path does not produce — :meth:`DetectionLitModule.on_train_epoch_start` already
-    returns early for a non-positive ``max_epochs`` — so they change no scheduled
-    value. What they remove is a plausible-looking answer to a nonsense question.
+    The upper clamp and the ``total_epochs`` check are guards on inputs the training path does not produce —
+    :meth:`DetectionLitModule.on_train_epoch_start` already returns early for a non-positive ``max_epochs`` — so they
+    change no scheduled value. What they remove is a plausible-looking answer to a nonsense question.
     """
 
     @pytest.mark.parametrize("epoch", [-1, -10, -1000])

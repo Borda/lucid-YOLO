@@ -1,18 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the A8 warmup + linear-decay LR factor (WP-072).
 
-Covers the pure :func:`~lucid_yolo.optim.schedule.warmup_decay_factor` contract
-(warmup ramp endpoints, decay endpoints, the ``lrf`` floor, the no-warmup form)
-and the module wiring: ``configure_optimizers`` pairs MuSGD with a step-interval
-``LambdaLR`` when a trainer with an epoch budget is attached, and degrades to
-the bare constant-LR optimizer when the schedule is disabled or no trainer is
-attached (the overfit-100 recipe and direct tool calls rely on both fallbacks).
+Covers the pure :func:`~lucid_yolo.optim.schedule.warmup_decay_factor` contract (warmup ramp endpoints, decay endpoints,
+the ``lrf`` floor, the no-warmup form) and the module wiring: ``configure_optimizers`` pairs MuSGD with a step-interval
+``LambdaLR`` when a trainer with an epoch budget is attached, and degrades to the bare constant-LR optimizer when the
+schedule is disabled or no trainer is attached (the overfit-100 recipe and direct tool calls rely on both fallbacks).
 """
 
 from __future__ import annotations
 
 import warnings
 from itertools import pairwise
+from unittest.mock import patch
 
 import pytest
 from pytorch_lightning import Trainer
@@ -59,22 +58,20 @@ class TestWarmupDecayFactor:
     def test_reaches_lrf_on_runs_last_step(self, total: int, warmup: int, lrf: float) -> None:
         """The floor is hit at ``total_steps - 1``, the last step a run of that length takes.
 
-        ``LambdaLR`` is called with zero-based step indices, so a run of ``total``
-        steps never evaluates index ``total``. Anchoring the decay there left the
-        schedule short of its own floor — at the 100-step shape the final factor was
-        0.021, twice the requested 0.01 — and the miss widens as runs get shorter,
-        which is the wrong direction for this project's short smoke tiers.
+        ``LambdaLR`` is called with zero-based step indices, so a run of ``total`` steps never evaluates index
+        ``total``. Anchoring the decay there left the schedule short of its own floor — at the 100-step shape the final
+        factor was 0.021, twice the requested 0.01 — and the miss widens as runs get shorter, which is the wrong
+        direction for this project's short smoke tiers.
         """
         assert warmup_decay_factor(total - 1, total, warmup, lrf) == pytest.approx(lrf)
 
     def test_warmup_covering_all_but_one_step_never_decays(self) -> None:
         """``warmup_steps == total_steps - 1`` peaks at 1.0 and never reaches the floor.
 
-        The boundary the caller-side clamp lands on, pinned here so it is a stated
-        limit rather than a surprise. Such a run has exactly one post-warmup step,
-        so the decay's own span is empty and its single sample sits at progress 0.
-        The floor is unreachable for this shape by construction — no schedule
-        arithmetic recovers it, only leaving fewer warmup steps does.
+        The boundary the caller-side clamp lands on, pinned here so it is a stated limit rather than a surprise. Such a
+        run has exactly one post-warmup step, so the decay's own span is empty and its single sample sits at progress 0.
+        The floor is unreachable for this shape by construction — no schedule arithmetic recovers it, only leaving
+        fewer warmup steps does.
         """
         assert warmup_decay_factor(1, 2, 1, 0.2) == pytest.approx(1.0)
 
@@ -97,6 +94,22 @@ def _module(**kwargs: float) -> DetectionLitModule:
     return DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4, **kwargs)
 
 
+def _attach_trainer(module: DetectionLitModule, max_epochs: int, limit_train_batches: int) -> None:
+    """Attach an epoch-budgeted trainer to ``module`` the way fitting would, without running it.
+
+    Examples:
+        >>> module = _module()
+        >>> _attach_trainer(module, 5, 10)
+        >>> module.trainer.max_epochs
+        5
+    """
+    trainer = Trainer(
+        max_epochs=max_epochs, limit_train_batches=limit_train_batches, logger=False, enable_progress_bar=False
+    )
+    trainer.strategy._lightning_module = module
+    module.trainer = trainer
+
+
 class TestConfigureOptimizers:
     """Tests for ``DetectionLitModule.configure_optimizers``."""
 
@@ -105,15 +118,12 @@ class TestConfigureOptimizers:
         optimizer = _module().configure_optimizers()
         assert isinstance(optimizer, MuSGD)
 
-    def test_with_trainer_pairs_step_lambda_lr(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The real property loads a train dataloader to count batches; the schedule only needs the resulting integer.
+    @patch.object(Trainer, "estimated_stepping_batches", property(lambda self: 50))
+    def test_with_trainer_pairs_step_lambda_lr(self) -> None:
         """With an epoch-budgeted trainer attached, MuSGD comes wrapped with a step-interval LambdaLR."""
         module = _module()
-        trainer = Trainer(max_epochs=5, limit_train_batches=10, logger=False, enable_progress_bar=False)
-        trainer.strategy._lightning_module = module
-        module.trainer = trainer
-        # The real property loads a train dataloader to count batches; the schedule
-        # only needs the resulting integer.
-        monkeypatch.setattr(Trainer, "estimated_stepping_batches", property(lambda self: 50))
+        _attach_trainer(module, 5, 10)
         config = module.configure_optimizers()
         assert isinstance(config, dict)
         scheduler_config = config["lr_scheduler"]
@@ -123,29 +133,23 @@ class TestConfigureOptimizers:
     def test_schedule_disabled_returns_bare_musgd(self) -> None:
         """lrf >= 1 with warmup 0 (the overfit-100 recipe) keeps the bare optimizer under a trainer."""
         module = _module(lrf=1.0, warmup_epochs=0.0)
-        trainer = Trainer(max_epochs=5, limit_train_batches=10, logger=False, enable_progress_bar=False)
-        trainer.strategy._lightning_module = module
-        module.trainer = trainer
+        _attach_trainer(module, 5, 10)
         optimizer = module.configure_optimizers()
         assert isinstance(optimizer, MuSGD)
 
-    def test_warmup_longer_than_run_clamped_below_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(Trainer, "estimated_stepping_batches", property(lambda self: 50))
+    def test_warmup_longer_than_run_clamps_to_last_step(self) -> None:
         """A warmup budget exceeding the run is clamped to ``total_steps - 1``, with a warning.
 
-        ``warmup_epochs`` is a fraction of the run, so the 3-epoch default against a
-        1-3 epoch smoke budget asks for more warmup steps than the run has — here 5
-        warmup epochs of a 2-epoch run over 50 steps requests 125. Unclamped, every
-        step takes the ramp branch: the LR climbs for the whole run, peaks below
-        ``lr``, and never decays, silently. Clamped, the ramp completes exactly at
-        the final step. It reaches 1.0 there rather than ``lrf`` because a run that
-        is all warmup has no step left to decay on — the clamp buys back the peak,
-        not the floor.
+        ``warmup_epochs`` is a fraction of the run, so the 3-epoch default against a 1-3 epoch smoke budget asks for
+        more warmup steps than the run has — here 5 warmup epochs of a 2-epoch run over 50 steps requests 125.
+        Unclamped, every step takes the ramp branch: the LR climbs for the whole run, peaks below ``lr``, and never
+        decays, silently. Clamped, the ramp completes exactly at the final step. It reaches 1.0 there rather than
+        ``lrf`` because a run that is all warmup has no step left to decay on — the clamp buys back the peak, not the
+        floor.
         """
         module = _module(warmup_epochs=5.0)
-        trainer = Trainer(max_epochs=2, limit_train_batches=25, logger=False, enable_progress_bar=False)
-        trainer.strategy._lightning_module = module
-        module.trainer = trainer
-        monkeypatch.setattr(Trainer, "estimated_stepping_batches", property(lambda self: 50))
+        _attach_trainer(module, 2, 25)
 
         with pytest.warns(UserWarning, match="leave room for the decay"):
             config = module.configure_optimizers()
@@ -155,18 +159,15 @@ class TestConfigureOptimizers:
         assert factor(49) == pytest.approx(1.0)  # unclamped this would still be mid-ramp at 0.4
         assert factor(0) == pytest.approx(1 / 49)  # the ramp is 49 steps long, not the requested 125
 
-    def test_warmup_fitting_run_left_alone(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(Trainer, "estimated_stepping_batches", property(lambda self: 500))
+    def test_warmup_fitting_run_left_alone(self) -> None:
         """A warmup budget that fits the run is untouched and warns nothing.
 
-        The guard against over-clamping: the common case (3 warmup epochs of a
-        50-epoch run) must keep its exact requested ramp length, and the decay must
-        still reach the ``lrf`` floor on the run's last step.
+        The guard against over-clamping: the common case (3 warmup epochs of a 50-epoch run) must keep its exact
+        requested ramp length, and the decay must still reach the ``lrf`` floor on the run's last step.
         """
         module = _module(warmup_epochs=3.0, lrf=0.01)
-        trainer = Trainer(max_epochs=50, limit_train_batches=10, logger=False, enable_progress_bar=False)
-        trainer.strategy._lightning_module = module
-        module.trainer = trainer
-        monkeypatch.setattr(Trainer, "estimated_stepping_batches", property(lambda self: 500))
+        _attach_trainer(module, 50, 10)
 
         with warnings.catch_warnings():
             warnings.simplefilter("error")

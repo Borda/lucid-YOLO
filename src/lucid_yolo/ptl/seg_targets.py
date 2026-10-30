@@ -1,34 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 """Segmentation supervision targets built from the batch's polygons (WP-087).
 
-Two dense targets are needed to train the mask side of the model, and both are
-derived here from the very rings :class:`~lucid_yolo.data.targets.Targets` carries
-through augmentation:
+Two dense targets are needed to train the mask side of the model, and both are derived here from the very rings
+:class:`~lucid_yolo.data.targets.Targets` carries through augmentation:
 
-- **per-instance masks** on the prototype grid, which
-  :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` scores the assembled
-  Eq. 7 masks against; and
-- **the auxiliary semantic map** on the fused-feature grid — for each class, the
-  union of that class's instance masks — which
-  :func:`~lucid_yolo.losses.semantic_loss.semantic_aux_loss` supervises (A17).
+- **per-instance masks** on the prototype grid, which :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` scores
+  the assembled Eq. 7 masks against; and
+- **the auxiliary semantic map** on the fused-feature grid — for each class, the union of that class's instance
+  masks — which :func:`~lucid_yolo.losses.semantic_loss.semantic_aux_loss` supervises (A17).
 
-Both grids are **derived from the prediction tensors** by the caller and passed in;
-nothing here assumes an input size or a stride. The prototype grid is twice the P3
-feature (A15, i.e. a quarter of the input side at stride 8) and the semantic grid is
-P3 itself, but neither number is written down anywhere: a model whose ProtoNet
-upsample changed would silently train against stale target grids.
+Both grids are **derived from the prediction tensors** by the caller and passed in; nothing here assumes an input
+size or a stride. The prototype grid is twice the P3 feature (A15, i.e. a quarter of the input side at stride 8)
+and the semantic grid is P3 itself, but neither number is written down anywhere: a model whose ProtoNet upsample
+changed would silently train against stale target grids.
 
 Two choices are load-bearing:
 
-1. **Polygons are scaled, then rasterised** — never rasterised at input resolution
-   and then resized. A thin instance covering a few input pixels survives the
-   coordinate scaling (its ring keeps its shape) but is aliased away by a
-   point-sampled downscale of its raster.
-2. **The semantic target is max-pooled from the instance masks**, rather than
-   rasterised a second time at the coarser grid. One rasterisation pass feeds both
-   consumers, so the two targets cannot disagree about where an instance is, and
-   the max keeps any instance that occupies a single fine cell — which a second,
-   coarser point-sampled rasterisation would drop.
+1. **Polygons are scaled, then rasterised** — never rasterised at input resolution and then resized. A thin
+   instance covering a few input pixels survives the coordinate scaling (its ring keeps its shape) but is
+   aliased away by a point-sampled downscale of its raster.
+2. **The semantic target is max-pooled from the instance masks**, rather than rasterised a second time at the
+   coarser grid. One rasterisation pass feeds both consumers, so the two targets cannot disagree about where
+   an instance is, and the max keeps any instance that occupies a single fine cell — which a second, coarser
+   point-sampled rasterisation would drop.
 
 Provenance: R1 Eq. 7-9, R1 sec. 3.4.1. Assumptions: A15, A17, A38.
 """
@@ -53,9 +47,9 @@ __all__ = ["instance_mask_targets", "scale_boxes_to_grid", "semantic_target"]
 def _grid_scale(image_size: tuple[int, int], grid_size: tuple[int, int]) -> tuple[float, float]:
     """Return the ``(x, y)`` factors mapping input pixels onto a feature grid.
 
-    The single derivation of the two factors, so box coordinates and polygon
-    coordinates cannot be scaled by different numbers. They are separate factors
-    rather than one ratio because a letterboxed canvas need not be square.
+    The single derivation of the two factors, so box coordinates and polygon coordinates cannot be scaled by
+    different numbers. They are separate factors rather than one ratio because a letterboxed canvas need not be
+    square.
 
     Args:
         image_size: Input canvas ``(height, width)`` the coordinates live in.
@@ -72,9 +66,9 @@ def _grid_scale(image_size: tuple[int, int], grid_size: tuple[int, int]) -> tupl
 def scale_boxes_to_grid(boxes: Tensor, image_size: tuple[int, int], grid_size: tuple[int, int]) -> Tensor:
     """Rescale ``xyxy`` boxes from input pixels into a feature grid's own frame.
 
-    :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` crops by comparing box
-    edges against integer pixel indices of the mask grid, so it documents that its
-    boxes must already be expressed in that grid's frame. This is that conversion.
+    :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` crops by comparing box edges against integer pixel
+    indices of the mask grid, so it documents that its boxes must already be expressed in that grid's frame.
+    This is that conversion.
 
     Args:
         boxes: ``(..., 4)`` boxes in ``xyxy`` input pixels.
@@ -102,26 +96,25 @@ def scale_boxes_to_grid(boxes: Tensor, image_size: tuple[int, int], grid_size: t
 def instance_mask_targets(target: Targets, image_size: tuple[int, int], grid_size: tuple[int, int]) -> Tensor:
     """Rasterise one image's instance polygons onto a feature grid.
 
-    The rings are scaled from input pixels into the grid's frame and then
-    rasterised there (see the module docstring for why not the other way round).
-    Rasterisation runs on CPU — :func:`~lucid_yolo.data.rasterize.rasterize_polygon`
-    builds its coordinate grids there — so the result is returned on CPU and the
-    caller moves it to the prediction device.
+    The rings are scaled from input pixels into the grid's frame and then rasterised there (see the module docstring
+    for why not the other way round). Rasterisation runs on CPU — :func:`~lucid_yolo.data.rasterize.rasterize_polygon`
+    builds its coordinate grids there — so the result is returned on CPU and the caller moves it to the prediction
+    device.
 
     Args:
-        target: One image's targets. Under ``task="segment"`` every instance must
-            carry a polygon ring; an image with no instances is fine.
+        target: One image's targets. Under ``task="segment"`` every instance must carry a polygon ring;
+            an image with no instances is fine.
         image_size: Input canvas ``(height, width)`` the polygons live in.
         grid_size: Target grid ``(height, width)``.
 
     Returns:
-        ``(N, grid_height, grid_width)`` float32 masks in ``{0.0, 1.0}``, one per
-        instance and in the instance order of ``target.boxes``.
+        ``(N, grid_height, grid_width)`` float32 masks in ``{0.0, 1.0}``, one per instance and in the instance order
+        of ``target.boxes``.
 
     Raises:
-        ValueError: If the image carries boxes without one polygon ring each —
-            a detection-only annotation cannot supervise masks, and silently
-            skipping it would train the mask branches on a subset nobody chose.
+        ValueError: If the image carries boxes without one polygon ring each — a detection-only
+            annotation cannot supervise masks, and silently skipping it would train the mask branches on a subset
+            nobody chose.
 
     Examples:
         ```pycon
@@ -150,23 +143,20 @@ def instance_mask_targets(target: Targets, image_size: tuple[int, int], grid_siz
 def semantic_target(masks: Tensor, labels: Tensor, num_classes: int, grid_size: tuple[int, int]) -> Tensor:
     """Build one image's per-class semantic map: the union of each class's instances.
 
-    The instance masks are max-pooled onto ``grid_size`` and then unioned per class,
-    so an instance occupying a single fine cell still marks its coarse cell (see the
-    module docstring). Overlapping instances of one class union to ``1.0``, never to
-    a count.
+    The instance masks are max-pooled onto ``grid_size`` and then unioned per class, so an instance
+    occupying a single fine cell still marks its coarse cell (see the module docstring). Overlapping instances
+    of one class union to ``1.0``, never to a count.
 
     Args:
-        masks: ``(N, H, W)`` per-instance masks in ``{0.0, 1.0}``, as returned by
-            :func:`instance_mask_targets` (any grid at least as fine as
-            ``grid_size``).
-        labels: ``(N,)`` int64 class ids, one per mask, all in
-            ``[0, num_classes)``.
+        masks: ``(N, H, W)`` per-instance masks in ``{0.0, 1.0}``, as returned by :func:`instance_mask_targets`
+            (any grid at least as fine as ``grid_size``).
+        labels: ``(N,)`` int64 class ids, one per mask, all in ``[0, num_classes)``.
         num_classes: Channel count ``C`` of the auxiliary branch's logits.
         grid_size: Output grid ``(height, width)`` — the fused feature's own size.
 
     Returns:
-        ``(C, grid_height, grid_width)`` float targets in ``{0.0, 1.0}``, on
-        ``masks``' device and dtype. An image with no instances yields all zeros.
+        ``(C, grid_height, grid_width)`` float targets in ``{0.0, 1.0}``, on ``masks``' device and dtype. An image
+        with no instances yields all zeros.
 
     Examples:
         ```pycon

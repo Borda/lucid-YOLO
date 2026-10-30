@@ -1,16 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Structural audit of the ``docs/`` governance registers (WP-003, split off tests/meta).
 
-``tests/meta/test_docs_present.py`` used to carry twelve independent test functions,
-each checking one structural property of the policy documents that back the
-clean-room paper trail: that every required file exists, that the ``ASSUMPTIONS.md``,
-``ROADMAP.md``, ``DECISIONS.md`` and ``PROVENANCE.md`` registers parse as contiguous,
-fully-populated id sequences, and that cross-file links between ``ROADMAP.md`` and the
-two log files resolve. Those checks depend only on repo content, not on the installed
-Python environment, so like ``audit_test_doctests.py`` before it they moved here: one
-``check_<name>`` function per original test, each returning the violations it finds
-instead of asserting, so a caller can run every check and report all of them at once
-rather than stopping at the first failure.
+``tests/meta/test_docs_present.py`` used to carry twelve independent test functions, each checking one structural
+property of the policy documents that back the clean-room paper trail: that every required file exists, that the
+``ASSUMPTIONS.md``, ``ROADMAP.md``, ``DECISIONS.md`` and ``PROVENANCE.md`` registers parse as contiguous,
+fully-populated id sequences, and that cross-file links between ``ROADMAP.md`` and the two log files resolve. Those
+checks depend only on repo content, not on the installed Python environment, so like ``audit_test_doctests.py`` before
+it they moved here: one ``check_<name>`` function per original test, each returning the violations it finds instead of
+asserting, so a caller can run every check and report all of them at once rather than stopping at the first failure.
 
 Examples:
     Command-line usage (exit status is the process return code)::
@@ -30,23 +27,20 @@ from scripts.lint._common import REPO_ROOT, add_repo_root_argument, print_failur
 
 DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 
-#: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target:
-#: contiguity alone would not notice the last row being deleted. Raise it when adding
-#: a work package; never lower it.
+#: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target: contiguity alone would not notice
+#: the last row being deleted. Raise it when adding a work package; never lower it.
 _WP_FLOOR = 200
 
-#: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
-#: contiguity alone would not notice the last row being deleted, since what remains
-#: stays contiguous. Raise it when adding a decision; never lower it.
+#: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target: contiguity alone would not notice
+#: the last row being deleted, since what remains stays contiguous. Raise it when adding a decision; never lower it.
 _DECISION_FLOOR = 29
 
-#: Lowest assumption count ASSUMPTIONS.md is allowed to hold, for the same ratchet
-#: reason as the two floors above.
+#: Lowest assumption count ASSUMPTIONS.md is allowed to hold, for the same ratchet reason as the two floors above.
 _ASSUMPTION_FLOOR = 78
 
-#: Paths, relative to ``docs_dir``/``repo_root``, every required policy document must
-#: resolve to. Mirrors the former ``REQUIRED_FILES`` tuple, split into its two roots so
-#: each check can be exercised against a synthetic tree rather than the live repo.
+#: Paths, relative to ``docs_dir``/``repo_root``, every required policy document must resolve to. Mirrors the former
+#: ``REQUIRED_FILES`` tuple, split into its two roots so each check can be exercised against a synthetic tree rather
+#: than the live repo.
 _REQUIRED_DOCS_RELATIVE = (
     "PROVENANCE.md",
     "ASSUMPTIONS.md",
@@ -64,13 +58,11 @@ _REQUIRED_DOCS_RELATIVE = (
     "model_cards/keypoints.md",
 )
 
-#: Section titles ``REPRODUCTION_REPORT.md`` must carry, in the order D10 appends them: the
-#: four per-release tiers plus the WP-065 consolidation, which stays third in append order
-#: since D10 forbids reordering a heading once appended. Copied from the file itself, not
-#: retyped -- each uses an em dash, and a hyphen-typed copy would silently never match.
-#: Stored without the ``##`` marker and without the leading emoji (WP-113): the heading's
-#: decoration is presentation, and pinning it here would make a purely visual edit fail a
-#: check about which sections exist.
+#: Section titles ``REPRODUCTION_REPORT.md`` must carry, in the order D10 appends them: the four per-release tiers
+#: plus the WP-065 consolidation, which stays third in append order since D10 forbids reordering a heading once
+#: appended. Copied from the file itself, not retyped -- each uses an em dash, and a hyphen-typed copy would silently
+#: never match. Stored without the ``##`` marker and without the leading emoji (WP-113): the heading's decoration is
+#: presentation, and pinning it here would make a purely visual edit fail a check about which sections exist.
 _REPORT_SECTIONS = (
     "0.1.0 — Detection",
     "0.2.0 — Instance segmentation",
@@ -80,9 +72,9 @@ _REPORT_SECTIONS = (
 )
 
 
-#: Where each long register keeps the pages it was split into (WP-196). The landing file
-#: (``ENGINEERING_LOG.md`` and so on) stays at the docs root so existing links resolve; its
-#: sections live one per page under the directory named here.
+#: Where each long register keeps the pages it was split into (WP-196). The landing file (``ENGINEERING_LOG.md``
+#: and so on) stays at the docs root so existing links resolve; its sections live one per page under the directory
+#: named here.
 _SPLIT_DIRS = {
     "REPRODUCTION_REPORT.md": "report",
     "RESEARCH_LOG.md": "research",
@@ -114,9 +106,9 @@ def _register_text(docs_dir: Path, name: str) -> str:
 def _undecorated(title: str) -> str:
     """Strip a heading's leading emoji, leaving the title the registers are asserted on.
 
-    Every H1 and H2 across the docs carries a topical emoji (WP-113), which is decoration:
-    a gate that pinned it would fail on a re-picked icon while reporting a missing section.
-    A lead token holding no ASCII alphanumeric is that decoration; anything else is title.
+    Every H1 and H2 across the docs carries a topical emoji (WP-113), which is decoration: a gate that pinned it would
+    fail on a re-picked icon while reporting a missing section. A lead token holding no ASCII alphanumeric is that
+    decoration; anything else is title.
 
     Examples:
         >>> _undecorated("🚀 Getting Started")
@@ -154,8 +146,8 @@ def _table_cells(line: str) -> list[str]:
 def _required_files(docs_dir: Path, repo_root: Path) -> list[Path]:
     """Every governance document required to exist, at its expected path.
 
-    Docs-tree entries resolve under ``docs_dir``; ``AGENTS.md`` resolves under
-    ``repo_root`` directly, since it lives at the repo root rather than in ``docs/``.
+    Docs-tree entries resolve under ``docs_dir``; ``AGENTS.md`` resolves under ``repo_root`` directly, since it
+    lives at the repo root rather than in ``docs/``.
 
     Examples:
         >>> import tempfile
@@ -191,9 +183,9 @@ def check_policy_docs_exist(docs_dir: Path, repo_root: Path) -> list[str]:
 def check_model_cards_are_required(docs_dir: Path, repo_root: Path) -> list[str]:
     """No card sits in ``docs_dir/model_cards`` unlisted among the required files (WP-106).
 
-    The directory is the natural place to drop a fourth card, and a card nothing gates is
-    a card that can be deleted or renamed silently. The listing is what makes each one
-    required, so the two are checked against each other rather than kept in step by hand.
+    The directory is the natural place to drop a fourth card, and a card nothing gates is a card that can be deleted
+    or renamed silently. The listing is what makes each one required, so the two are checked against each other
+    rather than kept in step by hand.
 
     Examples:
         >>> import tempfile
@@ -227,14 +219,12 @@ _LOG_LINK = re.compile(
 def check_log_links_resolve(docs_dir: Path, repo_root: Path) -> list[str]:
     """Each log link the roadmap cites names an anchor its own target file defines.
 
-    WP-118 split what was one research log into a fidelity log and an engineering log,
-    by claim rather than by work package, and WP-196 moved each WP's findings into its
-    own file under ``work_packages/``; a roadmap row may cite a landing file, a phase
-    page or a WP file. That is only safe while the pointers hold: a renamed section
-    leaves a row citing evidence a reader cannot reach, and nothing about the roadmap
-    itself would look wrong. Anchors are explicit ``<a id=>`` tags rather than heading
-    slugs, so they are greppable and survive a retitle; each is checked against the
-    file the link names, not against the logs pooled together.
+    WP-118 split what was one research log into a fidelity log and an engineering log, by claim rather than by work
+    package, and WP-196 moved each WP's findings into its own file under ``work_packages/``; a roadmap row may cite a
+    landing file, a phase page or a WP file. That is only safe while the pointers hold: a renamed section leaves
+    a row citing evidence a reader cannot reach, and nothing about the roadmap itself would look wrong. Anchors are
+    explicit ``<a id=>`` tags rather than heading slugs, so they are greppable and survive a retitle; each is checked
+    against the file the link names, not against the logs pooled together.
 
     Examples:
         >>> import tempfile
@@ -266,11 +256,10 @@ def check_log_links_resolve(docs_dir: Path, repo_root: Path) -> list[str]:
 def check_work_package_files(docs_dir: Path, repo_root: Path) -> list[str]:
     """Every ``work_packages/wp-<id>.md`` names a roadmap row and is included by a phase page.
 
-    A WP file is the single home of that package's findings (WP-196); the phase pages of the
-    research and engineering logs only include it. Two failures hide well in that layout: a
-    file whose id the roadmap never numbered (a typo, or a row renumbered after the fact),
-    and a file no phase page includes, which the site would build and serve while the log a
-    reader actually browses silently lacks the entry.
+    A WP file is the single home of that package's findings (WP-196); the phase pages of the research and engineering
+    logs only include it. Two failures hide well in that layout: a file whose id the roadmap never numbered (a typo,
+    or a row renumbered after the fact), and a file no phase page includes, which the site would build and serve
+    while the log a reader actually browses silently lacks the entry.
 
     Examples:
         >>> import tempfile
@@ -316,13 +305,11 @@ def check_work_package_files(docs_dir: Path, repo_root: Path) -> list[str]:
 def check_assumption_ids_contiguous(docs_dir: Path, repo_root: Path) -> list[str]:
     """ASSUMPTIONS.md register rows carry ids A1..AN with no gap or duplicate, and never shrink.
 
-    The floor counts rows (``len``) rather than reading the highest id (``max``), for
-    the reason :data:`_WP_FLOOR` already counts them: ``max`` grades the register by
-    its last row alone, so deleting a row from the *middle* leaves the maximum
-    untouched and the floor silent -- and the contiguity check above is what would
-    have caught that, except a deletion from the tail defeats it instead. One
-    predicate cannot see the tail and the other cannot see the middle, which is why
-    the two are separate checks and why this one counts.
+    The floor counts rows (``len``) rather than reading the highest id (``max``), for the reason :data:`_WP_FLOOR`
+    already counts them: ``max`` grades the register by its last row alone, so deleting a row from the *middle*
+    leaves the maximum untouched and the floor silent -- and the contiguity check above is what would have caught
+    that, except a deletion from the tail defeats it instead. One predicate cannot see the tail and the other cannot
+    see the middle, which is why the two are separate checks and why this one counts.
 
     Examples:
         >>> import tempfile
@@ -355,12 +342,11 @@ def check_assumption_ids_contiguous(docs_dir: Path, repo_root: Path) -> list[str
 def check_assumption_rows_complete(docs_dir: Path, repo_root: Path) -> list[str]:
     """Every register row carries all six columns, with a recognized status in the last.
 
-    A row written one cell short does not look broken: the formatter pads it back to six,
-    and the id and contiguity gates above keep passing because neither reads past the
-    first column. What actually happens is that every value shifts left -- the validation
-    plan lands under "Public source", the status under "Validation" -- so the register
-    reads as though a sourced assumption were unsourced. Two rows shipped that way before
-    this check existed (A25, A42).
+    A row written one cell short does not look broken: the formatter pads it back to six, and the id and contiguity
+    gates above keep passing because neither reads past the first column. What actually happens is that every
+    value shifts left -- the validation plan lands under "Public source", the status under "Validation" -- so the
+    register reads as though a sourced assumption were unsourced. Two rows shipped that way before this check
+    existed (A25, A42).
 
     Examples:
         >>> import tempfile
@@ -397,11 +383,10 @@ def check_assumption_rows_complete(docs_dir: Path, repo_root: Path) -> list[str]
 def check_roadmap_wp_ids_unique_and_complete(docs_dir: Path, repo_root: Path) -> list[str]:
     """ROADMAP.md numbers its work packages contiguously from 001, each exactly once, and never shrinks.
 
-    Contiguity and uniqueness are the real invariants and they hold at any size;
-    the count is pinned separately by a floor, so adding a work package does not
-    fail a check that is not reporting a defect. Dropping the last row would leave
-    the remainder contiguous, which is what the floor is for. Raise it when adding
-    a package -- see :data:`_WP_FLOOR`.
+    Contiguity and uniqueness are the real invariants and they hold at any size; the count is pinned separately
+    by a floor, so adding a work package does not fail a check that is not reporting a defect. Dropping the last row
+    would leave the remainder contiguous, which is what the floor is for. Raise it when adding a package -- see
+    :data:`_WP_FLOOR`.
 
     Examples:
         >>> import tempfile
@@ -432,15 +417,13 @@ def check_roadmap_wp_ids_unique_and_complete(docs_dir: Path, repo_root: Path) ->
 def check_roadmap_rows_complete(docs_dir: Path, repo_root: Path) -> list[str]:
     """Every numbered roadmap row carries all six columns.
 
-    An unescaped pipe inside a code span opens a table cell, so a row that reads fine in
-    the source renders its tail into the wrong columns on GitHub and drops the overflow.
-    This has now happened twice: once to a WP-058 row, and once to WP-093's own row, where
-    ``|d_theta|`` in a code span was expanded by the formatter into cell delimiters and
-    left the row with four cells instead of six.
+    An unescaped pipe inside a code span opens a table cell, so a row that reads fine in the source renders its tail
+    into the wrong columns on GitHub and drops the overflow. This has now happened twice: once to a WP-058 row,
+    and once to WP-093's own row, where ``|d_theta|`` in a code span was expanded by the formatter into cell
+    delimiters and left the row with four cells instead of six.
 
-    Neither id nor status check alone could see it: the id check reads only the first
-    column, and the status check matches only the last one by regex, so a row can lose
-    its middle entirely with both of them green.
+    Neither id nor status check alone could see it: the id check reads only the first column, and the status check
+    matches only the last one by regex, so a row can lose its middle entirely with both of them green.
 
     Examples:
         >>> import tempfile
@@ -492,9 +475,8 @@ def check_roadmap_statuses_valid(docs_dir: Path, repo_root: Path) -> list[str]:
 def check_roadmap_header_count(docs_dir: Path, repo_root: Path) -> list[str]:
     """The opening paragraph's package count matches the numbered rows it describes.
 
-    That count is prose, so nothing forces it to move when rows were added: it
-    read "69 work packages" while the table carried 91, and the id and status
-    checks both passed the whole time because neither of them reads the
+    That count is prose, so nothing forces it to move when rows were added: it read "69 work packages" while the
+    table carried 91, and the id and status checks both passed the whole time because neither of them reads the
     sentence. A documented number with no gate is a number that decays.
 
     Examples:
@@ -543,11 +525,10 @@ def check_provenance_ids(docs_dir: Path, repo_root: Path) -> list[str]:
 def check_report_sections(docs_dir: Path, repo_root: Path) -> list[str]:
     """REPRODUCTION_REPORT.md carries every tier section plus the WP-065 consolidation.
 
-    The report is append-only (D10): a later release corrects an earlier claim by adding to
-    it, never by editing the record away, so no existing heading may ever be renamed out of
-    the file or dropped. This check reads only the headings, not their content, which is what
-    keeps it compatible with that discipline -- a correction landing inside a section leaves
-    every heading exactly as it was, and this check unaffected.
+    The report is append-only (D10): a later release corrects an earlier claim by adding to it, never by editing
+    the record away, so no existing heading may ever be renamed out of the file or dropped. This check reads only
+    the headings, not their content, which is what keeps it compatible with that discipline -- a correction landing
+    inside a section leaves every heading exactly as it was, and this check unaffected.
 
     Examples:
         >>> import tempfile
@@ -571,20 +552,17 @@ def check_report_sections(docs_dir: Path, repo_root: Path) -> list[str]:
 def check_decisions_ids(docs_dir: Path, repo_root: Path) -> list[str]:
     """DECISIONS.md numbers its decisions contiguously from D1, never shrinks, and keeps every ADR.
 
-    Two properties, deliberately kept separate. Contiguity catches a duplicated or
-    skipped id, and it holds however many decisions the register grows to -- a
-    hardcoded upper bound would fail every time one is added, which is a check
-    demanding maintenance rather than reporting a defect. The floor is what a bare
-    contiguity check would miss: dropping the *last* row leaves the remainder
-    perfectly contiguous, so the count is asserted never to fall below what the
-    register has already reached. Raise the floor when adding a decision; that edit
-    is the deliberate act, not a chore.
+    Two properties, deliberately kept separate. Contiguity catches a duplicated or skipped id, and it holds however
+    many decisions the register grows to -- a hardcoded upper bound would fail every time one is added, which is
+    a check demanding maintenance rather than reporting a defect. The floor is what a bare contiguity check would
+    miss: dropping the *last* row leaves the remainder perfectly contiguous, so the count is asserted never to fall
+    below what the register has already reached. Raise the floor when adding a decision; that edit is the deliberate
+    act, not a chore.
 
-    The floor counts rows, matching :data:`_WP_FLOOR` and :data:`_ASSUMPTION_FLOOR`.
-    It read the highest id until WP-168, which graded the register by its last row
-    and so stayed silent on a row deleted from the middle -- the one case the
-    contiguity check beside it cannot cover either, since deleting from the tail is
-    what leaves the remainder contiguous.
+    The floor counts rows, matching :data:`_WP_FLOOR` and :data:`_ASSUMPTION_FLOOR`. It read the highest id until
+    WP-168, which graded the register by its last row and so stayed silent on a row deleted from the middle --
+    the one case the contiguity check beside it cannot cover either, since deleting from the tail is what
+    leaves the remainder contiguous.
 
     Examples:
         >>> import tempfile
@@ -613,28 +591,26 @@ def check_decisions_ids(docs_dir: Path, repo_root: Path) -> list[str]:
 
 
 #: Every check, in the order the original test file declared them.
-#: Licence families the pull-request attestation must name, keyed by the label the
-#: template groups them under. Every family here is one D13 excludes from the permissive
-#: allowlist, and the point of pinning them is that the attestation narrows silently: the
-#: line named Ultralytics alone for eight months while meaning all of this, and a reader
-#: could only have learned the real rule by finding D13 themselves.
+#: Licence families the pull-request attestation must name, keyed by the label the template groups them under. Every
+#: family here is one D13 excludes from the permissive allowlist, and the point of pinning them is that the
+#: attestation narrows silently: the line named Ultralytics alone for eight months while meaning all of this, and
+#: a reader could only have learned the real rule by finding D13 themselves.
 _ATTESTATION_FAMILIES = ("AGPL", "GPL", "LGPL", "SSPL", "BSL", "Elastic", "PolyForm")
 
-#: The two cases the families miss, checked as substrings for the same reason: neither is
-#: a licence name, and both are the kind of clause that falls out of a rewrite unnoticed.
+#: The two cases the families miss, checked as substrings for the same reason: neither is a licence name, and both
+#: are the kind of clause that falls out of a rewrite unnoticed.
 _ATTESTATION_CLAUSES = ("proprietary", "cannot be read")
 
 
 def check_pull_request_attestation_covers_the_allowlist(docs_dir: Path, repo_root: Path) -> list[str]:
     """The pull-request template's clean-room line names the whole excluded set (WP-143).
 
-    The admissible set is D13's permissive allowlist, so what a contributor attests to
-    not having copied from is everything outside it. The template named the Ultralytics
-    denylist alone, which is one instance of the rule stated as though it were the rule:
-    a contributor reading it would conclude a GPL detector was fair game.
+    The admissible set is D13's permissive allowlist, so what a contributor attests to not having copied from is
+    everything outside it. The template named the Ultralytics denylist alone, which is one instance of the rule
+    stated as though it were the rule: a contributor reading it would conclude a GPL detector was fair game.
 
-    ``docs_dir`` is unused and present so the check matches the signature every other
-    check in this module carries, which is what lets :data:`_CHECKS` stay a plain tuple.
+    ``docs_dir`` is unused and present so the check matches the signature every other check in this module carries,
+    which is what lets :data:`_CHECKS` stay a plain tuple.
 
     Args:
         docs_dir: Unused; part of the shared check signature.
@@ -686,9 +662,9 @@ _CHECKS = (
 def find_violations(docs_dir: Path, repo_root: Path) -> list[str]:
     """Run every governance-register check and collect their violation strings.
 
-    A check whose source file is entirely absent (rather than merely malformed) raises
-    ``FileNotFoundError`` instead of returning a violation list; that is caught here and
-    turned into one so a single missing file doesn't hide every other check's findings.
+    A check whose source file is entirely absent (rather than merely malformed) raises ``FileNotFoundError``
+    instead of returning a violation list; that is caught here and turned into one so a single missing file doesn't
+    hide every other check's findings.
 
     Examples:
         >>> import tempfile

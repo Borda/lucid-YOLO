@@ -96,8 +96,8 @@ class TestNativeUpdates:
     def test_default_optimizer_keeps_update_replay_off(self) -> None:
         """Without the opt-in flag the group asks for no replay and no owner is ever created.
 
-        The CUDA reference optimizers in this file name ``capture_updates=False`` explicitly, so this
-        is the case that fails if the constructor default flips.
+        The CUDA reference optimizers in this file name ``capture_updates=False`` explicitly, so this is the case that
+        fails if the constructor default flips.
         """
         param = torch.nn.Parameter(torch.ones(3, 4))
         optimizer = MuSGD([param], lr=0.01)
@@ -357,9 +357,9 @@ class TestCUDAUpdates:
     def test_failure_inside_capture_publishes_no_entry(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A failure raised while the stream is capturing leaves no entry, no open capture and a usable optimizer.
 
-        The stand-in iterator delegates to the native one during warmup and fails only on the capture call.
-        The graph context may replace the original error with its own, hence the loose ``RuntimeError``; the
-        state left behind is what matters. The next real step records only if the failed attempt kept nothing.
+        The stand-in iterator delegates to the native one during warmup and fails only on the capture call. The graph
+        context may replace the original error with its own, hence the loose ``RuntimeError``; the state left behind is
+        what matters. The next real step records only if the failed attempt kept nothing.
         """
         a, b = parameters("cuda"), parameters("cuda")
         reference = MuSGD(a, lr=0.01, capture_updates=False)

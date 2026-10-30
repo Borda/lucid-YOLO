@@ -52,9 +52,8 @@ def test_task_gradients_reach_every_branch(
 ) -> None:
     """Backward reaches every original task branch, including the non-null pose flow.
 
-    Missing mask coefficients, angle stems or point stems leave deployed branches
-    untrained. The pose flow must also exist and receive a non-zero gradient.
-    The original two-image batch has ragged instance counts of two and one;
+    Missing mask coefficients, angle stems or point stems leave deployed branches untrained. The pose flow must also
+    exist and receive a non-zero gradient. The original two-image batch has ragged instance counts of two and one;
     oriented targets remain elongated and rotated to avoid stationary angles.
     """
     module = tiny_module(task, **_GAINS, **options)

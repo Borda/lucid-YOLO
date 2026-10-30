@@ -79,10 +79,9 @@ def advance(
 ) -> int:
     """Step every optimizer on equal inputs and return how often the last one started native preparation.
 
-    The first optimizer is the native reference; the last is the candidate whose state
-    must match it byte for byte after the step. ``values`` overwrite group entries of
-    every optimizer before the step, and ``calls`` lists the optimizer of each native
-    preparation the ``native_calls`` fixture has seen.
+    The first optimizer is the native reference; the last is the candidate whose state must match it byte for byte
+    after the step. ``values`` overwrite group entries of every optimizer before the step, and ``calls`` lists the
+    optimizer of each native preparation the ``native_calls`` fixture has seen.
 
     Examples:
         >>> a, b = parameters("cpu"), parameters("cpu")
@@ -101,12 +100,23 @@ def advance(
     return calls.count(candidate) - before
 
 
+def twin_pairs(device: str) -> tuple[tuple[list[torch.nn.Parameter], MuSGD], tuple[list[torch.nn.Parameter], MuSGD]]:
+    """Build a native reference and a flag-on candidate over equal parameters, in the shape ``advance`` takes.
+
+    Examples:
+        >>> [(len(params), optimizer.param_groups[0]["capture_updates"]) for params, optimizer in twin_pairs("cpu")]
+        [(4, False), (4, True)]
+    """
+    a, b = parameters(device), parameters(device)
+    return (a, MuSGD(a, lr=0.01)), (b, MuSGD(b, lr=0.01, capture_updates=True))
+
+
 @contextmanager
 def high_matmul_precision() -> Iterator[None]:
     """Allow TF32 float32 matrix products, restoring every precision setting afterwards.
 
-    The legacy setter also moves the per-backend settings newer PyTorch reads, and
-    restoring through it alone leaves those at other values than before.
+    The legacy setter also moves the per-backend settings newer PyTorch reads, and restoring through it alone leaves
+    those at other values than before.
 
     Examples:
         >>> with high_matmul_precision():
@@ -233,8 +243,8 @@ class RecordingInputs:
 def native_calls(monkeypatch: pytest.MonkeyPatch) -> list[MuSGD]:
     """Record the optimizer behind every call of the native preparation iterator.
 
-    A step that replays a recording adds nothing; a native step adds one call, and a
-    new recording adds two (its warmup and its capture).
+    A step that replays a recording adds nothing; a native step adds one call, and a new recording adds two (its warmup
+    and its capture).
     """
     calls: list[MuSGD] = []
     native = MuSGD._group_updates
@@ -297,11 +307,10 @@ class TestRecordingCheck:
     def test_refuses_change(self, change: Callable[[RecordingInputs], RecordingInputs]) -> None:
         """Each input the recording cannot certify is refused before anything is captured.
 
-        One change at a time is applied to the accepted control set: another precision
-        or device, a sparse, empty, transposed or reshaped tensor, storage shared between
-        parameters, buffers or gradients (also through a DLPack import with its own
-        storage base), and group scalars of another type. Deleting any single guard of
-        the recording check lets its case through.
+        One change at a time is applied to the accepted control set: another precision or device, a sparse, empty,
+        transposed or reshaped tensor, storage shared between parameters, buffers or gradients (also through a DLPack
+        import with its own storage base), and group scalars of another type. Deleting any single guard of the
+        recording check lets its case through.
         """
         assert not change(RecordingInputs.supported()).accepted()
 
@@ -322,11 +331,10 @@ class TestRecordedSpans:
     def test_gradient_reach_matches_memory_overlaps(self, probe: Callable[[Tensor], Tensor], expected: bool) -> None:
         """A moved gradient is caught by address range exactly when the full overlap scan would catch it.
 
-        The spans are built with a gradient of the probe's layout at an unrelated address,
-        as at recording, and then asked about the probe at its own address, as on a later
-        replayed step. The recorded parameter and buffer sit in one buffer with a gap, so
-        same-storage neighbours, partial overlaps at either end, a strided reach and a
-        DLPack import with its own storage base are all decided by bytes, not storage.
+        The spans are built with a gradient of the probe's layout at an unrelated address, as at recording, and then
+        asked about the probe at its own address, as on a later replayed step. The recorded parameter and buffer sit in
+        one buffer with a gap, so same-storage neighbours, partial overlaps at either end, a strided reach and a DLPack
+        import with its own storage base are all decided by bytes, not storage.
         """
         base = torch.zeros(64)
         recorded = [base[0:16].view(4, 4), base[32:48]]
@@ -335,12 +343,11 @@ class TestRecordedSpans:
         assert spans.reached_by([gradient]) is expected
         assert _memory_overlaps([*recorded, gradient]) is expected
 
-    def test_later_gradient_reach_is_caught(self) -> None:
+    def test_later_gradient_reach_caught(self) -> None:
         """Every gradient slot is checked, not only the first one.
 
-        The first gradient is an unrelated allocation and the second reads the recorded
-        parameter, so a check that stopped after one slot would replay a step whose
-        native ordering differs.
+        The first gradient is an unrelated allocation and the second reads the recorded parameter, so a check that
+        stopped after one slot would replay a step whose native ordering differs.
         """
         base = torch.zeros(32)
         recorded = [base[0:16], base[16:32]]
@@ -352,9 +359,8 @@ class TestRecordingBudget:
     def test_reload_forgets_spent_budget(self) -> None:
         """Loading optimizer state lets a group whose re-record budget was spent record again.
 
-        A reload replaces every parameter group, so recording counts kept for the old
-        groups describe nothing that still exists. The CPU route creates the same owner
-        and reaches the same ``load_state_dict`` clear as a CUDA run.
+        A reload replaces every parameter group, so recording counts kept for the old groups describe nothing that still
+        exists. The CPU route creates the same owner and reaches the same ``load_state_dict`` clear as a CUDA run.
         """
         params = parameters("cpu")
         optimizer = MuSGD(params, lr=0.01, capture_updates=True)
@@ -372,14 +378,12 @@ class TestCUDARecordingLifecycle:
     def test_brief_changes_return_to_recording(self, native_calls: list[MuSGD]) -> None:
         """Signature changes shorter than the tolerance run natively, then replay the first recording.
 
-        Momentum differs for one step fewer than ``_MISMATCH_TOLERANCE``, twice, with a
-        single matching step between the two blips. Each differing step runs the native
-        iterator once and leaves the recording in place; the matching step replays it
-        and restarts the count, so the second blip does not inherit the first and no
-        blip pays a capture.
+        Momentum differs for one step fewer than ``_MISMATCH_TOLERANCE``, twice, with a single matching step between the
+        two blips. Each differing step runs the native iterator once and leaves the recording in place; the matching
+        step replays it and restarts the count, so the second blip does not inherit the first and no blip pays a
+        capture.
         """
-        a, b = parameters("cuda"), parameters("cuda")
-        pairs = ((a, MuSGD(a, lr=0.01)), (b, MuSGD(b, lr=0.01, capture_updates=True)))
+        pairs = twin_pairs("cuda")
         blip = [0.8] * (_MISMATCH_TOLERANCE - 1)
         schedule = [0.95, 0.95, *blip, 0.95, *blip, 0.95]
         prepared = [advance(pairs, step, native_calls, momentum=value) for step, value in enumerate(schedule)]
@@ -392,10 +396,9 @@ class TestCUDARecordingLifecycle:
     def test_lasting_change_records_again(self, native_calls: list[MuSGD]) -> None:
         """A change lasting the tolerance releases the old recording and replays a new one.
 
-        Momentum changes for good after the first recording. The tolerated steps run
-        natively; the next one records the new signature (warmup plus capture) and the
-        old recording must be unreachable, so its private pool is free rather than held
-        until a reload.
+        Momentum changes for good after the first recording. The tolerated steps run natively; the next one records the
+        new signature (warmup plus capture) and the old recording must be unreachable, so its private pool is free
+        rather than held until a reload.
         """
         a, b = parameters("cuda"), parameters("cuda")
         candidate = MuSGD(b, lr=0.01, capture_updates=True)
@@ -414,10 +417,9 @@ class TestCUDARecordingLifecycle:
     def test_spent_budget_releases_recording(self, native_calls: list[MuSGD]) -> None:
         """A signature that never settles stops recording after the budget and frees the last recording.
 
-        Momentum takes a new value on every step after the first recording, so each
-        recording meets ``_MISMATCH_TOLERANCE`` consecutive mismatches. After
-        ``_RERECORD_BUDGET`` replacements the next release leaves the group native for
-        good: no entry, no further capture, and every step matches the native reference.
+        Momentum takes a new value on every step after the first recording, so each recording meets
+        ``_MISMATCH_TOLERANCE`` consecutive mismatches. After ``_RERECORD_BUDGET`` replacements the next release leaves
+        the group native for good: no entry, no further capture, and every step matches the native reference.
         """
         a, b = parameters("cuda"), parameters("cuda")
         candidate = MuSGD(b, lr=0.01, capture_updates=True)
@@ -445,11 +447,10 @@ class TestCUDAReplayedStepChecks:
     def test_replay_skips_full_input_check(self, native_calls: list[MuSGD], monkeypatch: pytest.MonkeyPatch) -> None:
         """A step matching its recording replays without the full input scan.
 
-        The scan sorts every parameter, gradient and buffer span; the key already fixes
-        what it certified, so running it again on each replayed step only costs time.
+        The scan sorts every parameter, gradient and buffer span; the key already fixes what it certified, so running it
+        again on each replayed step only costs time.
         """
-        a, b = parameters("cuda"), parameters("cuda")
-        pairs = ((a, MuSGD(a, lr=0.01)), (b, MuSGD(b, lr=0.01, capture_updates=True)))
+        pairs = twin_pairs("cuda")
         prepared = [advance(pairs, step, native_calls) for step in range(2)]
         monkeypatch.setattr(_UpdateReplay, "_supported", lambda *args: pytest.fail("full input scan on replay"))
         prepared.append(advance(pairs, 2, native_calls))
@@ -458,9 +459,9 @@ class TestCUDAReplayedStepChecks:
     def test_gradient_reaching_parameter_after_recording_runs_native(self, native_calls: list[MuSGD]) -> None:
         """A gradient that moves onto a parameter's bytes after recording takes the native route.
 
-        The aliasing gradient keeps the recorded shape, strides and dtype, so the key
-        still matches; only the per-step address check can keep that step native. The
-        next step, with an independent gradient again, replays the same recording.
+        The aliasing gradient keeps the recorded shape, strides and dtype, so the key still matches; only the per-step
+        address check can keep that step native. The next step, with an independent gradient again, replays the same
+        recording.
         """
         a = [torch.nn.Parameter(torch.arange(4, device="cuda", dtype=torch.float32)) for _ in range(2)]
         b = [torch.nn.Parameter(param.detach().clone()) for param in a]
@@ -483,10 +484,9 @@ class TestCUDAStepGuards:
     def test_autocast_keeps_native_step(self, native_calls: list[MuSGD]) -> None:
         """A step under CUDA autocast runs the native iterator and records nothing.
 
-        Autocast changes the precision native preparation computes in, which a recording
-        made outside it would not follow. Both optimizers take their first recordable
-        step inside the same autocast scope, so their states agree byte for byte; the
-        candidate must have prepared natively and kept no recording.
+        Autocast changes the precision native preparation computes in, which a recording made outside it would not
+        follow. Both optimizers take their first recordable step inside the same autocast scope, so their states agree
+        byte for byte; the candidate must have prepared natively and kept no recording.
         """
         a, b = parameters("cuda"), parameters("cuda")
         candidate = MuSGD(b, lr=0.01, capture_updates=True)
@@ -501,10 +501,9 @@ class TestCUDAStepGuards:
     def test_enclosing_capture_keeps_native_step(self, native_calls: list[MuSGD]) -> None:
         """A step captured into a caller's CUDA graph runs the native iterator and records nothing.
 
-        A recording started inside another capture would synchronize and allocate inside
-        it. After one eager step initializes momentum, the candidate's next step is
-        captured into an outer graph on a warmed side stream; replaying that graph once
-        must match one native reference step, with no recording kept.
+        A recording started inside another capture would synchronize and allocate inside it. After one eager step
+        initializes momentum, the candidate's next step is captured into an outer graph on a warmed side stream;
+        replaying that graph once must match one native reference step, with no recording kept.
         """
         a, b, warm = parameters("cuda"), parameters("cuda"), parameters("cuda")
         reference, candidate, warmup = MuSGD(a, lr=0.01), MuSGD(b, lr=0.01, capture_updates=True), MuSGD(warm, lr=0.01)
@@ -547,13 +546,11 @@ class TestCUDARecordingKey:
     ) -> None:
         """A step under another arithmetic setting or stream prepares natively instead of replaying.
 
-        Each setting is part of the recording key. Both optimizers take the step under
-        the change, so their bytes agree with native arithmetic under it; matching bytes
-        alone cannot tell a reused recording apart where the setting changes no result
-        (no TF32 hardware, say), so the candidate must also have run the native iterator.
+        Each setting is part of the recording key. Both optimizers take the step under the change, so their bytes agree
+        with native arithmetic under it; matching bytes alone cannot tell a reused recording apart where the setting
+        changes no result (no TF32 hardware, say), so the candidate must also have run the native iterator.
         """
-        a, b = parameters("cuda"), parameters("cuda")
-        pairs = ((a, MuSGD(a, lr=0.01)), (b, MuSGD(b, lr=0.01, capture_updates=True)))
+        pairs = twin_pairs("cuda")
         prepared = [advance(pairs, step, native_calls) for step in range(2)]
         with change():
             prepared.append(advance(pairs, 2, native_calls))
@@ -562,11 +559,10 @@ class TestCUDARecordingKey:
     def test_fill_setting_keeps_replay(self, native_calls: list[MuSGD]) -> None:
         """Flipping the uninitialized-memory fill flag keeps replaying the recording.
 
-        The flag only decides what new memory holds before it is written, which correct
-        preparation never reads, so it is deliberately left out of the recording key.
+        The flag only decides what new memory holds before it is written, which correct preparation never reads, so it
+        is deliberately left out of the recording key.
         """
-        a, b = parameters("cuda"), parameters("cuda")
-        pairs = ((a, MuSGD(a, lr=0.01)), (b, MuSGD(b, lr=0.01, capture_updates=True)))
+        pairs = twin_pairs("cuda")
         prepared = [advance(pairs, step, native_calls) for step in range(2)]
         with flipped_fill():
             prepared.append(advance(pairs, 2, native_calls))
@@ -587,11 +583,10 @@ class TestCUDARecordingKey:
     ) -> None:
         """A group scalar changed for one step prepares natively, then the recording replays again.
 
-        Every scalar the recording bakes in is keyed by type and bits. The step after the
-        change restores the default and must replay with no preparation.
+        Every scalar the recording bakes in is keyed by type and bits. The step after the change restores the default
+        and must replay with no preparation.
         """
-        a, b = parameters("cuda"), parameters("cuda")
-        pairs = ((a, MuSGD(a, lr=0.01)), (b, MuSGD(b, lr=0.01, capture_updates=True)))
+        pairs = twin_pairs("cuda")
         prepared = [advance(pairs, step, native_calls) for step in range(2)]
         prepared.append(advance(pairs, 2, native_calls, **{name: changed}))
         prepared.append(advance(pairs, 3, native_calls, **{name: default}))
@@ -600,11 +595,11 @@ class TestCUDARecordingKey:
     def test_moved_parameter_runs_native_once(self, native_calls: list[MuSGD]) -> None:
         """A parameter whose storage moves for one step prepares natively, then replays once it is back.
 
-        The recording reads and writes the parameter at its captured address. Assigning
-        ``param.data`` to a copy keeps the parameter's identity but not that address.
+        The recording reads and writes the parameter at its captured address. Assigning ``param.data`` to a copy keeps
+        the parameter's identity but not that address.
         """
-        a, b = parameters("cuda"), parameters("cuda")
-        pairs = ((a, MuSGD(a, lr=0.01)), (b, MuSGD(b, lr=0.01, capture_updates=True)))
+        pairs = twin_pairs("cuda")
+        b = pairs[1][0]
         prepared = [advance(pairs, step, native_calls) for step in range(2)]
         original = b[0].data
         b[0].data = original.clone()
@@ -617,8 +612,8 @@ class TestCUDARecordingKey:
     def test_replaced_momentum_buffer_runs_native_once(self, native_calls: list[MuSGD]) -> None:
         """A momentum buffer replaced for one step prepares natively, then replays once it is back.
 
-        The recording updates momentum in place at the captured buffer. A new buffer
-        object, as a state load or a manual edit would leave, is a different address.
+        The recording updates momentum in place at the captured buffer. A new buffer object, as a state load or a manual
+        edit would leave, is a different address.
         """
         a, b = parameters("cuda"), parameters("cuda")
         candidate = MuSGD(b, lr=0.01, capture_updates=True)
@@ -635,8 +630,8 @@ class TestCUDARecordingKey:
     def test_changed_gradient_layout_runs_native_once(self, native_calls: list[MuSGD]) -> None:
         """A gradient arriving in another memory layout prepares natively, then replays with the usual layout.
 
-        The recording copies each gradient into a private buffer with the recorded
-        strides; a contiguous gradient for the channels-last kernel has other strides.
+        The recording copies each gradient into a private buffer with the recorded strides; a contiguous gradient for
+        the channels-last kernel has other strides.
         """
         a, b = parameters("cuda"), parameters("cuda")
         candidate = MuSGD(b, lr=0.01, capture_updates=True)
@@ -658,10 +653,9 @@ class TestCUDAGradientInputs:
     def test_recorded_gradients_keep_caller_values(self) -> None:
         """The gradients a recording was made from keep their values while later steps replay.
 
-        Each replay copies the new gradients into the recording's private inputs. Were
-        those inputs the caller's step-1 tensors rather than copies, every later step
-        would overwrite them while the optimizer's own bytes still matched native, so
-        the retained step-1 tensors are compared with snapshots taken right after it.
+        Each replay copies the new gradients into the recording's private inputs. Were those inputs the caller's step-1
+        tensors rather than copies, every later step would overwrite them while the optimizer's own bytes still matched
+        native, so the retained step-1 tensors are compared with snapshots taken right after it.
         """
         a, b = parameters("cuda"), parameters("cuda")
         candidate = MuSGD(b, lr=0.01, capture_updates=True)
@@ -686,10 +680,9 @@ class TestParameterLayout:
     def test_native_updates_take_parameter_strides(self) -> None:
         """Native updates for channels-last ``1x1``, depthwise and full kernels leave with their parameter's strides.
 
-        A ``1x1`` or depthwise update already counts as channels-last contiguous while
-        its strides differ from the parameter's on size-one dimensions, so a memory
-        format conversion leaves it untouched. The parameters are built as a converted
-        convolution holds them, and the values must survive the restride unchanged.
+        A ``1x1`` or depthwise update already counts as channels-last contiguous while its strides differ from the
+        parameter's on size-one dimensions, so a memory format conversion leaves it untouched. The parameters are built
+        as a converted convolution holds them, and the values must survive the restride unchanged.
         """
         params = parameters("cpu", _KERNEL_SHAPES)
         optimizer = MuSGD(params, lr=0.01)
@@ -710,9 +703,8 @@ class TestCUDAParameterLayout:
     def test_recorded_updates_take_parameter_strides(self) -> None:
         """Every recorded update has its parameter's exact strides, so one foreach call writes them all.
 
-        Counting foreach launches in a profiler cannot show this on PyTorch versions that
-        ignore size-one strides, so the recorded pairs are compared directly; the replayed
-        steps must still match the native reference.
+        Counting foreach launches in a profiler cannot show this on PyTorch versions that ignore size-one strides, so
+        the recorded pairs are compared directly; the replayed steps must still match the native reference.
         """
         a, b = parameters("cuda", _KERNEL_SHAPES), parameters("cuda", _KERNEL_SHAPES)
         candidate = MuSGD(b, lr=0.01, capture_updates=True)

@@ -1,20 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """``lucid-export``: a checkpoint in, one static ONNX file out, per task.
 
-The command composes nothing of its own — :func:`~lucid_yolo.export.graph_from_module`
-builds the graph and :func:`~lucid_yolo.export.export_graph` writes it, and
-``tests/models/test_onnx_export.py`` gates both on op content and numeric parity. What is
-tested here is the command around them: that it parses, that it reads the task from the
-checkpoint for every task, that the file it writes is the static, pinned-opset graph the
-summary describes, and that onnxruntime answers with the scores the checkpoint answers.
+The command composes nothing of its own — :func:`~lucid_yolo.export.graph_from_module` builds the graph and
+:func:`~lucid_yolo.export.export_graph` writes it, and ``tests/models/test_onnx_export.py`` gates both on op content and
+numeric parity. What is tested here is the command around them: that it parses, that it reads the task from the
+checkpoint for every task, that the file it writes is the static, pinned-opset graph the summary describes, and that
+onnxruntime answers with the scores the checkpoint answers.
 
-The checkpoints are small and untrained, at multipliers no registry row has, so they
-also show the command exports a module the training CLI did not configure. Their
-BatchNorm statistics are calibrated by a few forward passes before saving: a freshly
-built model emits near-identical scores at every anchor, and a score comparison between
-two backends would then pass on an export that never loaded the checkpoint's weights.
-Scores are compared sorted, because tied rows may be ordered differently by the two
-backends without either being wrong.
+The checkpoints are small and untrained, at multipliers no registry row has, so they also show the command exports a
+module the training CLI did not configure. Their BatchNorm statistics are calibrated by a few forward passes before
+saving: a freshly built model emits near-identical scores at every anchor, and a score comparison between two backends
+would then pass on an export that never loaded the checkpoint's weights. Scores are compared sorted, because tied rows
+may be ordered differently by the two backends without either being wrong.
 """
 
 from __future__ import annotations
@@ -29,6 +26,7 @@ import onnx
 import onnxruntime as ort
 import pytest
 import torch
+from cli_checkpoint_helpers import save_lightning_checkpoint
 
 from lucid_yolo.cli import export as export_cli
 from lucid_yolo.eval.checkpoint import load_eval_module
@@ -39,17 +37,19 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-#: Export side. 128 px yields 336 anchors, above the 300-row cap the segmentation graph
-#: requires, and keeps the export fast on CPU.
+#: Export side. 128 px yields 336 anchors, above the 300-row cap the segmentation graph requires, and keeps the export
+#: fast on CPU.
 _SIDE = 128
+
+#: Every task the command exports.
+_TASKS = ["detect", "segment", "obb", "keypoints"]
 
 #: Point count given to a ``keypoints`` checkpoint; deliberately not COCO's 17.
 _NUM_KEYPOINTS = 3
 
 _NUM_CLASSES = 2
 
-#: Score agreement between eager PyTorch and onnxruntime, measured well below this on
-#: the parity gate's own fixture.
+#: Score agreement between eager PyTorch and onnxruntime, measured well below this on the parity gate's own fixture.
 _SCORE_ATOL = 1e-5
 
 #: Column of the score in each task's detection rows.
@@ -74,21 +74,7 @@ def _write_checkpoint(task: str, path: Path) -> Path:
     with torch.no_grad():
         for _ in range(3):
             module(torch.rand(2, 3, _SIDE, _SIDE))
-    torch.save(
-        {
-            "state_dict": module.state_dict(),
-            "hyper_parameters": dict(module.hparams),
-            "epoch": 0,
-            "global_step": 0,
-            "pytorch-lightning_version": "2.4.0",
-            "loops": {},
-            "callbacks": {},
-            "optimizer_states": [],
-            "lr_schedulers": [],
-        },
-        path,
-    )
-    return path
+    return save_lightning_checkpoint(module, path)
 
 
 def _static_dims(value: onnx.ValueInfoProto) -> tuple[int, ...]:
@@ -105,8 +91,8 @@ def _static_dims(value: onnx.ValueInfoProto) -> tuple[int, ...]:
 def test_help_lists_every_flag(capsys: pytest.CaptureFixture[str]) -> None:
     """``--help`` exits zero and lists the six flags the command documents.
 
-    The help text is generated from the function signature, so a renamed parameter would
-    silently rename its flag; this pins the spellings the docs give.
+    The help text is generated from the function signature, so a renamed parameter would silently rename its flag; this
+    pins the spellings the docs give.
     """
     with pytest.raises(SystemExit) as stopped:
         export_cli.main(["--help"])
@@ -120,14 +106,14 @@ def test_help_lists_every_flag(capsys: pytest.CaptureFixture[str]) -> None:
 class TestEndToEnd:
     """One export per task, from a checkpoint on disk through the command's own ``main``."""
 
-    @pytest.mark.parametrize("task", ["detect", "segment", "obb", "keypoints"])
+    @pytest.mark.parametrize("task", _TASKS)
     def test_writes_static_graph_at_pinned_opset(
         self, task: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """The written file takes one static ``(1, 3, H, W)`` image and declares the pinned opset.
 
-        The output is written into a directory that does not exist yet, which the command
-        creates; the summary names the task it read from the checkpoint.
+        The output is written into a directory that does not exist yet, which the command creates; the summary names the
+        task it read from the checkpoint.
         """
         checkpoint = _write_checkpoint(task, tmp_path / f"{task}.ckpt")
         output = tmp_path / "out" / f"{task}.onnx"
@@ -145,13 +131,12 @@ class TestEndToEnd:
         }
         assert f"task={task}" in capsys.readouterr().out
 
-    @pytest.mark.parametrize("task", ["detect", "segment", "obb", "keypoints"])
+    @pytest.mark.parametrize("task", _TASKS)
     def test_onnxruntime_scores_match_checkpoint(self, task: str, tmp_path: Path) -> None:
         """Onnxruntime answers the exported file with the scores the checkpoint itself gives.
 
-        The reference is the checkpoint loaded afresh and decoded eagerly through the same
-        bridge, so a file exported from fresh weights, or from the wrong task's graph,
-        disagrees here.
+        The reference is the checkpoint loaded afresh and decoded eagerly through the same bridge, so a file exported
+        from fresh weights, or from the wrong task's graph, disagrees here.
         """
         checkpoint = _write_checkpoint(task, tmp_path / f"{task}.ckpt")
         output = tmp_path / f"{task}.onnx"
@@ -188,8 +173,8 @@ class TestRefusals:
     def test_canvas_and_img_size_together_refused(self, tmp_path: Path) -> None:
         """The two size flags are exclusive; the refusal names both values.
 
-        The checkpoint path does not exist, so a refusal raised after reading it would be
-        a ``FileNotFoundError`` instead.
+        The checkpoint path does not exist, so a refusal raised after reading it would be a ``FileNotFoundError``
+        instead.
         """
         with pytest.raises(ValueError, match=r"not both; got canvas=\[64, 64\] and img_size=128"):
             export_cli.export(tmp_path / "absent.ckpt", tmp_path / "out.onnx", canvas=(64, 64), img_size=128)
@@ -197,8 +182,8 @@ class TestRefusals:
     def test_missing_onnx_refused_naming_extra(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Without the ``onnx`` package the command stops at once, naming the extra that installs it.
 
-        torch's exporter only needs the package to finalise the file, so left to itself it
-        would fail after the trace rather than before the checkpoint is read.
+        torch's exporter only needs the package to finalise the file, so left to itself it would fail after the trace
+        rather than before the checkpoint is read.
         """
         real_find_spec = importlib.util.find_spec
         monkeypatch.setattr(
@@ -223,10 +208,9 @@ class TestRefusals:
     def test_output_naming_checkpoint_refused(self, spelling: str, tmp_path: Path) -> None:
         """An ``--output`` that is the checkpoint's own path is refused, the checkpoint left byte for byte.
 
-        The exporter truncates its destination, so without the refusal a real checkpoint
-        exported onto itself comes back as an ONNX file and the weights are gone. The
-        second spelling reaches the same file through ``..``, which only a resolved-path
-        comparison sees.
+        The exporter truncates its destination, so without the refusal a real checkpoint exported onto itself comes back
+        as an ONNX file and the weights are gone. The second spelling reaches the same file through ``..``, which only a
+        resolved-path comparison sees.
         """
         checkpoint = _write_checkpoint("detect", tmp_path / "detect.ckpt")
         original = checkpoint.read_bytes()
@@ -241,10 +225,9 @@ class TestRefusals:
     def test_output_linked_to_checkpoint_refused(self, link: Callable[[Path, Path], None], tmp_path: Path) -> None:
         """An ``--output`` linked to the checkpoint is refused, the checkpoint left byte for byte.
 
-        Writing through a symbolic link truncates its target, and a hard link is the
-        checkpoint's own file under a second name, so either alias would replace the
-        weights with ONNX bytes. A hard link resolves to a path of its own, which is why
-        the refusal also asks the filesystem whether the two are one file.
+        Writing through a symbolic link truncates its target, and a hard link is the checkpoint's own file under a
+        second name, so either alias would replace the weights with ONNX bytes. A hard link resolves to a path of its
+        own, which is why the refusal also asks the filesystem whether the two are one file.
         """
         checkpoint = _write_checkpoint("detect", tmp_path / "detect.ckpt")
         original = checkpoint.read_bytes()

@@ -1,16 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-099b datamodule layout dispatch.
 
-Every root here is written into ``tmp_path`` (A26): a two-image COCO root, the same two images
-written as a YOLO tree beside a ``data.yaml``, one root holding both and one holding neither.
-Nothing is downloaded, and the images are 64x48 PNGs so a letterbox to 32 px still resamples
-something real.
+Every root here is written into ``tmp_path`` (A26): a two-image COCO root, the same two images written as a YOLO tree
+beside a ``data.yaml``, one root holding both and one holding neither. Nothing is downloaded, and the images are 64x48
+PNGs so a letterbox to 32 px still resamples something real.
 
-Covered: each layout reaching its own reader from ``data_root`` alone — the flag WP-099 left
-serving only the COCO one — the refusal to break a tie on a root satisfying both, the error a
-root satisfying neither raises (naming both conventions and every path tried), the explicit
-``layout`` that settles either case, and the two things the YOLO path cannot serve that the
-COCO one does: segmentation mask targets, refused, and copy-paste, suppressed.
+Covered: each layout reaching its own reader from ``data_root`` alone — the flag WP-099 left serving only the COCO one —
+the refusal to break a tie on a root satisfying both, the error a root satisfying neither raises (naming both
+conventions and every path tried), the explicit ``layout`` that settles either case, and the two things the YOLO path
+cannot serve that the COCO one does: segmentation mask targets, refused, and copy-paste, suppressed.
 """
 
 from __future__ import annotations
@@ -56,8 +54,8 @@ _ORIENTED_ROW = "1 0.25 0.375 0.75 0.375 0.75 0.625 0.25 0.625"
 _COPY_PASTE_VARIANT = "x"
 #: Pipeline seed the determinism runs are built at; arbitrary, but fixed so a failure is one.
 _DETERMINISM_SEED = 20260904
-#: Silences the image cache's size report on tests about something else; the report itself
-#: is asserted by ``test_cached_fit_setup_reports_cache_size``.
+#: Silences the image cache's size report on tests about something else; the report itself is asserted by
+#: ``test_cached_fit_setup_reports_cache_size``.
 _quiet_cache_report = pytest.mark.filterwarnings("ignore:image cache:UserWarning")
 
 
@@ -66,10 +64,9 @@ def _write_image(path: Path, seed: int | None = None) -> None:
 
     Args:
         path: Destination file.
-        seed: ``None`` (the default) writes an all-zero image, which is what every test that
-            does not read pixels wants. An integer writes seeded random 8-bit content
-            instead — lossless in PNG, so the pixels read back are the ones written — and two
-            seeds give two different images.
+        seed: ``None`` (the default) writes an all-zero image, which is what every test that does not read pixels
+            wants. An integer writes seeded random 8-bit content instead — lossless in PNG, so the pixels read back are
+            the ones written — and two seeds give two different images.
 
     Examples:
         >>> import tempfile
@@ -92,8 +89,8 @@ def _write_image(path: Path, seed: int | None = None) -> None:
 def _coco_payload() -> dict[str, object]:
     """Return a COCO ``instances`` payload for the fixture's two images.
 
-    Each image carries one annotation with a four-point segmentation ring, so the reader keeps
-    it on the detection and the segmentation readings alike.
+    Each image carries one annotation with a four-point segmentation ring, so the reader keeps it on the detection and
+    the segmentation readings alike.
 
     Returns:
         The payload, ready to serialise.
@@ -155,9 +152,9 @@ def _write_coco_root(root: Path, *, distinct: bool = False) -> Path:
 def _write_yolo_root(root: Path, row: str = _DETECTION_ROW, *, distinct: bool = False) -> Path:
     """Materialise a two-split YOLO root in the shape a published export uses.
 
-    The ``val`` split is written under ``valid/`` and named by the ``data.yaml`` as
-    ``../valid/images`` — the published spelling (R32), which no convention table finds — so
-    building that split exercises the dataset's own entry rather than the fallback.
+    The ``val`` split is written under ``valid/`` and named by the ``data.yaml`` as ``../valid/images`` — the published
+    spelling (R32), which no convention table finds — so building that split exercises the dataset's own entry rather
+    than the fallback.
 
     Args:
         root: Directory to build inside.
@@ -185,6 +182,56 @@ def _write_yolo_root(root: Path, row: str = _DETECTION_ROW, *, distinct: bool = 
     text = f"names:\n{listed}nc: {len(_NAMES)}\ntrain: ../train/images\nval: ../valid/images\n"
     (root / DATA_YAML_NAME).write_text(text, encoding="utf-8")
     return root
+
+
+def _write_ambiguous_root(root: Path) -> Path:
+    """Materialise a root that satisfies both dataset conventions at once.
+
+    Args:
+        root: Directory to build inside.
+
+    Returns:
+        ``root``, holding the COCO tree and the YOLO tree side by side.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = _write_ambiguous_root(Path(tmp))
+        ...     (root / "annotations").is_dir() and (root / "data.yaml").is_file()
+        True
+    """
+    _write_coco_root(root)
+    _write_yolo_root(root)
+    return root
+
+
+def _rewrite_categories(root: Path, split: str, categories: list[dict[str, object]]) -> None:
+    """Replace the ``categories`` list of one COCO split's annotation file, leaving the rest of the payload.
+
+    Args:
+        root: A COCO root written by :func:`_write_coco_root`.
+        split: Which split's ``instances_<split>.json`` to rewrite.
+        categories: The new ``categories`` list.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = _write_coco_root(Path(tmp))
+        ...     _rewrite_categories(root, "val", [{"id": 7, "name": "bus"}])
+        ...     json.loads((root / "annotations" / "instances_val.json").read_text())["categories"]
+        [{'id': 7, 'name': 'bus'}]
+    """
+    payload = _coco_payload()
+    payload["categories"] = categories
+    (root / "annotations" / f"instances_{split}.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+#: ``(layout name, root writer)`` for each dataset convention, for tests that run once per reader.
+_LAYOUTS = [pytest.param("coco", _write_coco_root, id="coco"), pytest.param("yolo", _write_yolo_root, id="yolo")]
+#: The root writers alone, for tests that need no layout name.
+_ROOT_WRITERS = [pytest.param(_write_coco_root, id="coco"), pytest.param(_write_yolo_root, id="yolo")]
 
 
 def _datamodule(data_root: Path, **kwargs: object) -> DetectionDataModule:
@@ -232,19 +279,17 @@ def decode_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 class TestCocoLabelSpaceAgreement:
     """Both COCO splits are checked against each other's label space before either is served (WP-172).
 
-    Each split's contiguous labels are derived from its own file's ``categories`` list, so
-    two files that disagree produce two different label spaces and nothing downstream can
-    tell: the model trains against one numbering and is scored against another, reporting a
-    plausible metric the whole way. The disagreement is a property of the pair, so ``setup``
-    is the first and only place it can be seen.
+    Each split's contiguous labels are derived from its own file's ``categories`` list, so two files that disagree
+    produce two different label spaces and nothing downstream can tell: the model trains against one numbering and is
+    scored against another, reporting a plausible metric the whole way. The disagreement is a property of the pair, so
+    ``setup`` is the first and only place it can be seen.
     """
 
     def test_shared_category_set_builds_both_splits(self, tmp_path: Path) -> None:
         """Splits agreeing on their categories are served, with one label space between them.
 
-        The fixture writes the same ``categories`` list into both files, which is what an
-        ordinary export does; the check has to be silent here or it would reject every
-        healthy dataset.
+        The fixture writes the same ``categories`` list into both files, which is what an ordinary export does; the
+        check has to be silent here or it would reject every healthy dataset.
         """
         datamodule = _datamodule(_write_coco_root(tmp_path))
 
@@ -252,48 +297,39 @@ class TestCocoLabelSpaceAgreement:
 
         assert datamodule._train._base.category_id_to_label == datamodule._val.category_id_to_label
 
-    def test_category_only_in_val_named_and_raises(self, tmp_path: Path) -> None:
-        """A val-only category raises at ``setup``, naming the ids each side holds alone.
+    @pytest.mark.parametrize(
+        ("split", "extra_category", "only_in"),
+        [
+            pytest.param("val", {"id": 7, "name": "bus"}, r"only in val: \[7\]", id="val-only"),
+            pytest.param("train", {"id": 4, "name": "van"}, r"only in train: \[4\]", id="train-only"),
+        ],
+    )
+    def test_category_only_in_one_split_named_and_raises(
+        self, tmp_path: Path, split: str, extra_category: dict[str, object], only_in: str
+    ) -> None:
+        """A category held by one split alone raises at ``setup``, naming the ids that side holds alone.
 
-        Adding one category to val alone renumbers every label above it — with ids ``1, 7``
-        the val reader maps ``7 -> 1`` while train has no label ``1`` at all — so this is
-        the silent-relabelling case, not a cosmetic mismatch.
+        The check is symmetric, not a val-side filter: a one-sided ``issubset`` test would miss a train file that
+        declares a class the evaluation set never scores. Adding one category to val alone renumbers every label above
+        it — with ids ``1, 7`` the val reader maps ``7 -> 1`` while train has no label ``1`` at all — so this is the
+        silent-relabelling case, not a cosmetic mismatch.
         """
         root = _write_coco_root(tmp_path)
-        payload = _coco_payload()
-        payload["categories"] = [{"id": 1, "name": "car"}, {"id": 7, "name": "bus"}]
-        (root / "annotations" / "instances_val.json").write_text(json.dumps(payload), encoding="utf-8")
+        _rewrite_categories(root, split, [{"id": 1, "name": "car"}, extra_category])
         datamodule = _datamodule(root)
 
-        with pytest.raises(ValueError, match=r"only in val: \[7\]"):
-            datamodule.setup("fit")
-
-    def test_category_only_in_train_named_and_raises(self, tmp_path: Path) -> None:
-        """A train-only category raises too: the check is symmetric, not a val-side filter.
-
-        Guards the direction a one-sided ``issubset`` test would miss — a train file that
-        declares a class the evaluation set never scores.
-        """
-        root = _write_coco_root(tmp_path)
-        payload = _coco_payload()
-        payload["categories"] = [{"id": 1, "name": "car"}, {"id": 4, "name": "van"}]
-        (root / "annotations" / "instances_train.json").write_text(json.dumps(payload), encoding="utf-8")
-        datamodule = _datamodule(root)
-
-        with pytest.raises(ValueError, match=r"only in train: \[4\]"):
+        with pytest.raises(ValueError, match=only_in):
             datamodule.setup("fit")
 
     def test_mismatch_fails_before_train_cache_decodes_anything(self, tmp_path: Path, decode_calls: list[str]) -> None:
         """With ``cache_train_images`` on, a mismatched pair raises before a single image is decoded.
 
-        The comparison needs both readers' category maps, which two JSON reads produce; the
-        train cache needs the whole split decoded. Run in that order, a wrong annotation pair
-        on a large split fails in seconds instead of after the full decode it would discard.
+        The comparison needs both readers' category maps, which two JSON reads produce; the train cache needs the whole
+        split decoded. Run in that order, a wrong annotation pair on a large split fails in seconds instead of after
+        the full decode it would discard.
         """
         root = _write_coco_root(tmp_path)
-        payload = _coco_payload()
-        payload["categories"] = [{"id": 1, "name": "car"}, {"id": 7, "name": "bus"}]
-        (root / "annotations" / "instances_val.json").write_text(json.dumps(payload), encoding="utf-8")
+        _rewrite_categories(root, "val", [{"id": 1, "name": "car"}, {"id": 7, "name": "bus"}])
         datamodule = _datamodule(root, cache_train_images=True)
 
         with pytest.raises(ValueError, match=r"only in val: \[7\]"):
@@ -304,33 +340,34 @@ class TestCocoLabelSpaceAgreement:
 class TestLayoutDispatch:
     """Which reader a ``data_root`` reaches, under one flag and with no overrides."""
 
-    def test_coco_root_reaches_coco_reader(self, tmp_path: Path) -> None:
-        """The incumbent layout is unchanged: a COCO root still builds both splits from JSON."""
-        datamodule = _datamodule(_write_coco_root(tmp_path))
-        datamodule.setup("fit")
-
-        assert datamodule.layout is DatasetLayout.COCO
-        assert isinstance(datamodule._train._base, CocoDetectionDataset)
-        assert isinstance(datamodule._val, CocoDetectionDataset)
-
-    def test_yolo_root_reaches_yolo_reader(self, tmp_path: Path) -> None:
-        """The same flag on a YOLO root builds both splits from its label trees — the WP's point."""
-        datamodule = _datamodule(_write_yolo_root(tmp_path))
-        datamodule.setup("fit")
-
-        assert datamodule.layout is DatasetLayout.YOLO
-        assert isinstance(datamodule._train._base, YoloDetectionDataset)
-        assert isinstance(datamodule._val, YoloDetectionDataset)
-
     @pytest.mark.parametrize(
-        ("layout", "write_root"),
-        [("coco", _write_coco_root), ("yolo", _write_yolo_root)],
+        ("write_root", "layout", "reader"),
+        [
+            pytest.param(_write_coco_root, DatasetLayout.COCO, CocoDetectionDataset, id="coco"),
+            pytest.param(_write_yolo_root, DatasetLayout.YOLO, YoloDetectionDataset, id="yolo"),
+        ],
     )
+    def test_root_reaches_own_reader(
+        self, tmp_path: Path, write_root: object, layout: DatasetLayout, reader: type[object]
+    ) -> None:
+        """A root of either convention builds both splits from its own reader, from ``data_root`` alone.
+
+        The COCO case is the incumbent layout, unchanged: it still builds both splits from JSON. The YOLO case is the
+        WP's point: the same flag on a YOLO root builds both splits from its label trees.
+        """
+        datamodule = _datamodule(write_root(tmp_path))  # type: ignore[operator]
+        datamodule.setup("fit")
+
+        assert datamodule.layout is layout
+        assert isinstance(datamodule._train._base, reader)
+        assert isinstance(datamodule._val, reader)
+
+    @pytest.mark.parametrize(("layout", "write_root"), _LAYOUTS)
     def test_image_cache_off_unless_asked_for(self, tmp_path: Path, layout: str, write_root: object) -> None:
         """A datamodule built without ``cache_train_images`` decodes on demand and holds no cache.
 
-        The cache costs the uncompressed split in host RAM per process, so it is opt-in: every
-        existing run that never names the flag must keep today's memory behaviour.
+        The cache costs the uncompressed split in host RAM per process, so it is opt-in: every existing run that never
+        names the flag must keep today's memory behaviour.
         """
         datamodule = _datamodule(write_root(tmp_path), layout=layout)  # type: ignore[operator]
         datamodule.setup("fit")
@@ -341,17 +378,13 @@ class TestLayoutDispatch:
 
     @_quiet_cache_report
     @pytest.mark.parametrize("stage", ["fit", None])
-    @pytest.mark.parametrize(
-        ("layout", "write_root"),
-        [("coco", _write_coco_root), ("yolo", _write_yolo_root)],
-    )
+    @pytest.mark.parametrize(("layout", "write_root"), _LAYOUTS)
     def test_image_cache_train_only_for_both_readers(
         self, tmp_path: Path, layout: str, write_root: object, stage: str | None
     ) -> None:
         """The public switch caches train images without retaining one-use validation pixels.
 
-        ``setup()`` with no stage is Lightning's all-stages call, and it builds the cache as the
-        fit stage does.
+        ``setup()`` with no stage is Lightning's all-stages call, and it builds the cache as the fit stage does.
         """
         root = write_root(tmp_path)  # type: ignore[operator]
         datamodule = _datamodule(root, layout=layout, cache_train_images=True)
@@ -362,35 +395,28 @@ class TestLayoutDispatch:
         assert datamodule._val is not None
         assert datamodule._val._image_cache is None
 
-    @pytest.mark.parametrize(
-        ("layout", "write_root"),
-        [("coco", _write_coco_root), ("yolo", _write_yolo_root)],
-    )
+    @pytest.mark.parametrize(("layout", "write_root"), _LAYOUTS)
     def test_cached_fit_setup_reports_cache_size(self, tmp_path: Path, layout: str, write_root: object) -> None:
         """The datamodule turns the readers' size report on, so a run's log names what the cache costs.
 
-        Both readers stay quiet unless asked; the datamodule is the caller that owns a
-        training run's memory, and a decode that silently ends in an out-of-memory kill
-        is what the report exists to prevent.
+        Both readers stay quiet unless asked; the datamodule is the caller that owns a training run's memory, and a
+        decode that silently ends in an out-of-memory kill is what the report exists to prevent.
         """
         datamodule = _datamodule(write_root(tmp_path), layout=layout, cache_train_images=True)  # type: ignore[operator]
 
         with pytest.warns(UserWarning, match=r"image cache: decod.* bytes\) of host RAM per training process"):
             datamodule.setup("fit")
 
-    @pytest.mark.parametrize(
-        ("layout", "write_root"),
-        [("coco", _write_coco_root), ("yolo", _write_yolo_root)],
-    )
+    @pytest.mark.parametrize(("layout", "write_root"), _LAYOUTS)
     @pytest.mark.parametrize("stage", ["validate", "test", "predict"])
     def test_image_cache_skipped_outside_fit_stage(
         self, tmp_path: Path, layout: str, write_root: object, stage: str
     ) -> None:
         """A validate/test/predict call never decodes the train split it will not read.
 
-        ``setup`` still builds ``_train`` for idempotency, but a stage that cannot reach
-        it must not pay to cache it — the flag a training config sets would otherwise
-        make a validate-only run decode the whole train split for nothing.
+        ``setup`` still builds ``_train`` for idempotency, but a stage that cannot reach it must not pay to cache it —
+        the flag a training config sets would otherwise make a validate-only run decode the whole train split for
+        nothing.
         """
         root = write_root(tmp_path)  # type: ignore[operator]
         datamodule = _datamodule(root, layout=layout, cache_train_images=True)
@@ -400,19 +426,15 @@ class TestLayoutDispatch:
         assert datamodule._train._base._image_cache is None
 
     @_quiet_cache_report
-    @pytest.mark.parametrize(
-        ("layout", "write_root"),
-        [("coco", _write_coco_root), ("yolo", _write_yolo_root)],
-    )
+    @pytest.mark.parametrize(("layout", "write_root"), _LAYOUTS)
     def test_repeat_fit_setup_reuses_decoded_train_reader(
         self, tmp_path: Path, layout: str, write_root: object, decode_calls: list[str]
     ) -> None:
         """A second fit-stage ``setup`` decodes nothing and serves the reader the first one decoded.
 
-        A manual ``setup("fit")`` followed by ``trainer.fit``, or a second ``trainer.fit`` on
-        one datamodule in a notebook, calls it twice. Building a second cached reader there
-        held two copies of the split at the peak and paid the whole decode again for an
-        identical result; a flat decode count across the two calls rules both out.
+        A manual ``setup("fit")`` followed by ``trainer.fit``, or a second ``trainer.fit`` on one datamodule in a
+        notebook, calls it twice. Building a second cached reader there held two copies of the split at the peak and
+        paid the whole decode again for an identical result; a flat decode count across the two calls rules both out.
         """
         datamodule = _datamodule(write_root(tmp_path), layout=layout, cache_train_images=True)  # type: ignore[operator]
         datamodule.setup("fit")
@@ -426,16 +448,13 @@ class TestLayoutDispatch:
         assert datamodule._train._base is first_base
 
     @_quiet_cache_report
-    @pytest.mark.parametrize(
-        ("layout", "write_root"),
-        [("coco", _write_coco_root), ("yolo", _write_yolo_root)],
-    )
+    @pytest.mark.parametrize(("layout", "write_root"), _LAYOUTS)
     def test_repeat_fit_setup_rebuilds_train_pipeline(self, tmp_path: Path, layout: str, write_root: object) -> None:
         """Reusing the cached reader keeps ``setup``'s reset: the mosaic probability returns to its start.
 
-        The close-mosaic schedule lowers the probability on the live pipeline; a repeat
-        ``setup`` has always started a fresh pipeline at the initial value, and keeping
-        the decoded reader must not keep the old pipeline along with it.
+        The close-mosaic schedule lowers the probability on the live pipeline; a repeat ``setup`` has always started a
+        fresh pipeline at the initial value, and keeping the decoded reader must not keep the old pipeline along with
+        it.
         """
         datamodule = _datamodule(write_root(tmp_path), layout=layout, cache_train_images=True)  # type: ignore[operator]
         datamodule.setup("fit")
@@ -447,16 +466,12 @@ class TestLayoutDispatch:
         assert datamodule.mosaic_prob == initial_mosaic_prob
 
     @_quiet_cache_report
-    @pytest.mark.parametrize(
-        ("layout", "write_root"),
-        [("coco", _write_coco_root), ("yolo", _write_yolo_root)],
-    )
+    @pytest.mark.parametrize(("layout", "write_root"), _LAYOUTS)
     def test_validate_setup_after_fit_releases_cache(self, tmp_path: Path, layout: str, write_root: object) -> None:
         """A validate-stage ``setup`` after a fit one keeps no decoded train reader alive.
 
-        A stage that never reads the train split has no use for its pixels, so the reuse
-        that saves a repeat fit its decode must not turn into a cache retained for a run
-        that only validates.
+        A stage that never reads the train split has no use for its pixels, so the reuse that saves a repeat fit its
+        decode must not turn into a cache retained for a run that only validates.
         """
         datamodule = _datamodule(write_root(tmp_path), layout=layout, cache_train_images=True)  # type: ignore[operator]
         datamodule.setup("fit")
@@ -497,9 +512,7 @@ class TestLayoutDispatch:
 
     def test_root_satisfying_both_refuses_to_choose(self, tmp_path: Path) -> None:
         """Across the two conventions the loser is a different label space, so no precedence is taken."""
-        _write_coco_root(tmp_path)
-        _write_yolo_root(tmp_path)
-        datamodule = _datamodule(tmp_path)
+        datamodule = _datamodule(_write_ambiguous_root(tmp_path))
 
         with pytest.raises(ValueError, match="both dataset conventions") as failure:
             datamodule.setup("fit")
@@ -513,9 +526,7 @@ class TestLayoutDispatch:
     )
     def test_explicit_layout_settles_ambiguous_root(self, tmp_path: Path, layout: str, reader: type[object]) -> None:
         """Stating the layout skips the probe, which is the only way to read a root holding both."""
-        _write_coco_root(tmp_path)
-        _write_yolo_root(tmp_path)
-        datamodule = _datamodule(tmp_path, layout=layout)
+        datamodule = _datamodule(_write_ambiguous_root(tmp_path), layout=layout)
         datamodule.setup("fit")
 
         assert isinstance(datamodule._val, reader)
@@ -531,13 +542,11 @@ class TestLayoutDispatch:
     def test_path_override_states_coco_layout(self, tmp_path: Path) -> None:
         """The four overrides name a COCO annotation file, so naming one answers the question.
 
-        Without this the probe would run on roots it has no business judging — the offline
-        fixture datamodules point ``data_root`` at a directory whose layout is irrelevant
-        because every path is given — and an ambiguous root would fail on a reading nobody asked
-        for.
+        Without this the probe would run on roots it has no business judging — the offline fixture datamodules point
+        ``data_root`` at a directory whose layout is irrelevant because every path is given — and an ambiguous root
+        would fail on a reading nobody asked for.
         """
-        _write_coco_root(tmp_path)
-        _write_yolo_root(tmp_path)
+        _write_ambiguous_root(tmp_path)
         datamodule = _datamodule(
             tmp_path,
             train_images_dir=tmp_path / "train",
@@ -583,9 +592,9 @@ def _corrupt(path: Path) -> None:
     path.write_bytes(b"not a png")
 
 
-#: Root writer, train-split opener, the second image's path under the root, and the fault applied.
-#: A YOLO image missing at construction is not a case: the reader lists the directory, so a file
-#: that is absent then is simply not one of its images (see the removal-after-listing test below).
+#: Root writer, train-split opener, the second image's path under the root, and the fault applied. A YOLO image missing
+#: at construction is not a case: the reader lists the directory, so a file that is absent then is simply not one of
+#: its images (see the removal-after-listing test below).
 _UNREADABLE_CASES = [
     pytest.param(_write_coco_root, _open_coco_train, Path("train") / "frame1.png", Path.unlink, id="coco-missing"),
     pytest.param(_write_coco_root, _open_coco_train, Path("train") / "frame1.png", _corrupt, id="coco-corrupt"),
@@ -599,8 +608,8 @@ _UNREADABLE_CASES = [
 class TestUnreadableTrainImage:
     """A train image that is missing or undecodable, with the cache on and off.
 
-    The cache decodes the whole split at construction, so an image that would only have
-    failed when its sample was drawn now fails up front; either way the error names the path.
+    The cache decodes the whole split at construction, so an image that would only have failed when its sample was
+    drawn now fails up front; either way the error names the path.
     """
 
     def test_cache_fails_at_construction_naming_path(
@@ -618,8 +627,8 @@ class TestUnreadableTrainImage:
     ) -> None:
         """With the cache off, the same root builds and only the draw of the bad image raises.
 
-        Pins the timing change the cache brings: the failure moves from the draw to the build,
-        with no change to which file is named.
+        Pins the timing change the cache brings: the failure moves from the draw to the build, with no change to which
+        file is named.
         """
         root = write_root(tmp_path)  # type: ignore[operator]
         fault(root / image)  # type: ignore[operator]
@@ -632,8 +641,8 @@ class TestUnreadableTrainImage:
 def test_yolo_image_removed_after_listing_fails_cache_build_naming_path(tmp_path: Path) -> None:
     """A YOLO image that vanishes between the directory listing and the decode raises ``OSError``.
 
-    The reader lists its images at construction, so this is the one way a listed YOLO image is
-    missing; the cache build, run later, reports it by path and leaves the reader uncached.
+    The reader lists its images at construction, so this is the one way a listed YOLO image is missing; the cache
+    build, run later, reports it by path and leaves the reader uncached.
     """
     root = _write_yolo_root(tmp_path)
     dataset = YoloDetectionDataset.from_root(root, "train")
@@ -723,16 +732,16 @@ class TestYoloBatches:
 def _fit_datamodule(data_root: Path, global_seed: int, **kwargs: object) -> DetectionDataModule:
     """Build the determinism runs' datamodule and run its fit-stage ``setup``.
 
-    The global RNG is seeded to ``global_seed`` *before* construction on purpose: the claim
-    under test is that the pipeline's own ``seed`` determines the epoch, so a run under a
-    different ambient torch state must produce the same bytes.
+    The global RNG is seeded to ``global_seed`` *before* construction on purpose: the claim under test is that the
+    pipeline's own ``seed`` determines the epoch, so a run under a different ambient torch state must produce the same
+    bytes.
 
     Args:
         data_root: A root to build both splits from.
         global_seed: Ambient ``torch.manual_seed`` value, deliberately varied between runs.
         **kwargs: Overrides forwarded to the datamodule beyond this helper's own fixed
-            ``batch_size``/``variant``/``seed``/``mask_targets`` — ``cache_train_images``
-            for the cache-parity check below.
+            ``batch_size``/``variant``/``seed``/``mask_targets`` — ``cache_train_images`` for the cache-parity check
+            below.
 
     Returns:
         The datamodule, set up for ``"fit"``.
@@ -765,8 +774,8 @@ def _epochs_of(datamodule: DetectionDataModule, epochs: int) -> list[list[tuple[
         epochs: How many passes over the loader to collect.
 
     Returns:
-        One list of ``(uint8 images, PackedTargets)`` batches per epoch, in the transport
-        form the collate emits — before ``on_after_batch_transfer`` restores floats.
+        One list of ``(uint8 images, PackedTargets)`` batches per epoch, in the transport form the collate emits —
+        before ``on_after_batch_transfer`` restores floats.
 
     Examples:
         >>> import tempfile
@@ -840,23 +849,20 @@ def _assert_batches_identical(left: tuple[Tensor, PackedTargets], right: tuple[T
 class TestTrainingDeterminism:
     """One seed and a deterministic access order reproduce an epoch byte for byte (M-39).
 
-    The module docstring and :class:`_TrainPipeline` both claim this, and every test that
-    resembled a check pinned one transform in isolation. The property that actually breaks
-    is the composed one: six stateful transforms drawing from a single generator in a fixed
-    order, where ``_maybe_mixup`` and ``_maybe_copy_paste`` consume a *variable* number of
-    draws depending on their own outcome, so a reordered or added draw shifts everything
-    after it. The ``x`` variant is used because its scale policy gives mixup and copy-paste
-    non-zero probabilities — under the nano policy those branches never fire and the
-    variable-draw path is never exercised.
+    The module docstring and :class:`_TrainPipeline` both claim this, and every test that resembled a check pinned one
+    transform in isolation. The property that actually breaks is the composed one: six stateful transforms drawing from
+    a single generator in a fixed order, where ``_maybe_mixup`` and ``_maybe_copy_paste`` consume a *variable* number of
+    draws depending on their own outcome, so a reordered or added draw shifts everything after it. The ``x`` variant is
+    used because its scale policy gives mixup and copy-paste non-zero probabilities — under the nano policy those
+    branches never fire and the variable-draw path is never exercised.
     """
 
     def test_two_runs_at_one_seed_produce_identical_epochs(self, tmp_path: Path) -> None:
         """The whole training loader replays byte for byte across two independent builds.
 
-        Both runs are driven for two epochs under deliberately different ambient torch
-        seeds. The second epoch is the sharper half: the pipeline's generator has advanced
-        by a full pass, so it agrees only if every draw of the first epoch was consumed in
-        the same order and the same number.
+        Both runs are driven for two epochs under deliberately different ambient torch seeds. The second epoch is the
+        sharper half: the pipeline's generator has advanced by a full pass, so it agrees only if every draw of the first
+        epoch was consumed in the same order and the same number.
         """
         data_root = _write_coco_root(tmp_path)
 
@@ -871,8 +877,8 @@ class TestTrainingDeterminism:
     def test_different_seed_produces_different_epoch(self, tmp_path: Path) -> None:
         """The seed is what determines the epoch, not merely something the pipeline stores.
 
-        Without this, a pipeline that ignored its seed entirely — returning the same
-        augmented batch under every configuration — would satisfy the test above perfectly.
+        Without this, a pipeline that ignored its seed entirely — returning the same augmented batch under every
+        configuration — would satisfy the test above perfectly.
         """
         data_root = _write_coco_root(tmp_path)
         torch.manual_seed(0)
@@ -891,16 +897,15 @@ class TestTrainingDeterminism:
     def test_cache_train_images_not_change_augmented_epoch(self, tmp_path: Path, write_root: object) -> None:
         """The cache swaps where a draw's raw bytes come from, never what mosaic/affine/color/flip do with them.
 
-        ``test_opt_in_cache_decodes_once_and_keeps_returned_images_independent`` (in
-        ``test_coco.py``/``test_yolo_parse.py``) proves the reader's own decode count and
-        isolation with no ``transforms`` attached. It never drives the actual training
-        pipeline, so a cache that fed the same raw bytes through a *different* augmented
-        draw would still pass it. Replaying one seeded epoch through the real
-        ``_TrainPipeline`` with the cache on and off is the check that would catch that.
+        ``test_opt_in_cache_decodes_once_and_keeps_returned_images_independent`` (in ``test_coco.py``/
+        ``test_yolo_parse.py``) proves the reader's own decode count and isolation with no ``transforms`` attached. It
+        never drives the actual training pipeline, so a cache that fed the same raw bytes through a *different*
+        augmented draw would still pass it. Replaying one seeded epoch through the real ``_TrainPipeline`` with the
+        cache on and off is the check that would catch that.
 
-        Each image carries its own seeded random content: with all-zero images a cache that
-        served the wrong file, or a wrong pixel, would still match, and the assertion that
-        the cached arm holds a cache keeps the comparison from quietly running uncached twice.
+        Each image carries its own seeded random content: with all-zero images a cache that served the wrong file, or a
+        wrong pixel, would still match, and the assertion that the cached arm holds a cache keeps the comparison from
+        quietly running uncached twice.
         """
         data_root = write_root(tmp_path, distinct=True)  # type: ignore[operator]
 
@@ -917,10 +922,9 @@ class TestTrainingDeterminism:
     def test_cache_train_images_not_change_epoch_through_worker_process(self, tmp_path: Path) -> None:
         """With one loader worker, a cached epoch equals an uncached epoch drawn the same way.
 
-        A worker reseeds the pipeline per worker and epoch by design, so a one-worker epoch
-        is not byte-identical to a ``num_workers=0`` one and is never compared with it; both
-        arms here run through a worker under the same ambient seed. What this adds over the
-        in-process parity test is the cache surviving the hand-over to the worker (fork or
+        A worker reseeds the pipeline per worker and epoch by design, so a one-worker epoch is not byte-identical to a
+        ``num_workers=0`` one and is never compared with it; both arms here run through a worker under the same ambient
+        seed. What this adds over the in-process parity test is the cache surviving the hand-over to the worker (fork or
         spawn), with the pixels it serves there still the ones an uncached reader decodes.
         """
         data_root = _write_coco_root(tmp_path, distinct=True)
@@ -936,15 +940,15 @@ class TestTrainingDeterminism:
 class TestPreparedCacheMemoryReport:
     """The prepared cache tells the user what it will cost in host RAM, before and after the build.
 
-    Lives outside ``TestPreparedTrainingCache``: that class silences these very warnings so its
-    parity tests stay quiet, and a warning asserted under a blanket ignore is not asserted.
+    Lives outside ``TestPreparedTrainingCache``: that class silences these very warnings so its parity tests stay
+    quiet, and a warning asserted under a blanket ignore is not asserted.
     """
 
     def test_coco_estimate_states_twelve_bytes_per_source_pixel(self, tmp_path: Path) -> None:
         """A COCO root's pre-build estimate is 12 bytes (3 float32 channels) per annotated pixel.
 
-        The annotation sizes are known before a single image is decoded, so the user sees the
-        number while they can still abort a run that would not fit.
+        The annotation sizes are known before a single image is decoded, so the user sees the number while they can
+        still abort a run that would not fit.
         """
         expected_bytes = 12 * len(_IMAGE_STEMS) * _WIDTH * _HEIGHT
         module = _datamodule(_write_coco_root(tmp_path), cache_prepared_train_images=True)
@@ -960,8 +964,8 @@ class TestPreparedCacheMemoryReport:
     def test_yolo_estimate_omits_annotation_size_claim(self, tmp_path: Path) -> None:
         """A YOLO root carries no image sizes in its labels, so the estimate states none.
 
-        Inventing a figure there would be a number the reader cannot trust; the message still
-        warns of the four-times cost.
+        Inventing a figure there would be a number the reader cannot trust; the message still warns of the four-times
+        cost.
         """
         module = _datamodule(_write_yolo_root(tmp_path), cache_prepared_train_images=True)
 
@@ -970,11 +974,12 @@ class TestPreparedCacheMemoryReport:
 
         assert not any("from the annotation sizes" in str(warning.message) for warning in record)
 
-    @pytest.mark.parametrize("layout", ["coco", "yolo"])
-    def test_report_after_build_states_retained_bytes_and_record_count(self, tmp_path: Path, layout: str) -> None:
+    @pytest.mark.parametrize("write_root", _ROOT_WRITERS)
+    def test_report_after_build_states_retained_bytes_and_record_count(
+        self, tmp_path: Path, write_root: object
+    ) -> None:
         """The post-build report names the bytes the float cache holds and how many records hold them."""
-        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
-        module = _datamodule(write_root(tmp_path), cache_prepared_train_images=True)
+        module = _datamodule(write_root(tmp_path), cache_prepared_train_images=True)  # type: ignore[operator]
 
         with pytest.warns(UserWarning, match=r"prepared image cache: holding") as record:
             module.setup("fit")
@@ -990,8 +995,8 @@ class TestPreparedCacheMemoryReport:
     def test_both_cache_flags_warn_at_construction_naming_precedence(self, tmp_path: Path) -> None:
         """Setting both train-cache flags warns once, at the caller's line, that the prepared cache wins.
 
-        The flags are alternatives; a config setting both silently builds only one of them, and
-        the user who expected the 8-bit cache to be in force should hear which one is.
+        The flags are alternatives; a config setting both silently builds only one of them, and the user who expected
+        the 8-bit cache to be in force should hear which one is.
         """
         root = _write_coco_root(tmp_path)
 
@@ -1016,12 +1021,11 @@ class TestPreparedCacheMemoryReport:
 class TestPreparedTrainingCache:
     """Moving the affine subtraction to immutable sources preserves every output byte."""
 
-    @pytest.mark.parametrize("layout", ["coco", "yolo"])
+    @pytest.mark.parametrize("write_root", _ROOT_WRITERS)
     @pytest.mark.parametrize("mosaic_prob", [0.0, 1.0])
-    def test_float_pixels_targets_and_draws_match(self, tmp_path: Path, layout: str, mosaic_prob: float) -> None:
+    def test_float_pixels_targets_and_draws_match(self, tmp_path: Path, write_root: object, mosaic_prob: float) -> None:
         """Compare before transport quantization, with mixed-source blending enabled."""
-        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
-        root = write_root(tmp_path, distinct=True)
+        root = write_root(tmp_path, distinct=True)  # type: ignore[operator]
         baseline = _fit_datamodule(root, 0, cache_train_images=True)
         prepared = _fit_datamodule(root, 0, cache_prepared_train_images=True)
         baseline.set_mosaic_prob(mosaic_prob)
@@ -1039,14 +1043,13 @@ class TestPreparedTrainingCache:
         for (image, _), original in zip(source, saved, strict=True):
             assert torch.equal(image.contiguous().view(torch.uint8), original.contiguous().view(torch.uint8))
 
-    @pytest.mark.parametrize("layout", ["coco", "yolo"])
+    @pytest.mark.parametrize("write_root", _ROOT_WRITERS)
     @pytest.mark.parametrize("stage", ["validate", "test", "predict"])
-    def test_reuses_prepared_storage_and_releases_it_outside_fit(
-        self, tmp_path: Path, layout: str, stage: str, decode_calls: list[str]
+    def test_reuses_prepared_storage_and_releases_outside_fit(
+        self, tmp_path: Path, write_root: object, stage: str, decode_calls: list[str]
     ) -> None:
         """Repeated setup keeps one float cache; enabling both flags keeps no byte copy."""
-        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
-        module = _datamodule(write_root(tmp_path), cache_train_images=True, cache_prepared_train_images=True)
+        module = _datamodule(write_root(tmp_path), cache_train_images=True, cache_prepared_train_images=True)  # type: ignore[operator]
         module.setup("fit")
         first = module._prepared_train
         assert first is not None
@@ -1062,13 +1065,12 @@ class TestPreparedTrainingCache:
         assert module._cached_train_base is None
         assert module._train is not None and not isinstance(module._train._base, _PreparedTrainingSource)
 
-    @pytest.mark.parametrize("layout", ["coco", "yolo"])
+    @pytest.mark.parametrize("write_root", _ROOT_WRITERS)
     def test_fit_after_release_rebuilds_prepared_cache_by_decoding_again(
-        self, tmp_path: Path, layout: str, decode_calls: list[str]
+        self, tmp_path: Path, write_root: object, decode_calls: list[str]
     ) -> None:
         """A fit setup following a release pays the decode again: the cache was dropped, not kept hidden."""
-        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
-        module = _datamodule(write_root(tmp_path), cache_prepared_train_images=True)
+        module = _datamodule(write_root(tmp_path), cache_prepared_train_images=True)  # type: ignore[operator]
         module.setup("fit")
         module.setup("validate")
         decoded_before_rebuild = len(decode_calls)
@@ -1079,11 +1081,10 @@ class TestPreparedTrainingCache:
         assert len(decode_calls) == 2 * len(_IMAGE_STEMS)
         assert module._prepared_train is not None
 
-    @pytest.mark.parametrize("layout", ["coco", "yolo"])
-    def test_stage_none_builds_prepared_cache(self, tmp_path: Path, layout: str) -> None:
+    @pytest.mark.parametrize("write_root", _ROOT_WRITERS)
+    def test_stage_none_builds_prepared_cache(self, tmp_path: Path, write_root: object) -> None:
         """``setup(None)`` covers every stage, training included, so it builds the cache as ``"fit"`` does."""
-        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
-        module = _datamodule(write_root(tmp_path), cache_prepared_train_images=True)
+        module = _datamodule(write_root(tmp_path), cache_prepared_train_images=True)  # type: ignore[operator]
 
         module.setup(None)
 
@@ -1103,9 +1104,9 @@ class TestPreparedTrainingCache:
     def test_failed_prepared_fit_after_validate_setup_leaves_no_train_pipeline(self, tmp_path: Path) -> None:
         """A failed prepared build after a validate setup must not leave the validate pipeline serving training.
 
-        ``setup("validate")`` builds a plain train pipeline for idempotency. When the next fit setup
-        fails mid-build, ``train_dataloader`` has to refuse rather than quietly train on that
-        uncached, wrong-stage pipeline; the validation split stays the one already built.
+        ``setup("validate")`` builds a plain train pipeline for idempotency. When the next fit setup fails mid-build,
+        ``train_dataloader`` has to refuse rather than quietly train on that uncached, wrong-stage pipeline; the
+        validation split stays the one already built.
         """
         root = _write_coco_root(tmp_path, distinct=True)
         module = _datamodule(root, cache_prepared_train_images=True)
@@ -1142,9 +1143,9 @@ class TestPreparedTrainingCache:
     ) -> None:
         """The source is ordinary picklable state under a spawned worker and shared copy-on-write under a forked one.
 
-        Persistent workers keep one pipeline copy across epochs while recycled ones rebuild it, so
-        the multi-epoch fork case also pins that a worker holding the float cache stays byte-equal
-        to the decoded-cache run over repeated passes.
+        Persistent workers keep one pipeline copy across epochs while recycled ones rebuild it, so the multi-epoch fork
+        case also pins that a worker holding the float cache stays byte-equal to the decoded-cache run over repeated
+        passes.
         """
         root = _write_coco_root(tmp_path, distinct=True)
         expected = _train_epochs(root, 0, epochs=epochs, num_workers=1, persistent_workers=persistent_workers)

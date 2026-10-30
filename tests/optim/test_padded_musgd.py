@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import copy
 import math
+from collections.abc import Callable
+from typing import NoReturn
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -35,6 +38,38 @@ def device(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> s
     return value
 
 
+@pytest.fixture
+def batched_shapes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, ...]]:
+    """Record the shape of every native batch the optimizer launches, running each unchanged.
+
+    Examples:
+        >>> batched_shapes(None)  # doctest: +SKIP
+    """
+    calls: list[tuple[int, ...]] = []
+    native = musgd._orthogonalize_batched
+
+    def record(matrices: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
+        calls.append(tuple(matrices.shape))
+        return native(matrices, steps=steps, eps=eps)
+
+    monkeypatch.setattr(musgd, "_orthogonalize_batched", record)
+    return calls
+
+
+def _fail_if_called(reason: str) -> Callable[..., NoReturn]:
+    """Build a stand-in that fails the test with ``reason`` when it is called.
+
+    Examples:
+        >>> with pytest.raises(pytest.fail.Exception, match="boom"):
+        ...     _fail_if_called("boom")(1, key=2)
+    """
+
+    def fail(*args: object, **kwargs: object) -> NoReturn:
+        pytest.fail(reason)
+
+    return fail
+
+
 def _parameters(device: str, dtype: torch.dtype) -> list[torch.nn.Parameter]:
     """Build asymmetric wide, tall, square and convolutional matrices.
 
@@ -49,27 +84,31 @@ def _parameters(device: str, dtype: torch.dtype) -> list[torch.nn.Parameter]:
     ]
 
 
+def _with_unit_gradients(params: list[torch.nn.Parameter]) -> list[torch.nn.Parameter]:
+    """Give every parameter a gradient of ones and return the same list.
+
+    Examples:
+        >>> [float(param.grad.sum()) for param in _with_unit_gradients([torch.nn.Parameter(torch.zeros(2, 3))])]
+        [6.0]
+    """
+    for param in params:
+        param.grad = torch.ones_like(param)
+    return params
+
+
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_mixed_width_update_matches_scalar_oracle(
-    device: str, dtype: torch.dtype, monkeypatch: pytest.MonkeyPatch
+    device: str, dtype: torch.dtype, batched_shapes: list[tuple[int, ...]]
 ) -> None:
     """One native batch preserves independent norms, transpose, scale, gains and decay."""
     params = _parameters(device, dtype)
     for index, param in enumerate(params):
         param.grad = torch.arange(param.numel(), device=device, dtype=dtype).reshape_as(param) / (index + 7)
     starts = [param.detach().clone() for param in params]
-    calls: list[tuple[int, ...]] = []
-    native = musgd._orthogonalize_batched
-
-    def record(matrices: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
-        calls.append(tuple(matrices.shape))
-        return native(matrices, steps=steps, eps=eps)
-
-    monkeypatch.setattr(musgd, "_orthogonalize_batched", record)
     optimizer = MuSGD(params, lr=0.03, momentum=0.8, w_muon=0.7, w_sgd=0.2, weight_decay=0.04, ns_steps=3)
     optimizer.step()
 
-    assert calls == [(4, 4, 9)]
+    assert batched_shapes == [(4, 4, 9)]
     for param, start in zip(params, starts, strict=True):
         assert param.grad is not None
         gradient = param.grad + 0.8 * param.grad
@@ -81,43 +120,27 @@ def test_mixed_width_update_matches_scalar_oracle(
         torch.testing.assert_close(optimizer.state[param]["momentum_buffer"], param.grad, rtol=0, atol=0)
 
 
-def test_padding_storage_uses_existing_stack_budget(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_padding_storage_uses_existing_stack_budget(device: str, batched_shapes: list[tuple[int, ...]]) -> None:
     """An extreme width starts another batch instead of padding every small matrix to it."""
-    params = [torch.nn.Parameter(torch.ones(shape, device=device)) for shape in [(4, 5), (4, 6), (4, 1000)]]
-    for param in params:
-        param.grad = torch.ones_like(param)
-    calls: list[tuple[int, ...]] = []
-    native = musgd._orthogonalize_batched
-
-    def record(matrices: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
-        calls.append(tuple(matrices.shape))
-        return native(matrices, steps=steps, eps=eps)
-
-    monkeypatch.setattr(musgd, "_orthogonalize_batched", record)
+    params = _with_unit_gradients(
+        [torch.nn.Parameter(torch.ones(shape, device=device)) for shape in [(4, 5), (4, 6), (4, 1000)]]
+    )
     MuSGD(params, lr=0.01).step()
-    assert calls == [(2, 4, 6)]
-    assert math.prod(calls[0]) <= 2 * sum(param.numel() for param in params[:2])
+    assert batched_shapes == [(2, 4, 6)]
+    assert math.prod(batched_shapes[0]) <= 2 * sum(param.numel() for param in params[:2])
     assert all(bool(torch.isfinite(param).all()) for param in params)
 
 
 @pytest.mark.parametrize(("rows", "expected_batches"), [(255, 1), (256, 1), (257, 0)])
 def test_padding_stays_inside_measured_row_region(
-    device: str, monkeypatch: pytest.MonkeyPatch, rows: int, expected_batches: int
+    device: str, batched_shapes: list[tuple[int, ...]], rows: int, expected_batches: int
 ) -> None:
     """The measured boundary includes 256 rows; the next row retains exact shapes."""
-    params = [torch.nn.Parameter(torch.ones((rows, rows + extra), device=device)) for extra in (1, 2)]
-    for param in params:
-        param.grad = torch.ones_like(param)
-    calls = []
-    native = musgd._orthogonalize_batched
-
-    def record(matrices: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
-        calls.append(tuple(matrices.shape))
-        return native(matrices, steps=steps, eps=eps)
-
-    monkeypatch.setattr(musgd, "_orthogonalize_batched", record)
+    params = _with_unit_gradients(
+        [torch.nn.Parameter(torch.ones((rows, rows + extra), device=device)) for extra in (1, 2)]
+    )
     MuSGD(params, lr=0.01).step()
-    assert len(calls) == expected_batches
+    assert len(batched_shapes) == expected_batches
     assert all(bool(torch.isfinite(param).all()) for param in params)
 
 
@@ -148,12 +171,11 @@ def test_mixed_width_resume_preserves_momentum(device: str) -> None:
         torch.testing.assert_close(optimizer.state[param]["momentum_buffer"], buffer, rtol=0, atol=0)
 
 
-def test_shared_storage_keeps_exact_shape_updates(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(musgd, "_orthogonalize_batched", _fail_if_called("shared storage batched"))
+def test_shared_storage_keeps_exact_shape_updates(device: str) -> None:
     """Overlapping matrix views retain sequential decay rather than sharing a padded update."""
     storage = torch.arange(24.0, device=device)
-    params = [torch.nn.Parameter(storage[:20].view(4, 5)), torch.nn.Parameter(storage.view(4, 6))]
-    for param in params:
-        param.grad = torch.ones_like(param)
+    params = _with_unit_gradients([torch.nn.Parameter(storage[:20].view(4, 5)), torch.nn.Parameter(storage.view(4, 6))])
     expected = storage.clone()
     for width in (5, 6):
         view = expected[: 4 * width].view(4, width)
@@ -161,46 +183,41 @@ def test_shared_storage_keeps_exact_shape_updates(device: str, monkeypatch: pyte
         muon = orthogonalize(gradient).mul(0.2 * math.sqrt(width))
         update = muon.mul(0.5).add(gradient, alpha=0.5).add(view, alpha=0.2)
         view.add_(update, alpha=-0.1)
-    monkeypatch.setattr(musgd, "_orthogonalize_batched", lambda *args, **kwargs: pytest.fail("shared storage batched"))
     MuSGD(params, lr=0.1, weight_decay=0.2).step()
     torch.testing.assert_close(storage, expected)
 
 
+@patch.object(musgd, "_orthogonalize_batched", _fail_if_called("overlapping views batched"))
 def test_dlpack_overlap_keeps_scalar_order(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Views of one buffer under distinct storage objects keep the sequential decay order.
 
-    ``torch.from_dlpack`` wraps the same memory in another storage object with its own base pointer,
-    so a base-pointer comparison calls the two parameters independent while their bytes overlap.
-    Padding would then reorder their decoupled-decay updates and diverge from the scalar path.
+    ``torch.from_dlpack`` wraps the same memory in another storage object with its own base pointer, so a base-pointer
+    comparison calls the two parameters independent while their bytes overlap. Padding would then reorder their
+    decoupled-decay updates and diverge from the scalar path.
     """
     base = torch.linspace(-1.0, 1.0, 40, device=device)
 
     def run() -> torch.Tensor:
         flat = base.clone()
-        params = [
-            torch.nn.Parameter(flat[:24].view(4, 6)),
-            torch.nn.Parameter(torch.from_dlpack(flat[2:22]).view(4, 5)),
-        ]
-        for param in params:
-            param.grad = torch.ones_like(param)
+        params = _with_unit_gradients(
+            [
+                torch.nn.Parameter(flat[:24].view(4, 6)),
+                torch.nn.Parameter(torch.from_dlpack(flat[2:22]).view(4, 5)),
+            ]
+        )
         MuSGD(params, lr=0.1, weight_decay=0.2).step()
         return flat
 
     with monkeypatch.context() as scalar:
         scalar.setattr(musgd, "_BATCHED_DEVICE_TYPES", frozenset())
         expected = run()
-    monkeypatch.setattr(
-        musgd, "_orthogonalize_batched", lambda *args, **kwargs: pytest.fail("overlapping views batched")
-    )
     assert torch.equal(run(), expected)
 
 
 @pytest.mark.parametrize("shape", [(3,), (4, 6)])
 def test_parameter_subclass_keeps_legacy_route(device: str, shape: tuple[int, ...]) -> None:
     """A valid parameter subclass need not expose storage to keep its old update."""
-    params = [_StorageOpaqueParameter(torch.ones(shape, device=device)) for _ in range(2)]
-    for param in params:
-        param.grad = torch.ones_like(param)
+    params = _with_unit_gradients([_StorageOpaqueParameter(torch.ones(shape, device=device)) for _ in range(2)])
     gradient = torch.full(shape, 1.95, device=device)
     update = gradient
     if len(shape) > 1:
@@ -212,7 +229,8 @@ def test_parameter_subclass_keeps_legacy_route(device: str, shape: tuple[int, ..
         torch.testing.assert_close(param, expected)
 
 
-def test_mixed_subclass_group_keeps_alias_order(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(musgd, "_orthogonalize_batched", _fail_if_called("opaque group padded"))
+def test_mixed_subclass_group_keeps_alias_order(device: str) -> None:
     """Opaque storage can overlap an ordinary parameter, so the whole group keeps its old keys."""
     storage = torch.arange(32.0, device=device).view(4, 8)
     params = [
@@ -230,7 +248,6 @@ def test_mixed_subclass_group_keeps_alias_order(device: str, monkeypatch: pytest
         muon = orthogonalize(nesterov).mul(0.2 * math.sqrt(width))
         update = muon.mul(0.5).add(nesterov, alpha=0.5).add(view, alpha=0.5)
         view.add_(update, alpha=-0.2)
-    monkeypatch.setattr(musgd, "_orthogonalize_batched", lambda *args, **kwargs: pytest.fail("opaque group padded"))
     MuSGD(params, lr=0.2, weight_decay=0.5).step()
     torch.testing.assert_close(storage, expected)
 
@@ -246,16 +263,16 @@ def test_mixed_subclass_group_keeps_alias_order(device: str, monkeypatch: pytest
         pytest.param("cuda", torch.float64, marks=requires_cuda, id="cuda-float64"),
     ],
 )
+@patch.object(musgd, "_BATCHED_DEVICE_TYPES", frozenset({"cpu", "cuda"}))
 def test_momentum_batches_without_reassociation(
     device_name: str, dtype: torch.dtype, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The three foreach calls retain the scalar recurrence and its updates bit for bit across resume.
 
-    Zero Muon gain, unit SGD gain and no decay make every update the Nesterov gradient itself, so the
-    parameters expose that gradient after a nonzero-lr step instead of the buffers alone. The gate is
-    widened to CPU unconditionally: half precision stays on CUDA, where the recurrence was measured.
+    Zero Muon gain, unit SGD gain and no decay make every update the Nesterov gradient itself, so the parameters expose
+    that gradient after a nonzero-lr step instead of the buffers alone. The gate is widened to CPU unconditionally: half
+    precision stays on CUDA, where the recurrence was measured.
     """
-    monkeypatch.setattr(musgd, "_BATCHED_DEVICE_TYPES", frozenset({"cpu", "cuda"}))
     shapes = [(), (3,), (2, 3), (4,)]
     params = [torch.nn.Parameter(torch.zeros(shape, device=device_name, dtype=dtype)) for shape in shapes]
     settings = {"lr": 0.01, "w_muon": 0.0, "w_sgd": 1.0, "weight_decay": 0.0}
@@ -287,16 +304,15 @@ def test_momentum_batches_without_reassociation(
     assert calls == [4] * 20
 
 
-def test_default_gate_keeps_scalar_momentum_on_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(torch, "_foreach_mul_", _fail_if_called("cpu momentum batched"))
+def test_default_gate_keeps_scalar_momentum_on_cpu() -> None:
     """CPU stays outside the foreach gate, so the narrow default never calls a foreach kernel."""
-    params = [torch.nn.Parameter(torch.ones(3)) for _ in range(2)]
-    for param in params:
-        param.grad = torch.ones_like(param)
-    monkeypatch.setattr(torch, "_foreach_mul_", lambda *args: pytest.fail("cpu momentum batched"))
+    params = _with_unit_gradients([torch.nn.Parameter(torch.ones(3)) for _ in range(2)])
     MuSGD(params, lr=0.1).step()
 
 
-def test_gradient_parameter_alias_preserves_sequential_updates(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(torch, "_foreach_mul_", _fail_if_called("aliased gradients batched"))
+def test_gradient_parameter_alias_preserves_sequential_updates(device: str) -> None:
     """A vector update that changes another gradient retains the original ordering."""
     params = [torch.nn.Parameter(torch.tensor([1.0, 2.0], device=device)) for _ in range(2)]
     params[0].grad = params[1].detach()
@@ -304,13 +320,13 @@ def test_gradient_parameter_alias_preserves_sequential_updates(device: str, monk
     expected = [param.detach().clone() for param in params]
     expected[0].add_(expected[1] * 1.95, alpha=-0.1)
     expected[1].add_(expected[0] * 1.95, alpha=-0.1)
-    monkeypatch.setattr(torch, "_foreach_mul_", lambda *args: pytest.fail("aliased gradients batched"))
     MuSGD(params, lr=0.1).step()
     for param, value in zip(params, expected, strict=True):
         torch.testing.assert_close(param, value)
 
 
-def test_restored_mixed_buffer_dtype_keeps_scalar_route(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(torch, "_foreach_mul_", _fail_if_called("mixed buffer dtype batched"))
+def test_restored_mixed_buffer_dtype_keeps_scalar_route(device: str) -> None:
     """A wider saved buffer keeps the scalar promotion instead of joining a foreach batch."""
     param = torch.nn.Parameter(torch.ones(3, device=device))
     param.grad = torch.full_like(param, 0.3)
@@ -321,13 +337,13 @@ def test_restored_mixed_buffer_dtype_keeps_scalar_route(device: str, monkeypatch
     optimizer.state[param]["momentum_buffer"] = buffer
     expected_buffer = buffer * 0.95 + param.grad
     expected = param.detach() - 0.1 * param.grad.add(expected_buffer, alpha=0.95)
-    monkeypatch.setattr(torch, "_foreach_mul_", lambda *args: pytest.fail("mixed buffer dtype batched"))
     optimizer.step()
     torch.testing.assert_close(param, expected.to(param.dtype))
     torch.testing.assert_close(buffer, expected_buffer, rtol=0, atol=0)
 
 
-def test_shared_momentum_buffer_preserves_sequential_recurrence(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(torch, "_foreach_mul_", _fail_if_called("shared momentum batched"))
+def test_shared_momentum_buffer_preserves_sequential_recurrence(device: str) -> None:
     """A shared restored buffer advances once per parameter in the original order."""
     params = [torch.nn.Parameter(torch.ones(3, device=device)) for _ in range(2)]
     optimizer = MuSGD(params, lr=0.1)
@@ -339,7 +355,6 @@ def test_shared_momentum_buffer_preserves_sequential_recurrence(device: str, mon
         optimizer.state[param]["momentum_buffer"] = shared
         reference.mul_(0.95).add_(param.grad)
         expected.append(param.detach() - 0.1 * param.grad.add(reference, alpha=0.95))
-    monkeypatch.setattr(torch, "_foreach_mul_", lambda *args: pytest.fail("shared momentum batched"))
     optimizer.step()
     for param, value in zip(params, expected, strict=True):
         torch.testing.assert_close(param, value)
@@ -347,14 +362,14 @@ def test_shared_momentum_buffer_preserves_sequential_recurrence(device: str, mon
 
 
 @pytest.mark.skipif(not hasattr(torch.Tensor, "grad_dtype"), reason="grad_dtype postdates torch>=2.4")
-def test_wider_gradient_keeps_scalar_promotion(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(torch, "_foreach_mul_", _fail_if_called("wider gradient batched"))
+def test_wider_gradient_keeps_scalar_promotion(device: str) -> None:
     """The optional wider gradient does not inherit the parameter's precision."""
     param = torch.nn.Parameter(torch.ones(3, device=device))
     param.grad_dtype = None
     param.grad = torch.full((3,), 0.3, device=device, dtype=torch.float64)
     buffer = param.grad.float()
     expected = param.detach() - 0.1 * param.grad.add(buffer, alpha=0.95)
-    monkeypatch.setattr(torch, "_foreach_mul_", lambda *args: pytest.fail("wider gradient batched"))
     other = torch.nn.Parameter(torch.ones(3, device=device))
     other.grad = torch.ones_like(other)
     MuSGD([param, other], lr=0.1).step()

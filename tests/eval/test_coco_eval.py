@@ -5,34 +5,29 @@ Covers the three pieces of :mod:`lucid_yolo.eval.coco_eval`, now driven by
 :class:`torchmetrics.detection.MeanAveragePrecision` on its ``faster_coco_eval``
 backend (WP-069):
 
-- :func:`test_dual_path_report` (the WP-043 DoD) — a **real** tiny untrained
-  detector is run through :class:`~lucid_yolo.eval.coco_eval.DualPathEvaluator`
-  over a few detseg fixture images with ground-truth target dicts built from the
-  fixture annotation JSON; the report must carry both ``"e2e"`` and ``"nms"``
-  keys, each a full 12-metric dict of finite values (an untrained mAP near zero
-  is fine — the contract under test is the plumbing, one pass / one checkpoint /
-  both paths, not accuracy).
-- :func:`detections_to_predictions` unit cases — padding rows dropped, ``xyxy``
-  kept as-is, contiguous-label to COCO-category-id mapping, and the score floor.
-- :func:`test_evaluate_bbox_perfect_predictions` — a one-image smoke where the
-  predictions are exactly the ground-truth boxes, so mAP is 1.0. It is a
-  minimal preview of :class:`TestOracleRoundTrip`, kept deliberately small here.
-- :class:`TestOracleRoundTrip` (the WP-044 DoD, :func:`TestOracleRoundTrip.test_oracle`)
-  — the full-fixture oracle: perfect predictions round-tripped through
-  :func:`detections_to_predictions` score mAP 1.0, shuffled-class predictions
-  collapse it near 0, a localization-jitter ladder pins the metric's monotonic
-  response to box error, wrong-ranked candidate scores degrade AP even with a
-  perfect box present, and score-zero padding rows change nothing.
-- :class:`TestRecallGridBoundary` (the WP-092 DoD) — the 101-point recall grid at
-  the boundaries floating point decides wrongly, asserted against a hand-derived
-  ``(k + 1) / 101`` rather than against another implementation, plus the guard
-  that fails loudly if torchmetrics ever stops honouring ``rec_thresholds``.
+- :func:`test_dual_path_report` (the WP-043 DoD) — a **real** tiny untrained detector is run through
+  :class:`~lucid_yolo.eval.coco_eval.DualPathEvaluator` over a few detseg fixture images with ground-truth target
+  dicts built from the fixture annotation JSON; the report must carry both ``"e2e"`` and ``"nms"`` keys, each a full
+  12-metric dict of finite values (an untrained mAP near zero is fine — the contract under test is the plumbing,
+  one pass / one checkpoint / both paths, not accuracy).
+- :func:`detections_to_predictions` unit cases — padding rows dropped, ``xyxy`` kept as-is, contiguous-label to
+  COCO-category-id mapping, and the score floor.
+- :func:`test_evaluate_bbox_perfect_predictions` — a one-image smoke where the predictions are exactly the
+  ground-truth boxes, so mAP is 1.0. It is a minimal preview of :class:`TestOracleRoundTrip`, kept deliberately small
+  here.
+- :class:`TestOracleRoundTrip` (the WP-044 DoD, :func:`TestOracleRoundTrip.test_oracle`) — the full-fixture oracle:
+  perfect predictions round-tripped through :func:`detections_to_predictions` score mAP 1.0, shuffled-class
+  predictions collapse it near 0, a localization-jitter ladder pins the metric's monotonic response to box error,
+  wrong-ranked candidate scores degrade AP even with a perfect box present, and score-zero padding rows change
+  nothing.
+- :class:`TestRecallGridBoundary` (the WP-092 DoD) — the 101-point recall grid at the boundaries floating point
+  decides wrongly, asserted against a hand-derived ``(k + 1) / 101`` rather than against another implementation,
+  plus the guard that fails loudly if torchmetrics ever stops honouring ``rec_thresholds``.
 
-The oracle bands (perfect -> 1.0, small-jitter floor 0.5, shuffled/offset ceiling
-0.05, ranking -> 0.5) are unchanged from the WP-044 gate: the
-``faster_coco_eval`` backend reimplements COCOeval faithfully, so only the metric
-**key names** move (``map50_95`` -> ``map``, ``recall_*`` -> ``mar_*``) and the
-ground truth is a target dict rather than a ``COCO`` object.
+The oracle bands (perfect -> 1.0, small-jitter floor 0.5, shuffled/offset ceiling 0.05, ranking -> 0.5) are unchanged
+from the WP-044 gate: the ``faster_coco_eval`` backend reimplements COCOeval faithfully, so only the metric
+**key names** move (``map50_95`` -> ``map``, ``recall_*`` -> ``mar_*``) and the ground truth is a target dict rather
+than a ``COCO`` object.
 """
 
 from __future__ import annotations
@@ -40,6 +35,7 @@ from __future__ import annotations
 import inspect
 import json
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -58,7 +54,9 @@ from lucid_yolo.models.heads.detect import DualHeadOutput
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
+    from unittest.mock import MagicMock
 
 _SPLIT = "train"
 _ANNOTATION = "_annotations.coco.json"
@@ -74,19 +72,22 @@ _SHUFFLED_MAP_CEILING = 0.05  # shuffled-class predictions must stay under this 
 _RANKING_NUM_IMAGES = 3  # keep the score-ranking case small and fast (spec: 2-3 images).
 _PAD_ROWS = 3  # extra score-zero rows appended per image for the padding-invariance case.
 
-# Geometry of the exact-recall boundary fixture. The pitch far exceeds the box size, so
-# the targets are pairwise disjoint and each detection can only match its own copy —
-# which is what makes the attained recall exactly found/positives at every IoU threshold.
+# Geometry of the exact-recall boundary fixture. The pitch far exceeds the box size, so the targets are pairwise
+# disjoint and each detection can only match its own copy — which is what makes the attained recall exactly
+# found/positives at every IoU threshold.
 _BOUNDARY_PITCH = 100.0
 _BOUNDARY_HALF_WIDTH = 10.0
 _BOUNDARY_HALF_HEIGHT = 5.0
+
+# Every statistic a bbox+segm scorer reports: the 12 bbox keys plus their ``segm_``-prefixed twins.
+_BBOX_AND_SEGM_KEYS = (*_METRIC_KEYS, *(coco_eval._SEGM_PREFIX + key for key in _METRIC_KEYS))
 
 
 def _targets_by_image(doc: dict[str, object]) -> dict[int, dict[str, torch.Tensor]]:
     """Build torchmetrics target dicts (``xyxy`` boxes, category-id labels) keyed by image id.
 
-    Every image in the document gets an entry — images without annotations map to
-    empty ``(0, 4)`` box / ``(0,)`` label tensors, so any yielded image id resolves.
+    Every image in the document gets an entry — images without annotations map to empty ``(0, 4)`` box / ``(0,)`` label
+    tensors, so any yielded image id resolves.
 
     Examples:
         >>> ann = {"image_id": 1, "bbox": [0.0, 0.0, 2.0, 3.0], "category_id": 5}
@@ -119,10 +120,9 @@ def _eval_batch(
 ) -> list[tuple[torch.Tensor, list[int], list[tuple[int, int]]]]:
     """Assemble one ``(images, image_ids, orig_sizes)`` batch from fixture images.
 
-    Reads the first ``num_images`` images named in the fixture COCO JSON, scales
-    each to ``[0, 1]``, letterboxes it onto the canvas, and stacks them with their
-    COCO image ids and original ``(height, width)`` sizes — the batch contract the
-    :class:`~lucid_yolo.eval.coco_eval.DualPathEvaluator` consumes.
+    Reads the first ``num_images`` images named in the fixture COCO JSON, scales each to ``[0, 1]``, letterboxes it
+    onto the canvas, and stacks them with their COCO image ids and original ``(height, width)`` sizes — the batch
+    contract the :class:`~lucid_yolo.eval.coco_eval.DualPathEvaluator` consumes.
 
     Examples:
         >>> callable(_eval_batch)  # needs a real fixture_dir with COCO images/annotations on disk
@@ -145,8 +145,7 @@ def _eval_batch(
 def test_dual_path_report(detseg_fixture_dir: Path) -> None:
     """A real tiny detector yields a both-paths report of finite 12-metric dicts (DoD)."""
     torch.manual_seed(0)
-    split_dir = detseg_fixture_dir / _SPLIT
-    dataset = CocoDetectionDataset(split_dir, split_dir / _ANNOTATION)
+    dataset = _fixture_dataset(detseg_fixture_dir)
     letterbox = Letterbox(_CANVAS)
     model = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=_NUM_CLASSES)
     evaluator = DualPathEvaluator(model, TopKDecoder(), NMSDecoder(), dataset.label_to_category_id, letterbox)
@@ -244,12 +243,10 @@ class _ZeroHead(torch.nn.Module):
 def test_each_path_scored_from_own_decoder() -> None:
     """The ``e2e`` report comes from the E2E decoder and ``nms`` from the NMS decoder.
 
-    Which predictions reach which path's metric cannot be checked with a real
-    untrained model: both paths then emit identical detections and both score
-    0.0, so crossing them changes nothing observable. Two constant decoders that
-    disagree -- one landing exactly on the ground truth, one missing it entirely
-    -- separate the paths by construction, and the report has to show 1.0 against
-    0.0 in the right order.
+    Which predictions reach which path's metric cannot be checked with a real untrained model: both paths then emit
+    identical detections and both score 0.0, so crossing them changes nothing observable. Two constant decoders that
+    disagree -- one landing exactly on the ground truth, one missing it entirely -- separate the paths by construction,
+    and the report has to show 1.0 against 0.0 in the right order.
     """
     box = [10.0, 12.0, 30.0, 42.0]
     evaluator = DualPathEvaluator(
@@ -271,10 +268,9 @@ def test_each_path_scored_from_own_decoder() -> None:
 def test_gather_keypoints_binds_its_own_keyword_names() -> None:
     """The public keypoint gather keeps the ``keypoints`` / ``anchor_index`` names it shipped with.
 
-    The training module's ``val/oks_mAP`` imports it from here, and callers outside the
-    package may spell the call by keyword. An alias of the shared gather renamed the first
-    parameter and turned that spelling into a ``TypeError``; the answer, padding row
-    included, must be the shared gather's own.
+    The training module's ``val/oks_mAP`` imports it from here, and callers outside the package may spell the call by
+    keyword. An alias of the shared gather renamed the first parameter and turned that spelling into a ``TypeError``;
+    the answer, padding row included, must be the shared gather's own.
     """
     points = torch.arange(12.0).reshape(1, 3, 2, 2)
     indices = torch.tensor([[2, -1]])
@@ -285,16 +281,14 @@ def test_gather_keypoints_binds_its_own_keyword_names() -> None:
     assert torch.equal(gathered[0, 1], torch.zeros(2, 2))
 
 
-def test_gather_keypoints_delegates_to_shared_gather(monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(coco_eval, "gather_by_anchor", return_value=torch.full((1, 1, 2, 2), 7.0))
+def test_gather_keypoints_delegates_to_shared_gather(mock_gather: MagicMock) -> None:
     """The public keypoint gather calls the decode package's one gather, not a copy of it.
 
-    Prediction and export gather through :mod:`lucid_yolo.decode` directly; one padding
-    rule is what keeps the three from drifting apart.
+    Prediction and export gather through :mod:`lucid_yolo.decode` directly; one padding rule is what keeps the three
+    from drifting apart.
     """
-    sentinel = torch.full((1, 1, 2, 2), 7.0)
-    monkeypatch.setattr(coco_eval, "gather_by_anchor", lambda *_args: sentinel)
-
-    assert gather_keypoints(torch.zeros(1, 3, 2, 2), torch.tensor([[0]])) is sentinel
+    assert gather_keypoints(torch.zeros(1, 3, 2, 2), torch.tensor([[0]])) is mock_gather.return_value
 
 
 def test_evaluate_bbox_empty_preds_zeroed() -> None:
@@ -313,6 +307,41 @@ def _load_fixture_doc(fixture_dir: Path) -> dict[str, object]:
         True
     """
     return json.loads((fixture_dir / _SPLIT / _ANNOTATION).read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+
+
+def _fixture_dataset(fixture_dir: Path) -> CocoDetectionDataset:
+    """Open the detseg fixture's train split as a detection dataset.
+
+    Args:
+        fixture_dir: The detseg fixture root holding the train split.
+
+    Returns:
+        The dataset, which carries the label <-> COCO category id maps the evaluator needs.
+
+    Examples:
+        >>> callable(_fixture_dataset)  # needs a real fixture_dir with COCO images/annotations on disk
+        True
+    """
+    split_dir = fixture_dir / _SPLIT
+    return CocoDetectionDataset(split_dir, split_dir / _ANNOTATION)
+
+
+def _oracle_inputs(fixture_dir: Path) -> tuple[dict[str, object], dict[int, dict[str, torch.Tensor]], list[int]]:
+    """Load the fixture annotation document with its per-image targets and their deterministic image order.
+
+    Args:
+        fixture_dir: The detseg fixture root holding the train split.
+
+    Returns:
+        The raw COCO document, the target dicts keyed by image id, and the sorted image-id order.
+
+    Examples:
+        >>> callable(_oracle_inputs)  # needs a real fixture_dir; reads a COCO json file from disk
+        True
+    """
+    doc = _load_fixture_doc(fixture_dir)
+    targets = _targets_by_image(doc)
+    return doc, targets, _image_order(targets)
 
 
 def _image_order(targets: dict[int, dict[str, torch.Tensor]]) -> list[int]:
@@ -397,9 +426,8 @@ def _shuffled_preds(
 def _ranked_preds(target_list: list[dict[str, torch.Tensor]]) -> list[dict[str, torch.Tensor]]:
     """Two candidates per box: the correct box at 0.9, a one-box-offset wrong box at 0.95.
 
-    The wrong candidate has zero IoU with the target yet outranks the correct one on
-    score, so a ranking-aware metric must be dragged down by it even though the correct
-    box is present.
+    The wrong candidate has zero IoU with the target yet outranks the correct one on score, so a ranking-aware metric
+    must be dragged down by it even though the correct box is present.
 
     Examples:
         >>> target_list = [{"boxes": torch.tensor([[0.0, 0.0, 2.0, 2.0]]), "labels": torch.tensor([1])}]
@@ -438,10 +466,9 @@ def _oracle_preds(
 ) -> list[dict[str, torch.Tensor]]:
     """Round-trip every gt annotation through the A9 tensor -> :func:`detections_to_predictions` path.
 
-    Each image's annotations become one perfect-score ``(1, N + pad_rows, 6)`` detections
-    tensor (the true box, its true category as a contiguous label, score 1.0), with
-    ``pad_rows`` all-zero rows appended to mimic a fixed-size decoder's padding; the batch
-    is decoded back into per-image prediction dicts in ``order``.
+    Each image's annotations become one perfect-score ``(1, N + pad_rows, 6)`` detections tensor (the true box, its
+    true category as a contiguous label, score 1.0), with ``pad_rows`` all-zero rows appended to mimic a fixed-size
+    decoder's padding; the batch is decoded back into per-image prediction dicts in ``order``.
 
     Examples:
         >>> doc = {"annotations": [{"image_id": 1, "bbox": [0.0, 0.0, 2.0, 3.0], "category_id": 5}]}
@@ -472,33 +499,27 @@ class TestOracleRoundTrip:
 
     def test_oracle(self, detseg_fixture_dir: Path) -> None:
         """Perfect predictions, round-tripped through the full pipeline, score mAP 1.0 (DoD)."""
-        split_dir = detseg_fixture_dir / _SPLIT
-        dataset = CocoDetectionDataset(split_dir, split_dir / _ANNOTATION)
-        doc = _load_fixture_doc(detseg_fixture_dir)
-        targets = _targets_by_image(doc)
-        order = _image_order(targets)
+        dataset = _fixture_dataset(detseg_fixture_dir)
+        doc, targets, order = _oracle_inputs(detseg_fixture_dir)
 
         preds = _oracle_preds(doc, order, dataset.category_id_to_label, dataset.label_to_category_id)
         stats = evaluate_bbox(preds, _targets_list(targets, order))
 
-        # Observed: exact 1.0 at this scale/precision (128px canvas, float32) -- no backend
-        # quantization drift was seen. Kept as a ">" bound per spec rather than "==", since
-        # quantization is a documented caveat of the instrument, not a guarantee to pin down.
+        # Observed: exact 1.0 at this scale/precision (128px canvas, float32) -- no backend quantization drift was seen.
+        # Kept as a ">" bound per spec rather than "==", since quantization is a documented caveat of the instrument,
+        # not a guarantee to pin down.
         assert stats["map"] > 0.999
         assert stats["map_50"] == pytest.approx(1.0)
         assert stats["map_75"] == pytest.approx(1.0)
-        # mar_10/mar_100 saturate. mar_1 does not (observed ~0.50): several fixture images
-        # carry more than one annotation, and AR@1 credits only the single highest-scoring
-        # detection per image, so it is structurally capped well below 1.0 regardless of
-        # prediction quality -- not asserted here for that reason.
+        # mar_10/mar_100 saturate. mar_1 does not (observed ~0.50): several fixture images carry more than one
+        # annotation, and AR@1 credits only the single highest-scoring detection per image, so it is structurally capped
+        # well below 1.0 regardless of prediction quality -- not asserted here for that reason.
         assert stats["mar_10"] == pytest.approx(1.0)
         assert stats["mar_100"] == pytest.approx(1.0)
 
     def test_oracle_shuffled_classes(self, detseg_fixture_dir: Path) -> None:
         """Correct boxes with every label cyclically shifted to a wrong class collapse mAP."""
-        doc = _load_fixture_doc(detseg_fixture_dir)
-        targets = _targets_by_image(doc)
-        order = _image_order(targets)
+        doc, targets, order = _oracle_inputs(detseg_fixture_dir)
         category_ids = sorted({int(category["id"]) for category in doc["categories"]})  # type: ignore[union-attr]
 
         preds = _shuffled_preds(_targets_list(targets, order), category_ids)
@@ -508,9 +529,7 @@ class TestOracleRoundTrip:
 
     def test_perturbation_ladder_localization_sensitivity(self, detseg_fixture_dir: Path) -> None:
         """mAP degrades monotonically from exact boxes to small jitter to a full offset."""
-        doc = _load_fixture_doc(detseg_fixture_dir)
-        targets = _targets_by_image(doc)
-        order = _image_order(targets)
+        _, targets, order = _oracle_inputs(detseg_fixture_dir)
         target_list = _targets_list(targets, order)
 
         exact = evaluate_bbox(_jittered_preds(target_list, 0.0), target_list)["map"]
@@ -524,9 +543,8 @@ class TestOracleRoundTrip:
 
     def test_score_ranking_degrades_ap(self, detseg_fixture_dir: Path) -> None:
         """A higher-scored, wrong-location candidate outranks the correct one and halves AP."""
-        doc = _load_fixture_doc(detseg_fixture_dir)
-        targets = _targets_by_image(doc)
-        order = _image_order(targets)[:_RANKING_NUM_IMAGES]
+        _, targets, order = _oracle_inputs(detseg_fixture_dir)
+        order = order[:_RANKING_NUM_IMAGES]
         target_list = _targets_list(targets, order)
 
         perfect_map = evaluate_bbox(_perfect_preds(target_list), target_list)["map"]
@@ -538,11 +556,8 @@ class TestOracleRoundTrip:
 
     def test_detections_padding_invariance(self, detseg_fixture_dir: Path) -> None:
         """Score-zero padding rows appended to each image's detections change nothing."""
-        split_dir = detseg_fixture_dir / _SPLIT
-        dataset = CocoDetectionDataset(split_dir, split_dir / _ANNOTATION)
-        doc = _load_fixture_doc(detseg_fixture_dir)
-        targets = _targets_by_image(doc)
-        order = _image_order(targets)
+        dataset = _fixture_dataset(detseg_fixture_dir)
+        doc, targets, order = _oracle_inputs(detseg_fixture_dir)
         target_list = _targets_list(targets, order)
 
         unpadded = _oracle_preds(doc, order, dataset.category_id_to_label, dataset.label_to_category_id)
@@ -556,10 +571,9 @@ class TestOracleRoundTrip:
 def _boundary_case(found: int, positives: int) -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
     """Return prediction and target dicts whose attained recall is exactly ``found / positives``.
 
-    ``positives`` well-separated single-class targets, of which the first ``found`` are
-    returned as exact copies. Every detection is therefore a true positive at every IoU
-    threshold, precision is 1 all the way along, and the interpolated curve is flat — so
-    the average is purely a count of sampled grid points and can be derived by hand.
+    ``positives`` well-separated single-class targets, of which the first ``found`` are returned as exact copies.
+    Every detection is therefore a true positive at every IoU threshold, precision is 1 all the way along, and the
+    interpolated curve is flat — so the average is purely a count of sampled grid points and can be derived by hand.
 
     Examples:
         >>> preds, targets = _boundary_case(2, 3)
@@ -612,14 +626,13 @@ class TestRecallGridBoundary:
     def test_boundary_recall_sampled_exactly(self, found: int, positives: int, grid_index: int) -> None:
         """A recall landing exactly on grid point ``k`` samples it, giving ``(k + 1) / 101``.
 
-        The expected value is derived by hand, not read off another implementation: the
-        envelope is flat at precision 1, the attained recall is exactly ``k / 100``, so
-        ``k + 1`` of the 101 points sample 1 and the remaining ones sample 0.
+        The expected value is derived by hand, not read off another implementation: the envelope is flat at
+        precision 1, the attained recall is exactly ``k / 100``, so ``k + 1`` of the 101 points sample 1 and the
+        remaining ones sample 0.
 
-        The tolerance is set by the metric's **output dtype**, not chosen to make the
-        assertion pass: ``MeanAveragePrecision`` returns float32 tensors, in which
-        ``66 / 101`` differs from the exact quotient by about 3e-8. The defect being
-        detected is a whole grid point, ``1 / 101`` ~ 9.9e-3 — five orders of magnitude
+        The tolerance is set by the metric's **output dtype**, not chosen to make the assertion pass:
+        ``MeanAveragePrecision`` returns float32 tensors, in which ``66 / 101`` differs from the exact quotient
+        by about 3e-8. The defect being detected is a whole grid point, ``1 / 101`` ~ 9.9e-3 — five orders of magnitude
         larger than the tolerance, so it cannot hide inside it.
         """
         preds, targets = _boundary_case(found, positives)
@@ -632,10 +645,9 @@ class TestRecallGridBoundary:
     def test_torchmetrics_default_grid_overshoots_at_thirty_six_boundaries(self) -> None:
         """Pin the dependency defect this module works around, so its removal is noticed.
 
-        ``rec_thresholds=None`` makes torchmetrics build the grid with a **float32**
-        ``torch.linspace``; at 36 of the 101 indices the stored value is strictly greater
-        than the ``k / 100`` it represents. Should a future torchmetrics build that grid
-        in float64 — or exactly — this test fails, which is the notification worth having:
+        ``rec_thresholds=None`` makes torchmetrics build the grid with a **float32** ``torch.linspace``; at 36 of the
+        101 indices the stored value is strictly greater than the ``k / 100`` it represents. Should a future
+        torchmetrics build that grid in float64 — or exactly — this test fails, which is the notification worth having:
         the workaround in :func:`~lucid_yolo.eval.coco_eval._new_metric` could then go.
         """
         default = torch.linspace(0.0, 1.00, round(1.00 / 0.01) + 1).tolist()
@@ -646,16 +658,15 @@ class TestRecallGridBoundary:
         assert {14, 28, 65, 78, 84} <= overshoot  # the five indices parametrized above
         assert not any(value > index / 100 for index, value in enumerate(COCO_RECALL_GRID))
 
-    def test_guard_fires_when_metric_stops_honouring_rec_thresholds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(_coco_streaming, "MeanAveragePrecision", _IgnoresRecThresholds)
+    def test_guard_fires_when_metric_stops_honouring_rec_thresholds(self) -> None:
         """A metric that accepts ``rec_thresholds`` and ignores it must fail loudly, not silently.
 
-        The fix rests on a documented constructor parameter, so a future torchmetrics that
-        **removed** it would raise ``TypeError`` at construction on its own. The dangerous
-        regression is the quiet one — the parameter still accepted, no longer honoured —
-        which would restore the downward bias with nothing to show for it. This substitutes
-        exactly that metric and requires the guard to raise.
+        The fix rests on a documented constructor parameter, so a future torchmetrics that **removed** it would raise
+        ``TypeError`` at construction on its own. The dangerous regression is the quiet one — the parameter still
+        accepted, no longer honoured — which would restore the downward bias with nothing to show for it. This
+        substitutes exactly that metric and requires the guard to raise.
         """
-        monkeypatch.setattr(_coco_streaming, "MeanAveragePrecision", _IgnoresRecThresholds)
         pred, target = _single_image_gt()
 
         with pytest.raises(RuntimeError, match="rec_thresholds"):
@@ -665,10 +676,9 @@ class TestRecallGridBoundary:
 def _synthetic_bbox_case(num_images: int = 6, seed: int = 0) -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
     """Build a small, informative bbox case: several images, a few classes, some jitter.
 
-    Neither trivially perfect nor trivially empty — some predictions match their
-    ground truth closely, some are offset, some ranked wrong — so the two engines
-    being compared actually exercise matching, ranking and the recall grid rather
-    than only the degenerate all-1.0/all-0.0 corners.
+    Neither trivially perfect nor trivially empty — some predictions match their ground truth closely, some are offset,
+    some ranked wrong — so the two engines being compared actually exercise matching, ranking and the recall grid
+    rather than only the degenerate all-1.0/all-0.0 corners.
 
     Examples:
         >>> preds, targets = _synthetic_bbox_case(num_images=2)
@@ -733,12 +743,10 @@ def _synthetic_segm_case(num_images: int = 4, seed: int = 0) -> tuple[list[dict[
 def _crowd_and_area_case() -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
     """One image whose targets carry a crowd instance and an ``area`` that is not the box area.
 
-    The two fields COCO reads off the annotation rather than off the box, in the
-    one arrangement where both change the answer: the second instance is
-    ``iscrowd=1``, so the detection sitting inside it is ignored rather than
-    counted a false positive, and the first instance's ``area`` of 200 puts it in
-    the *small* bucket although its box measures 200x200. Rebuilding either field
-    from the box moves ``map`` and moves every size bucket.
+    The two fields COCO reads off the annotation rather than off the box, in the one arrangement where both change the
+    answer: the second instance is ``iscrowd=1``, so the detection sitting inside it is ignored rather than counted a
+    false positive, and the first instance's ``area`` of 200 puts it in the *small* bucket although its box measures
+    200x200. Rebuilding either field from the box moves ``map`` and moves every size bucket.
 
     Examples:
         >>> preds, targets = _crowd_and_area_case()
@@ -766,10 +774,9 @@ def _crowd_and_area_case() -> tuple[list[dict[str, Tensor]], list[dict[str, Tens
 def _crowd_and_area_masks_case() -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
     """The crowd/area case's twin with masks: the same instances, plus a filled patch for each.
 
-    The mask pass reads ``iscrowd`` and ``area`` off the annotation exactly as the
-    box pass does, and gets its own fallback (the RLE's own pixel count) when they
-    are absent, so it needs its own case rather than inheriting the bbox one's
-    coverage.
+    The mask pass reads ``iscrowd`` and ``area`` off the annotation exactly as the box pass does, and gets its own
+    fallback (the RLE's own pixel count) when they are absent, so it needs its own case rather than inheriting the bbox
+    one's coverage.
 
     Examples:
         >>> preds, targets = _crowd_and_area_masks_case()
@@ -789,20 +796,55 @@ def _crowd_and_area_masks_case() -> tuple[list[dict[str, Tensor]], list[dict[str
     return preds, targets
 
 
+def _score_both(preds: list[dict[str, Tensor]], targets: list[dict[str, Tensor]]) -> tuple[dict[str, float], ...]:
+    """Feed one accumulated batch to both streaming scorers and return their statistics.
+
+    Args:
+        preds: Per-image prediction dicts.
+        targets: Per-image target dicts.
+
+    Returns:
+        The ``faster_coco_eval`` scorer's statistics, then the hotcoco scorer's.
+
+    Examples:
+        >>> faster_stats, hotcoco_stats = _score_both(*_synthetic_bbox_case(num_images=2))
+        >>> sorted(faster_stats) == sorted(hotcoco_stats)
+        True
+    """
+    faster = coco_eval._StreamingScorer()
+    faster.update(preds, targets)
+    hotcoco_scorer = coco_eval._HotcocoStreamingScorer()
+    hotcoco_scorer.update(preds, targets)
+    return faster.compute(), hotcoco_scorer.compute()
+
+
+def _assert_stats_match(faster_stats: dict[str, float], hotcoco_stats: dict[str, float], keys: Iterable[str]) -> None:
+    """Assert the hotcoco statistic equals the ``faster_coco_eval`` one, within ``1e-6``, for every key.
+
+    Args:
+        faster_stats: Statistics from the ``faster_coco_eval`` scorer.
+        hotcoco_stats: Statistics from the hotcoco scorer.
+        keys: The statistic names to compare.
+
+    Examples:
+        >>> _assert_stats_match({"map": 0.5}, {"map": 0.5 + 1e-9}, ["map"])
+    """
+    for key in keys:
+        assert hotcoco_stats[key] == pytest.approx(faster_stats[key], abs=1e-6), key
+
+
 class TestHotcocoIsUsableHere:
     """The canary under the parity class's ``skipif`` (WP-174)."""
 
     def test_hotcoco_available_and_working(self) -> None:
         """Hotcoco imports and its compiled extension constructs, unconditionally.
 
-        Every parity case below is guarded by ``skipif`` on this same probe, so if hotcoco
-        stops importing the whole class evaporates and the gate stays green — the failure
-        mode a guarded suite has by construction. hotcoco is not optional here: it is a
-        hard runtime dependency and ``lucid-eval``'s default bbox/segm engine, and three of
-        the five compatibility traps recorded in ``pyproject.toml`` "fail silently rather
-        than raising". So the probe returning ``True`` is itself a contract, asserted
-        without a guard, and the reason string is carried into the failure message because
-        "hotcoco is missing" and "hotcoco is built but broken" need different remedies.
+        Every parity case below is guarded by ``skipif`` on this same probe, so if hotcoco stops importing the whole
+        class evaporates and the gate stays green — the failure mode a guarded suite has by construction. hotcoco is
+        not optional here: it is a hard runtime dependency and ``lucid-eval``'s default bbox/segm engine, and three of
+        the five compatibility traps recorded in ``pyproject.toml`` "fail silently rather than raising". So the probe
+        returning ``True`` is itself a contract, asserted without a guard, and the reason string is carried into the
+        failure message because "hotcoco is missing" and "hotcoco is built but broken" need different remedies.
         """
         probe = coco_eval.hotcoco_available()
 
@@ -812,20 +854,18 @@ class TestHotcocoIsUsableHere:
 class TestBackendDefaults:
     """The library default and the CLI default are different, and the prose says so (audit M-01).
 
-    Two docstrings in this project used to describe hotcoco as opt-in without
-    qualification, while ``lucid-eval`` --- the only shipped caller --- defaults to
-    ``auto`` and takes hotcoco whenever it is usable. Both defaults are pinned here
-    so a later change to either one makes the corrected prose fail rather than go
-    stale a second time. Nothing here needs hotcoco installed: the availability
-    probe is substituted, which is also the only way to exercise both arms of the
-    ``auto`` rule on one machine.
+    Two docstrings in this project used to describe hotcoco as opt-in without qualification, while ``lucid-eval`` ---
+    the only shipped caller --- defaults to ``auto`` and takes hotcoco whenever it is usable. Both defaults are pinned
+    here so a later change to either one makes the corrected prose fail rather than go stale a second time. Nothing
+    here needs hotcoco installed: the availability probe is substituted, which is also the only way to exercise both
+    arms of the ``auto`` rule on one machine.
     """
 
     def test_library_default_faster_coco_eval(self) -> None:
         """Constructing the evaluator without naming a backend scores with ``faster_coco_eval``.
 
-        This is the conservative half of the claim: a caller who predates WP-138,
-        or who never read it, gets the report this project always produced.
+        This is the conservative half of the claim: a caller who predates WP-138, or who never read it, gets the report
+        this project always produced.
         """
         default = inspect.signature(DualPathEvaluator.__init__).parameters["backend"].default
 
@@ -834,9 +874,8 @@ class TestBackendDefaults:
     def test_cli_default_auto(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """``lucid-eval`` defaults ``--eval_backend`` to ``auto``, not to the library default.
 
-        The signature uses an unset sentinel to distinguish omission from an
-        explicitly supplied option. Check the effective resolution rule and the
-        engine forwarded to scoring, rather than that internal representation.
+        The signature uses an unset sentinel to distinguish omission from an explicitly supplied option. Check the
+        effective resolution rule and the engine forwarded to scoring, rather than that internal representation.
         """
         module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=1)
         requested_backends: list[str] = []
@@ -856,119 +895,84 @@ class TestBackendDefaults:
         assert cli_eval.evaluate(tmp_path / "model.ckpt", tmp_path) == 0
         assert requested_backends == ["auto"]
 
-    def test_auto_takes_hotcoco_when_hotcoco_usable(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """With a usable hotcoco, ``auto`` resolves to hotcoco -- silently, and with no reason recorded.
+    @pytest.mark.parametrize(
+        ("probe", "resolved"),
+        [
+            # A usable hotcoco is taken silently, with no reason recorded. This is why a ``lucid-eval`` report on a
+            # normal host is a hotcoco report: the caller opted into nothing.
+            pytest.param((True, None), ("hotcoco", None), id="usable-hotcoco-taken-silently"),
+            # The fallback is what stops the CLI default being a flat "the default is hotcoco": on a host without a
+            # working wheel the same command scores with the other engine, and the report says which.
+            pytest.param(
+                (False, "no wheel for this platform"),
+                ("faster_coco_eval", "no wheel for this platform"),
+                id="unusable-hotcoco-falls-back-recording-why",
+            ),
+        ],
+    )
+    def test_auto_resolves_backend_from_hotcoco_probe(
+        self, monkeypatch: pytest.MonkeyPatch, probe: tuple[bool, str | None], resolved: tuple[str, str | None]
+    ) -> None:
+        """``auto`` resolves to hotcoco when it is usable, else to ``faster_coco_eval`` carrying the probe's reason.
 
-        This is why a ``lucid-eval`` report on a normal host is a hotcoco report:
-        the caller opted into nothing.
+        The availability probe is substituted so both arms of the rule run on one machine, whichever engines it has.
         """
-        monkeypatch.setattr(cli_eval, "hotcoco_available", lambda: (True, None))
+        monkeypatch.setattr(cli_eval, "hotcoco_available", lambda: probe)
 
-        assert cli_eval._resolve_eval_backend("auto") == ("hotcoco", None)
-
-    def test_auto_falls_back_and_records_why(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """An unusable hotcoco sends ``auto`` back to ``faster_coco_eval``, carrying the reason.
-
-        The fallback is what stops the CLI default being a flat "the default is
-        hotcoco": on a host without a working wheel the same command scores with
-        the other engine, and the report says which.
-        """
-        monkeypatch.setattr(cli_eval, "hotcoco_available", lambda: (False, "no wheel for this platform"))
-
-        assert cli_eval._resolve_eval_backend("auto") == ("faster_coco_eval", "no wheel for this platform")
+        assert cli_eval._resolve_eval_backend("auto") == resolved
 
 
 @pytest.mark.skipif(not coco_eval.hotcoco_available()[0], reason="hotcoco not installed or not usable here")
 class TestHotcocoParity:
     """Hotcoco's streaming scorer must report exactly what faster_coco_eval's does (WP-138).
 
-    hotcoco is opt-in *at the library boundary* — ``DualPathEvaluator()`` with no
-    ``backend`` scores with ``faster_coco_eval``, exactly the report this project
-    has always produced. It is **not** opt-in at the shipped command line:
-    ``lucid-eval`` defaults ``--eval_backend`` to ``auto``, which takes hotcoco
-    whenever hotcoco is usable on the host. So on any machine that can run it, the
-    tool's reports are hotcoco reports unless the caller says otherwise, and this
-    class is what stands behind them rather than a nicety for an opt-in path. The
-    contract it pins is narrower and stricter: given the
-    *identical* accumulated predictions and targets, the two engines must not
-    merely agree in spirit, they must report the same numbers under the same
-    key names, because a report's ``eval_backend`` field is metadata about how
-    it was computed, not part of what it means.
+    hotcoco is opt-in *at the library boundary* — ``DualPathEvaluator()`` with no ``backend`` scores with
+    ``faster_coco_eval``, exactly the report this project has always produced. It is **not** opt-in at the shipped
+    command line: ``lucid-eval`` defaults ``--eval_backend`` to ``auto``, which takes hotcoco whenever hotcoco is
+    usable on the host. So on any machine that can run it, the tool's reports are hotcoco reports unless the caller
+    says otherwise, and this class is what stands behind them rather than a nicety for an opt-in path. The contract it
+    pins is narrower and stricter: given the *identical* accumulated predictions and targets, the two engines must not
+    merely agree in spirit, they must report the same numbers under the same key names, because a report's
+    ``eval_backend`` field is metadata about how it was computed, not part of what it means.
     """
 
     def test_bbox_only_matches_faster_coco_eval(self) -> None:
         """Every one of the 12 bbox statistics matches exactly, on a mixed-quality case."""
-        preds, targets = _synthetic_bbox_case()
+        faster_stats, hotcoco_stats = _score_both(*_synthetic_bbox_case())
 
-        faster = coco_eval._StreamingScorer()
-        faster.update(preds, targets)
-        hotcoco_scorer = coco_eval._HotcocoStreamingScorer()
-        hotcoco_scorer.update(preds, targets)
-
-        faster_stats = faster.compute()
-        hotcoco_stats = hotcoco_scorer.compute()
         assert set(hotcoco_stats) == set(_METRIC_KEYS)
-        for key in _METRIC_KEYS:
-            assert hotcoco_stats[key] == pytest.approx(faster_stats[key], abs=1e-6), key
+        _assert_stats_match(faster_stats, hotcoco_stats, _METRIC_KEYS)
 
     def test_bbox_and_segm_matches_faster_coco_eval(self) -> None:
         """All 24 bbox+segm statistics match exactly, including the ``segm_``-prefixed half."""
-        preds, targets = _synthetic_segm_case()
+        faster_stats, hotcoco_stats = _score_both(*_synthetic_segm_case())
 
-        faster = coco_eval._StreamingScorer()
-        faster.update(preds, targets)
-        hotcoco_scorer = coco_eval._HotcocoStreamingScorer()
-        hotcoco_scorer.update(preds, targets)
-
-        faster_stats = faster.compute()
-        hotcoco_stats = hotcoco_scorer.compute()
-        expected_keys = {*_METRIC_KEYS, *(coco_eval._SEGM_PREFIX + key for key in _METRIC_KEYS)}
-        assert set(hotcoco_stats) == expected_keys
-        for key in expected_keys:
-            assert hotcoco_stats[key] == pytest.approx(faster_stats[key], abs=1e-6), key
+        assert set(hotcoco_stats) == set(_BBOX_AND_SEGM_KEYS)
+        _assert_stats_match(faster_stats, hotcoco_stats, _BBOX_AND_SEGM_KEYS)
 
     def test_crowd_and_annotation_area_match_faster_coco_eval(self) -> None:
         """A crowd instance and a non-box ``area`` are honoured identically by both engines (WP-166).
 
-        The parity cases above omit ``iscrowd`` and ``area`` entirely, so both
-        engines fall back to the same reconstruction and agree by construction on
-        the only two fields where they can differ. This case supplies both:
-        crowd-ignore decides ``map``, and the annotation's own ``area`` decides
-        which of the three size buckets the instance lands in, so a scorer that
-        rebuilds either field from the box reports a different protocol here.
+        The parity cases above omit ``iscrowd`` and ``area`` entirely, so both engines fall back to the same
+        reconstruction and agree by construction on the only two fields where they can differ. This case supplies both:
+        crowd-ignore decides ``map``, and the annotation's own ``area`` decides which of the three size buckets
+        the instance lands in, so a scorer that rebuilds either field from the box reports a different protocol here.
         """
-        preds, targets = _crowd_and_area_case()
+        faster_stats, hotcoco_stats = _score_both(*_crowd_and_area_case())
 
-        faster = coco_eval._StreamingScorer()
-        faster.update(preds, targets)
-        hotcoco_scorer = coco_eval._HotcocoStreamingScorer()
-        hotcoco_scorer.update(preds, targets)
-
-        faster_stats = faster.compute()
-        hotcoco_stats = hotcoco_scorer.compute()
-        for key in _METRIC_KEYS:
-            assert hotcoco_stats[key] == pytest.approx(faster_stats[key], abs=1e-6), key
+        _assert_stats_match(faster_stats, hotcoco_stats, _METRIC_KEYS)
 
     def test_crowd_and_annotation_area_match_across_masks(self) -> None:
         """The mask pass honours the same two annotation fields the box pass does (WP-166).
 
-        ``_accumulate_masks`` builds its own ground-truth document with its own
-        area fallback — the RLE's pixel count rather than the box's extent — so a
-        crowd instance or a non-box ``area`` can be dropped on the segm side while
-        the bbox side is already correct. This drives the same fixture with masks
-        attached and holds all 24 statistics to the parity contract.
+        ``_accumulate_masks`` builds its own ground-truth document with its own area fallback — the RLE's pixel count
+        rather than the box's extent — so a crowd instance or a non-box ``area`` can be dropped on the segm side while
+        the bbox side is already correct. This drives the same fixture with masks attached and holds all 24 statistics
+        to the parity contract.
         """
-        preds, targets = _crowd_and_area_masks_case()
+        faster_stats, hotcoco_stats = _score_both(*_crowd_and_area_masks_case())
 
-        faster = coco_eval._StreamingScorer()
-        faster.update(preds, targets)
-        hotcoco_scorer = coco_eval._HotcocoStreamingScorer()
-        hotcoco_scorer.update(preds, targets)
-
-        faster_stats = faster.compute()
-        hotcoco_stats = hotcoco_scorer.compute()
-        for key in (*_METRIC_KEYS, *(coco_eval._SEGM_PREFIX + key for key in _METRIC_KEYS)):
-            assert hotcoco_stats[key] == pytest.approx(faster_stats[key], abs=1e-6), key
+        _assert_stats_match(faster_stats, hotcoco_stats, _BBOX_AND_SEGM_KEYS)
 
     def test_empty_preds_zeroed_like_faster_coco_eval_path(self) -> None:
         """No batch ever fed the scorer -> the same all-zero dict :func:`evaluate_bbox` returns."""
@@ -979,16 +983,13 @@ class TestHotcocoParity:
     def test_dual_path_report_matches_across_backends(self, detseg_fixture_dir: Path) -> None:
         """The same checkpoint, same batches, scored end to end by each backend: identical report.
 
-        The unit-level parity tests above feed one hand-built batch straight to
-        each scorer; this drives the whole :class:`DualPathEvaluator` — the real
-        decode, the real letterbox, several batches — the same shape
-        :func:`test_dual_path_report` already exercises, to catch anything that
-        only surfaces once real decoded detections (not a hand-built fixture)
-        reach the RLE/height-width/params machinery above.
+        The unit-level parity tests above feed one hand-built batch straight to each scorer; this drives the whole
+        :class:`DualPathEvaluator` — the real decode, the real letterbox, several batches — the same shape
+        :func:`test_dual_path_report` already exercises, to catch anything that only surfaces once real decoded
+        detections (not a hand-built fixture) reach the RLE/height-width/params machinery above.
         """
         torch.manual_seed(0)
-        split_dir = detseg_fixture_dir / _SPLIT
-        dataset = CocoDetectionDataset(split_dir, split_dir / _ANNOTATION)
+        dataset = _fixture_dataset(detseg_fixture_dir)
         letterbox = Letterbox(_CANVAS)
         model = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=_NUM_CLASSES)
         targets = _targets_by_image(_load_fixture_doc(detseg_fixture_dir))

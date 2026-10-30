@@ -21,11 +21,21 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+def _metric(task: str, **options: bool) -> _RotatedMAP | _KeypointAP:
+    """Build the task's whole-epoch metric, forwarding ``options`` such as ``dataset_order``.
+
+    Examples:
+        >>> type(_metric("obb")).__name__, type(_metric("keypoints", dataset_order=True)).__name__
+        ('_RotatedMAP', '_KeypointAP')
+    """
+    return _RotatedMAP(**options) if task == "obb" else _KeypointAP(SIGMAS, **options)
+
+
 @pytest.mark.parametrize("task", ["obb", "keypoints"])
 def test_single_process_matches_list_accumulator(task: str) -> None:
     """The old accumulator's exact floats survive multiple batches and epoch resets."""
     preds, targets = validation_records(task)
-    metric = _RotatedMAP() if task == "obb" else _KeypointAP(SIGMAS)
+    metric = _metric(task)
     image_ids = [41, 3, 17, 2, 9]
     for start, end in ((0, 2), (2, 5)):
         metric.update(preds[start:end], targets[start:end], image_ids[start:end])
@@ -47,7 +57,7 @@ def test_single_process_matches_list_accumulator(task: str) -> None:
 def test_deduplication_keeps_first_image_and_input_order(task: str) -> None:
     """Arbitrary IDs never reorder tied scores, and a conflicting later copy is discarded."""
     preds, targets = validation_records(task)
-    metric = _RotatedMAP() if task == "obb" else _KeypointAP(SIGMAS)
+    metric = _metric(task)
     metric.update(preds, targets, [41, 3, 17, 2, 9])
     metric.update([preds[2]], [targets[0]], [41])
     assert metric.compute() == list_accumulator_score(task, preds, targets)
@@ -59,7 +69,7 @@ def test_deduplication_keeps_first_image_and_input_order(task: str) -> None:
 def test_local_module_metric_keeps_supplied_order(task: str) -> None:
     """Dataset-order restoration applies only to gathered shards, never a single-device batch."""
     preds, targets = validation_records(task)
-    metric = _RotatedMAP(dataset_order=True) if task == "obb" else _KeypointAP(SIGMAS, dataset_order=True)
+    metric = _metric(task, dataset_order=True)
     metric.update(preds, targets, [41, 3, 17, 2, 9])
     assert metric.compute() == list_accumulator_score(task, preds, targets)
     stored = metric._images()[0]
@@ -121,8 +131,7 @@ def test_module_metric_retains_validation_identity(task: str) -> None:
 def test_cat_reduction_restores_dataset_order_and_local_state(task: str, empty_rank: bool) -> None:
     """Exercise torchmetrics' cat reduction with a supplied collective boundary, then unsync."""
     preds, targets = validation_records(task)
-    first = _RotatedMAP(dataset_order=True) if task == "obb" else _KeypointAP(SIGMAS, dataset_order=True)
-    second = _RotatedMAP(dataset_order=True) if task == "obb" else _KeypointAP(SIGMAS, dataset_order=True)
+    first, second = _metric(task, dataset_order=True), _metric(task, dataset_order=True)
     positions = [] if empty_rank else [0, 2, 4]
     other_positions = list(range(5)) if empty_rank else [1, 3, 0]
     first.update([preds[index] for index in positions], [targets[index] for index in positions], positions)

@@ -17,9 +17,8 @@ from markers import BF16_REPLAY_EXPECTED
 def graph_recordings() -> Iterator[MagicMock]:
     """Count CUDA graph recordings without judging the warnings a fit emits.
 
-    The spy wraps the real recorder, so replay still runs. Use it directly when a
-    retirement warning is the expected outcome; ``replay_spy`` is the variant for
-    fits that must keep replaying.
+    The spy wraps the real recorder, so replay still runs. Use it directly when a retirement warning is the
+    expected outcome; ``replay_spy`` is the variant for fits that must keep replaying.
     """
     with patch("torch.cuda.make_graphed_callables", wraps=torch.cuda.make_graphed_callables) as record:
         yield record
@@ -29,11 +28,10 @@ def graph_recordings() -> Iterator[MagicMock]:
 def dry_recording() -> Iterator[MagicMock]:
     """Replace the shared recording seam with the module itself, so a CPU test drives a holder's whole lifecycle.
 
-    The network and segmentation-head holders record only through
-    ``lucid_yolo.ptl._graph_replay.record_graphed``. Returning the module it was given makes
-    every "replay" the native forward and backward on CPU, while recording, the forward-time
-    gradient copy, the backward hold, its release and ``clear`` run as they do in a CUDA fit.
-    Graph numerics are what this cannot show; the ``gpu`` tests own them.
+    The network and segmentation-head holders record only through ``lucid_yolo.ptl._graph_replay.record_graphed``.
+    Returning the module it was given makes every "replay" the native forward and backward on CPU, while recording,
+    the forward-time gradient copy, the backward hold, its release and ``clear`` run as they do in a CUDA fit. Graph
+    numerics are what this cannot show; the ``gpu`` tests own them.
     """
     with patch(
         "lucid_yolo.ptl._graph_replay.record_graphed", side_effect=lambda module, samples, device: module
@@ -53,9 +51,9 @@ def replay_spy(graph_recordings: MagicMock) -> Iterator[MagicMock]:
 def bf16_replay_expected() -> bool:
     """Whether this runtime's torch is new enough to record BF16 replay (torch 2.9, the first verified release).
 
-    Defined in ``markers`` from ``torch.__version__`` rather than read from the production gate,
-    so a changed production threshold fails ``test_bf16_gate_tracks_torch_2_9`` instead of
-    silently moving every expectation with it.
+    Defined in ``markers`` from ``torch.__version__`` rather than read from the production gate, so a changed
+    production threshold fails ``test_bf16_gate_tracks_torch_2_9`` instead of silently moving every expectation with
+    it.
     """
     return BF16_REPLAY_EXPECTED
 

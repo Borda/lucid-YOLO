@@ -1,62 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
 """Functional-core tests: golden harness and frozen-golden regression (WP-005).
 
-Exercises the harness end to end against the repository's real goldens, then
-drives its failure paths with throwaway golden directories: a tampered value, a
-malformed JSON file, and an unresolvable producer must each fail. A copied
-``frozen/`` file proves frozen snapshots are discovered and compared by the same
-path as live goldens, and a copy marked ``"freezable": false`` proves the harness
-rejects it there rather than silently comparing a snapshot nothing can keep
+Exercises the harness end to end against the repository's real goldens, then drives its failure paths with throwaway
+golden directories: a tampered value, a malformed JSON file, and an unresolvable producer must each fail. A copied
+``frozen/`` file proves frozen snapshots are discovered and compared by the same path as live goldens, and a copy marked
+``"freezable": false`` proves the harness rejects it there rather than silently comparing a snapshot nothing can keep
 green (WP-154c).
 """
 
-import importlib.util
 import json
 import shutil
-import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
+from script_loader import load_script
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-HARNESS_PATH = REPO_ROOT / "scripts" / "check_goldens.py"
 REAL_GOLDEN = REPO_ROOT / "goldens" / "fixture_checksums.json"
 #: A real, freezable golden — ``REAL_GOLDEN`` is deliberately not (WP-154c).
 REAL_FREEZABLE_GOLDEN = REPO_ROOT / "goldens" / "assignment_cases.json"
 
-
-def _load_harness() -> ModuleType:
-    """Load ``scripts/check_goldens.py`` as an importable module.
-
-    Examples:
-        ```pycon
-        >>> module = _load_harness()
-        >>> module.__name__
-        'check_goldens'
-        >>> callable(module.check_all)
-        True
-
-        ```
-    """
-    spec = importlib.util.spec_from_file_location("check_goldens", HARNESS_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # dataclasses need the module registered before exec
-    spec.loader.exec_module(module)
-    return module
+harness = load_script("check_goldens")
 
 
-harness = _load_harness()
-
-
-# There is deliberately no ``test_real_goldens_pass`` here. It ran ``check_all()``
-# over every real golden -- the same ~55 s sweep ``ci-tests.yml`` runs as its own
-# step on the one cell the goldens were frozen on -- and so did the ``check_all``
-# doctest and the exit-code test below, so ``make test`` paid the sweep three times
-# per cell and six cells paid it on interpreters the tolerances were never sized
-# for. The harness's own logic is pinned below against a copied golden; the
-# repository's goldens have one checker, and it is the CI step.
+# There is deliberately no ``test_real_goldens_pass`` here. It ran ``check_all()`` over every real golden -- the same
+# ~55 s sweep ``ci-tests.yml`` runs as its own step on the one cell the goldens were frozen on -- and so did the
+# ``check_all`` doctest and the exit-code test below, so ``make test`` paid the sweep three times per cell and six cells
+# paid it on interpreters the tolerances were never sized for. The harness's own logic is pinned below against a copied
+# golden; the repository's goldens have one checker, and it is the CI step.
 
 
 def test_tampered_golden_fails(tmp_path: Path) -> None:
@@ -155,10 +126,9 @@ def _golden_minus_one_metric(source: Path, dest: Path) -> str:
 def test_live_golden_missing_produced_metric_fails(tmp_path: Path) -> None:
     """A metric the producer emits but the live golden does not pin fails the check (M-44).
 
-    The gate's purpose is to pin a producer's output. Comparing only the stored keys
-    means adding a metric to a producer leaves it unpinned indefinitely while the gate
-    keeps reporting ``PASS`` with the old metric count — the new number is never
-    guarded, and nothing says so.
+    The gate's purpose is to pin a producer's output. Comparing only the stored keys means adding a metric to a
+    producer leaves it unpinned indefinitely while the gate keeps reporting ``PASS`` with the old metric count — the
+    new number is never guarded, and nothing says so.
     """
     golden = tmp_path / "assignment_cases.json"
     dropped = _golden_minus_one_metric(REAL_FREEZABLE_GOLDEN, golden)
@@ -172,9 +142,9 @@ def test_live_golden_missing_produced_metric_fails(tmp_path: Path) -> None:
 def test_frozen_golden_may_pin_subset_of_produced_metrics(tmp_path: Path) -> None:
     """A frozen snapshot pinning fewer metrics than the producer now emits still passes (M-44).
 
-    A past release legitimately froze the metrics that existed then. Holding frozen
-    files to the live files' "every produced metric is pinned" rule would turn every
-    metric addition into a retroactive failure of every prior release's snapshot.
+    A past release legitimately froze the metrics that existed then. Holding frozen files to the live files' "every
+    produced metric is pinned" rule would turn every metric addition into a retroactive failure of every prior
+    release's snapshot.
     """
     frozen_dir = tmp_path / "frozen" / "0.1"
     frozen_dir.mkdir(parents=True)
@@ -214,8 +184,8 @@ def _count_producer_runs(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 def _copy_tree_with_frozen(tmp_path: Path, frozen_bytes: bytes | None) -> Path:
     """Build a goldens dir holding one live golden plus a ``frozen/0.1`` copy of it.
 
-    ``frozen_bytes`` overrides the frozen copy's content when given, so a caller can
-    make the pair differ; ``None`` copies the live golden verbatim.
+    ``frozen_bytes`` overrides the frozen copy's content when given, so a caller can make the pair differ; ``None``
+    copies the live golden verbatim.
 
     Examples:
         ```pycon
@@ -239,10 +209,9 @@ def _copy_tree_with_frozen(tmp_path: Path, frozen_bytes: bytes | None) -> Path:
 def test_byte_identical_frozen_golden_reuses_live_producer_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A frozen file byte-identical to its live sibling is not recomputed (M-41).
 
-    41 of the repository's 50 offline goldens are byte-identical copies of a live
-    sibling, so the sweep runs the same seven producers up to six times each. The
-    frozen file is still parsed and compared on its own — only the producer run is
-    shared.
+    41 of the repository's 50 offline goldens are byte-identical copies of a live sibling, so the sweep runs the same
+    seven producers up to six times each. The frozen file is still parsed and compared on its own — only the producer
+    run is shared.
     """
     goldens_dir = _copy_tree_with_frozen(tmp_path, None)
     runs = _count_producer_runs(monkeypatch)
@@ -266,9 +235,8 @@ def test_frozen_golden_without_identical_live_sibling_recomputed(
 ) -> None:
     """A frozen file that is not byte-identical to a live sibling gets the full recompute (M-41).
 
-    The short-circuit's whole safety argument is byte-equality, so the two ways it can
-    fail to hold — a frozen file whose bytes moved, and one whose live sibling was
-    renamed or removed — must both fall back to running the producer.
+    The short-circuit's whole safety argument is byte-equality, so the two ways it can fail to hold — a frozen file
+    whose bytes moved, and one whose live sibling was renamed or removed — must both fall back to running the producer.
     """
     if differing:
         data = json.loads(REAL_FREEZABLE_GOLDEN.read_text())

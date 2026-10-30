@@ -1,77 +1,67 @@
 # SPDX-License-Identifier: Apache-2.0
 """Long-edge rotated-box primitives for the oriented-detection path (WP-055, A23).
 
-A rotated box is ``(cx, cy, w, h, theta)`` float32 in the **long-edge** convention R1
-sec. 3.4.3 adopts from MMRotate: ``w >= h``, and ``theta`` in radians on
-``[-pi/4, 3*pi/4)`` — the ``[-45, 135)`` degree range whose stated purpose is that it
-"alleviates the boundary ambiguity near 0 or 90deg and reduces the instability caused by
+A rotated box is ``(cx, cy, w, h, theta)`` float32 in the **long-edge** convention R1 sec. 3.4.3 adopts from
+MMRotate: ``w >= h``, and ``theta`` in radians on ``[-pi/4, 3*pi/4)`` — the ``[-45, 135)`` degree range whose stated
+purpose is that it "alleviates the boundary ambiguity near 0 or 90deg and reduces the instability caused by
 edge swapping" (R1 Table 10 measures it at +1.3 mAP over the ``(0, 90]`` definition).
-:class:`~lucid_yolo.data.targets.Targets` already *carries* rotated boxes in this form;
-this module is where the form is established and enforced.
+:class:`~lucid_yolo.data.targets.Targets` already *carries* rotated boxes in this form; this module is where the
+form is established and enforced.
 
 Conventions, all load-bearing for the work packages that consume this module:
 
 Rotation:
-    Image coordinates are y-down. ``theta`` is the angle of the long (``w``) edge
-    measured from ``+x`` **towards ``+y``** — clockwise as the image is displayed. The
-    box's local frame is ``u = (cos theta, sin theta)`` along ``w`` and
-    ``v = (-sin theta, cos theta)`` along ``h``, so a corner is
-    ``centre +- (w/2) u +- (h/2) v``.
+    Image coordinates are y-down. ``theta`` is the angle of the long (``w``) edge measured from ``+x`` **towards
+    ``+y``** — clockwise as the image is displayed. The box's local frame is ``u = (cos theta, sin theta)`` along
+    ``w`` and ``v = (-sin theta, cos theta)`` along ``h``, so a corner is ``centre +- (w/2) u +- (h/2) v``.
 
 Canonical form:
-    Two moves preserve the rectangle: ``theta += pi`` (a rectangle is invariant under a
-    180-degree rotation — the premise R1 Eq. 14 measures its angular residual modulo
-    ``pi`` on) and swapping ``w``/``h`` together with ``theta += pi/2`` (which maps
-    ``u -> v`` and ``v -> -u``). :func:`canonicalize` applies them so the output always
-    satisfies ``w >= h`` and the angle range, and is exactly idempotent: a box already in
-    canonical form is returned bit for bit, not merely to tolerance.
+    Two moves preserve the rectangle: ``theta += pi`` (a rectangle is invariant under a 180-degree rotation — the
+    premise R1 Eq. 14 measures its angular residual modulo ``pi`` on) and swapping ``w``/``h`` together with
+    ``theta += pi/2`` (which maps ``u -> v`` and ``v -> -u``). :func:`canonicalize` applies them so the output
+    always satisfies ``w >= h`` and the angle range, and is exactly idempotent: a box already in canonical form is
+    returned bit for bit, not merely to tolerance.
 
 Square tie-break:
-    When ``w == h`` exactly, ``theta`` and ``theta + pi/2`` both land in range and
-    describe the same square, so the range alone does not pin a unique answer. The tie is
-    broken **towards zero**: a square's canonical angle lies in ``[-pi/4, pi/4)``.
+    When ``w == h`` exactly, ``theta`` and ``theta + pi/2`` both land in range and describe the same square, so the
+    range alone does not pin a unique answer. The tie is broken **towards zero**: a square's canonical angle lies in
+    ``[-pi/4, pi/4)``.
 
 Winding:
-    :func:`rboxes_to_polygons` emits corners from local ``(-w/2, -h/2)`` and steps
-    ``(+w/2, -h/2)``, ``(+w/2, +h/2)``, ``(-w/2, +h/2)`` — clockwise as displayed, which
-    is a positive shoelace area in the raw ``(x, y)`` values. The order is defined on the
-    *canonical* box, so ``theta`` and ``theta + pi`` yield the same corners in the same
-    slots rather than one ring rolled by two.
+    :func:`rboxes_to_polygons` emits corners from local ``(-w/2, -h/2)`` and steps ``(+w/2, -h/2)``, ``(+w/2, +h/2)``,
+    ``(-w/2, +h/2)`` — clockwise as displayed, which is a positive shoelace area in the raw ``(x, y)`` values. The
+    order is defined on the *canonical* box, so ``theta`` and ``theta + pi`` yield the same corners in the same slots
+    rather than one ring rolled by two.
 
 Containment:
-    :func:`points_in_rboxes` is edge-**inclusive**: a point exactly on a boundary counts
-    as inside. WP-061's rotated TAL/STAL candidate selection (A25) inherits that choice.
+    :func:`points_in_rboxes` is edge-**inclusive**: a point exactly on a boundary counts as inside. WP-061's rotated
+    TAL/STAL candidate selection (A25) inherits that choice.
 
 Overlap:
-    :func:`rotated_iou` is the **exact** pairwise intersection over union (A24):
-    Sutherland-Hodgman clipping of one quadrilateral against the other — valid because
-    both are convex — then the shoelace area of what survives, with no sampling and no
-    Gaussian surrogate. :mod:`lucid_yolo.losses.probiou` approximates a rotated box by its
-    uniform-density Gaussian because a loss needs a smooth gradient; a decoder suppressing
-    by overlap and a metric scoring one both need the area itself, so it is computed here
-    rather than separately in either of them. That single home is what makes
-    :class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` and
-    :func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map` agree on what "overlap" means
-    by construction (WP-091c). Clipping is edge-inclusive, matching
-    :func:`points_in_rboxes`, so boxes sharing only an edge or a corner intersect in a
-    zero-area polygon.
+    :func:`rotated_iou` is the **exact** pairwise intersection over union (A24): Sutherland-Hodgman clipping of one
+    quadrilateral against the other — valid because both are convex — then the shoelace area of what survives, with
+    no sampling and no Gaussian surrogate. :mod:`lucid_yolo.losses.probiou` approximates a rotated box by its
+    uniform-density Gaussian because a loss needs a smooth gradient; a decoder suppressing by overlap and a metric
+    scoring one both need the area itself, so it is computed here rather than separately in either of them. That
+    single home is what makes :class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` and
+    :func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map` agree on what "overlap" means by construction (WP-091c).
+    Clipping is edge-inclusive, matching :func:`points_in_rboxes`, so boxes sharing only an edge or a corner
+    intersect in a zero-area polygon.
 
 Precision, and why there is no float64 here:
-    :mod:`lucid_yolo.data.tiling` clips in float64 because DOTA coordinates reach 10^4 px
-    and a float32 shoelace difference loses the precision its 0.7 threshold is compared
-    at. That escape is not available to :func:`rotated_iou`: it runs on the evaluation and
-    the decode paths alike, and both run on MPS, which has no float64 — the same
-    constraint :mod:`lucid_yolo.losses.probiou` restructured its algebra for. The working
-    dtype there follows the input instead, and the conditioning is fixed structurally:
-    intersection over union is **translation invariant**, so every pair is re-centred on
-    its own midpoint and only then expanded to corners. A pair of 50 px boxes at
-    ``x = 12000`` is clipped at coordinates near zero rather than near 12000, which is
-    where a float32 shoelace has its precision, and the remaining operations are all
-    like-signed sums over small numbers.
+    :mod:`lucid_yolo.data.tiling` clips in float64 because DOTA coordinates reach 10^4 px and a float32 shoelace
+    difference loses the precision its 0.7 threshold is compared at. That escape is not available to
+    :func:`rotated_iou`: it runs on the evaluation and the decode paths alike, and both run on MPS, which has no
+    float64 — the same constraint :mod:`lucid_yolo.losses.probiou` restructured its algebra for. The working dtype
+    there follows the input instead, and the conditioning is fixed structurally: intersection over union is
+    **translation invariant**, so every pair is re-centred on its own midpoint and only then expanded to corners.
+    A pair of 50 px boxes at ``x = 12000`` is clipped at coordinates near zero rather than near 12000, which is
+    where a float32 shoelace has its precision, and the remaining operations are all like-signed sums over small
+    numbers.
 
-    The order of those two steps is the whole of it, and it is not a detail. Worst
-    absolute IoU error over 300 overlapping 20-80 px pairs per row, measured against a
-    float64 shapely evaluation, as the pair's common offset from the origin grows::
+    The order of those two steps is the whole of it, and it is not a detail. Worst absolute IoU error over 300
+    overlapping 20-80 px pairs per row, measured against a float64 shapely evaluation, as the pair's common offset
+    from the origin grows::
 
         common offset   no shift at all   shift after   shift before (shipped)
         0               1.5e-07           2.2e-07       1.4e-07
@@ -80,21 +70,18 @@ Precision, and why there is no float64 here:
         1e5             1.7e+00           1.4e-04       1.4e-07
         1e6             1.5e+00           1.4e-03       1.4e-07
 
-    Shifting *after* the corners are expanded still leaves them rounded at absolute scale
-    — a cliff that merely starts later. Shifting *before* makes the kernel scale-free, at
-    the cost of canonicalizing ``M * N`` boxes rather than ``M + N``. That price is worth
-    paying: tiles are 1024 px local, so the tiled path never exercises the cliff, but
-    WP-064 evaluates on whole DOTA images whose coordinates reach 10^4, and a metric that
-    quietly loses three digits at that scale would be found by nobody.
+    Shifting *after* the corners are expanded still leaves them rounded at absolute scale — a cliff that merely
+    starts later. Shifting *before* makes the kernel scale-free, at the cost of canonicalizing ``M * N`` boxes rather
+    than ``M + N``. That price is worth paying: tiles are 1024 px local, so the tiled path never exercises the cliff,
+    but WP-064 evaluates on whole DOTA images whose coordinates reach 10^4, and a metric that quietly loses three
+    digits at that scale would be found by nobody.
 
-Everything here is plain vectorized torch — no numpy, and no Python loop over boxes
-anywhere: the only loop is :func:`rotated_iou`'s pass over the four edges of a
-quadrilateral, whose count is fixed by the geometry. That matters because
-:func:`points_in_rboxes` sits inside the assigner's per-level work and
-:func:`rotated_iou` inside both the oriented accumulator and the rotated decoder's
-suppression loop. Box parameters are float32 as A23 stores them; :func:`rotated_iou`
-alone works in whatever dtype :func:`torch.result_type` gives its two arguments, so a
-float64 caller is not silently narrowed.
+Everything here is plain vectorized torch — no numpy, and no Python loop over boxes anywhere: the only loop is
+:func:`rotated_iou`'s pass over the four edges of a quadrilateral, whose count is fixed by the geometry. That matters
+because :func:`points_in_rboxes` sits inside the assigner's per-level work and :func:`rotated_iou` inside both the
+oriented accumulator and the rotated decoder's suppression loop. Box parameters are float32 as A23 stores them;
+:func:`rotated_iou` alone works in whatever dtype :func:`torch.result_type` gives its two arguments, so a float64
+caller is not silently narrowed.
 """
 
 from __future__ import annotations
@@ -108,9 +95,8 @@ from lucid_yolo.data._common import _POINT_DIM, _QUAD_CORNERS, _RBOX_DIM
 
 __all__ = ["canonicalize", "points_in_rboxes", "polygons_to_rboxes", "rboxes_to_polygons", "rotated_iou"]
 
-#: Vertex bound on the intersection of two convex quadrilaterals. Clipping a 4-gon by
-#: ``j`` half-planes yields at most ``4 + j`` vertices, so 8 bounds every intermediate
-#: stage of the four-edge pass as well as its result.
+#: Vertex bound on the intersection of two convex quadrilaterals. Clipping a 4-gon by ``j`` half-planes yields at most
+#: ``4 + j`` vertices, so 8 bounds every intermediate stage of the four-edge pass as well as its result.
 _MAX_INTERSECTION_CORNERS = 8
 #: Minimum vertex count for a polygon to enclose any area.
 _MIN_AREA_CORNERS = 3
@@ -127,23 +113,22 @@ _THETA_HIGH = 3 * math.pi / 4
 def canonicalize(rboxes: Tensor) -> Tensor:
     """Map rotated boxes to their unique long-edge representative.
 
-    Applies the two geometry-preserving moves the module docstring describes: ``w``/``h``
-    are swapped (with ``theta += pi/2``) when the short edge was stored first, and
-    ``theta`` is shifted by whole multiples of ``pi`` into ``[-pi/4, 3*pi/4)``. An exact
-    square, whose two in-range representatives describe the same rectangle, is folded
-    towards zero so its angle lands in ``[-pi/4, pi/4)``.
+    Applies the two geometry-preserving moves the module docstring describes: ``w``/``h`` are swapped
+    (with ``theta += pi/2``) when the short edge was stored first, and ``theta`` is shifted by whole multiples of
+    ``pi`` into ``[-pi/4, 3*pi/4)``. An exact square, whose two in-range representatives describe the same rectangle,
+    is folded towards zero so its angle lands in ``[-pi/4, pi/4)``.
 
-    The function is exactly idempotent: an already-canonical box short-circuits the angle
-    wrap and is returned bit for bit, so ``canonicalize(canonicalize(x))`` equals
-    ``canonicalize(x)`` under :func:`torch.equal`, not merely under a tolerance.
+    The function is exactly idempotent: an already-canonical box short-circuits the angle wrap and is returned bit
+    for bit, so ``canonicalize(canonicalize(x))`` equals ``canonicalize(x)`` under :func:`torch.equal`, not merely
+    under a tolerance.
 
     Args:
-        rboxes: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``; ``w``, ``h`` and
-            ``theta`` may be in any orientation or angle range.
+        rboxes: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``; ``w``, ``h`` and ``theta`` may be in any orientation
+            or angle range.
 
     Returns:
-        ``(M, 5)`` canonical rotated boxes with ``w >= h`` and ``theta`` in
-        ``[-pi/4, 3*pi/4)``, describing exactly the same rectangles.
+        ``(M, 5)`` canonical rotated boxes with ``w >= h`` and ``theta`` in ``[-pi/4, 3*pi/4)``, describing exactly the
+        same rectangles.
 
     Raises:
         ValueError: If ``rboxes`` is not a 2-D ``(M, 5)`` tensor.
@@ -176,11 +161,10 @@ def canonicalize(rboxes: Tensor) -> Tensor:
 def rboxes_to_polygons(rboxes: Tensor) -> Tensor:
     """Expand rotated boxes into their four corner coordinates.
 
-    The boxes are canonicalized first, so the corner slots are a function of the
-    *rectangle* rather than of the parameterization it arrived in: ``theta`` and
-    ``theta + pi`` produce identical output rather than the same ring rolled by two.
-    Corners run from the local ``(-w/2, -h/2)`` corner clockwise as displayed (see the
-    module docstring's winding note).
+    The boxes are canonicalized first, so the corner slots are a function of the *rectangle* rather than of the
+    parameterization it arrived in: ``theta`` and ``theta + pi`` produce identical output rather than the same ring
+    rolled by two. Corners run from the local ``(-w/2, -h/2)`` corner clockwise as displayed (see the module
+    docstring's winding note).
 
     Args:
         rboxes: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``, canonical or not.
@@ -220,19 +204,16 @@ def rboxes_to_polygons(rboxes: Tensor) -> Tensor:
 def polygons_to_rboxes(polygons: Tensor) -> Tensor:
     """Fit canonical rotated boxes to quadrilaterals that are rotated rectangles.
 
-    This is the load path for DOTA's eight-coordinate labels (WP-056), whose quads are
-    hand-drawn and therefore only *approximately* rectangular. The fit is chosen so no
-    single vertex decides an output: the centre is the vertex centroid, each extent is
-    the mean of its pair of opposite side lengths, and the long-edge direction is the
-    mean of that pair's two (antiparallel) edge vectors. On an exact rectangle all three
-    reduce to the exact values, and a quad whose vertices sit within ``eps`` of a
-    rectangle returns extents within ``eps`` of that rectangle's. The result is
-    :func:`canonicalize`\\ d, so the corner order and winding of the input quad do not
+    This is the load path for DOTA's eight-coordinate labels (WP-056), whose quads are hand-drawn and therefore
+    only *approximately* rectangular. The fit is chosen so no single vertex decides an output: the centre is the
+    vertex centroid, each extent is the mean of its pair of opposite side lengths, and the long-edge direction is
+    the mean of that pair's two (antiparallel) edge vectors. On an exact rectangle all three reduce to the exact
+    values, and a quad whose vertices sit within ``eps`` of a rectangle returns extents within ``eps`` of that
+    rectangle's. The result is :func:`canonicalize`\\ d, so the corner order and winding of the input quad do not
     matter — any cyclic rotation or reversal of the same ring gives the same box.
 
     Args:
-        polygons: ``(M, 4, 2)`` quadrilateral corners ``(x, y)``, each ring in order
-            around its quad (either winding).
+        polygons: ``(M, 4, 2)`` quadrilateral corners ``(x, y)``, each ring in order around its quad (either winding).
 
     Returns:
         ``(M, 5)`` canonical rotated boxes ``(cx, cy, w, h, theta)``.
@@ -252,27 +233,25 @@ def polygons_to_rboxes(polygons: Tensor) -> Tensor:
     _check_polygons(polygons)
     edges = polygons.roll(-1, dims=1) - polygons
     lengths = edges.norm(dim=2)
-    # Opposite sides of a rectangle are the (0, 2) and (1, 3) edge pairs under any cyclic
-    # ordering, and are antiparallel -- hence the difference, not the sum, for direction.
+    # Opposite sides of a rectangle are the (0, 2) and (1, 3) edge pairs under any cyclic ordering, and are
+    # antiparallel -- hence the difference, not the sum, for direction.
     first_len = (lengths[:, 0] + lengths[:, 2]) / 2
     second_len = (lengths[:, 1] + lengths[:, 3]) / 2
     first_dir = (edges[:, 0] - edges[:, 2]) / 2
     theta = torch.atan2(first_dir[:, 1], first_dir[:, 0])
-    # `canonicalize` swaps the pair round when the second one turned out to be longer,
-    # which is why the first pair may be handed over as `w` unconditionally.
+    # `canonicalize` swaps the pair round when the second one turned out to be longer, which is why the first pair may
+    # be handed over as `w` unconditionally.
     return canonicalize(torch.stack([*polygons.mean(dim=1).unbind(dim=1), first_len, second_len, theta], dim=1))
 
 
 def points_in_rboxes(points: Tensor, rboxes: Tensor) -> Tensor:
     """Test every point against every rotated box, edge-inclusive.
 
-    Each point is expressed in each box's local frame — projected onto ``u`` and ``v``
-    (module docstring, rotation note) — where containment is the pair of interval tests
-    ``|local_x| <= w/2`` and ``|local_y| <= h/2``. This is the containment primitive
-    WP-061 selects rotated TAL/STAL candidates with (A25), so it is a single broadcast
-    expression over the ``(P, M)`` pair grid with no Python loop over boxes. Boxes are
-    used as given: containment is invariant under the canonical moves, so no
-    canonicalization is needed or performed.
+    Each point is expressed in each box's local frame — projected onto ``u`` and ``v`` (module docstring, rotation
+    note) — where containment is the pair of interval tests ``|local_x| <= w/2`` and ``|local_y| <= h/2``. This is
+    the containment primitive WP-061 selects rotated TAL/STAL candidates with (A25), so it is a single broadcast
+    expression over the ``(P, M)`` pair grid with no Python loop over boxes. Boxes are used as given: containment
+    is invariant under the canonical moves, so no canonicalization is needed or performed.
 
     Args:
         points: ``(P, 2)`` query points ``(x, y)``.
@@ -307,50 +286,43 @@ def points_in_rboxes(points: Tensor, rboxes: Tensor) -> Tensor:
 def rotated_iou(boxes_a: Tensor, boxes_b: Tensor) -> Tensor:
     """Compute exact pairwise intersection-over-union between rotated boxes.
 
-    Each box is expanded to its four corners by :func:`rboxes_to_polygons` — which
-    canonicalizes first, so ``theta`` and ``theta + pi`` give identical overlaps — and
-    every pair's intersection is obtained by clipping one quadrilateral against the
-    other's four edges (Sutherland-Hodgman, valid because both are convex) and taking the
-    shoelace area of what survives. No sampling, no Gaussian surrogate, no float64: see
-    the module docstring on the per-pair midpoint shift that makes float32 sufficient.
+    Each box is expanded to its four corners by :func:`rboxes_to_polygons` — which canonicalizes first, so ``theta``
+    and ``theta + pi`` give identical overlaps — and every pair's intersection is obtained by clipping one
+    quadrilateral against the other's four edges (Sutherland-Hodgman, valid because both are convex) and taking the
+    shoelace area of what survives. No sampling, no Gaussian surrogate, no float64: see the module docstring on the
+    per-pair midpoint shift that makes float32 sufficient.
 
     Conventions and degenerate cases:
 
-    - Clipping is **edge-inclusive** (a vertex exactly on a clip edge counts as inside),
-      matching :func:`points_in_rboxes` and WP-055's containment choice. Boxes sharing
-      only an edge or a corner therefore intersect in a zero-area polygon and score
-      exactly ``0.0`` either way — inclusivity changes which vertices are kept, never the
-      area.
-    - A box with zero or negative extent encloses no area, and every IoU involving it is
-      ``0.0``. This is enforced by :func:`_valid_rboxes` on the arguments **as given**,
-      not left to the winding: :func:`canonicalize` swaps a pair of signed extents back
-      into ``w >= h`` order, and two negative extents are a half-turn that reconstructs
-      the very rectangle the caller wrote as invalid — so ``[-4, -2]`` against itself, and
-      against the honest ``[4, 2]``, both scored ``1.0`` until the validity mask was
-      applied to the inputs rather than inferred from the polygon.
-    - A box carrying a non-finite ``cx``, ``cy``, ``w``, ``h`` or ``theta`` is invalid the
-      same way and also scores ``0.0``. That zero is now stated by the mask rather than
-      arrived at by accident: every comparison against ``NaN`` is false, so the union
-      guard below already took the zero branch, and a caller could not tell "these boxes
-      do not overlap" from "one of these boxes is not a box". The decoders do not rely on
-      the distinction being visible in the number — they drop non-finite rows outright
-      (:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder`) — because a zero overlap
-      suppresses nothing, so a ``NaN`` box that reaches suppression survives every round.
-    - The union is guarded against division by zero, so a degenerate pair yields ``0.0``
-      rather than ``NaN`` — the same refusal :mod:`lucid_yolo.losses.probiou` makes.
+    - Clipping is **edge-inclusive** (a vertex exactly on a clip edge counts as inside), matching
+      :func:`points_in_rboxes` and WP-055's containment choice. Boxes sharing only an edge or a corner therefore
+      intersect in a zero-area polygon and score exactly ``0.0`` either way — inclusivity changes which vertices are
+      kept, never the area.
+    - A box with zero or negative extent encloses no area, and every IoU involving it is ``0.0``. This is enforced by
+      :func:`_valid_rboxes` on the arguments **as given**, not left to the winding: :func:`canonicalize` swaps a pair
+      of signed extents back into ``w >= h`` order, and two negative extents are a half-turn that reconstructs the
+      very rectangle the caller wrote as invalid — so ``[-4, -2]`` against itself, and against the honest ``[4, 2]``,
+      both scored ``1.0`` until the validity mask was applied to the inputs rather than inferred from the polygon.
+    - A box carrying a non-finite ``cx``, ``cy``, ``w``, ``h`` or ``theta`` is invalid the same way and also scores
+      ``0.0``. That zero is now stated by the mask rather than arrived at by accident: every comparison against
+      ``NaN`` is false, so the union guard below already took the zero branch, and a caller could not tell "these
+      boxes do not overlap" from "one of these boxes is not a box". The decoders do not rely on the distinction
+      being visible in the number — they drop non-finite rows outright
+      (:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder`) — because a zero overlap suppresses nothing, so a
+      ``NaN`` box that reaches suppression survives every round.
+    - The union is guarded against division by zero, so a degenerate pair yields ``0.0`` rather than ``NaN`` — the
+      same refusal :mod:`lucid_yolo.losses.probiou` makes.
 
     Args:
         boxes_a: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``, canonical or not.
         boxes_b: ``(N, 5)`` rotated boxes in the same form.
 
     Returns:
-        ``(M, N)`` IoU in ``[0, 1]``, in the dtype
-        :func:`torch.result_type` gives the two inputs.
+        ``(M, N)`` IoU in ``[0, 1]``, in the dtype :func:`torch.result_type` gives the two inputs.
 
     Raises:
-        ValueError: If either argument is not a 2-D five-column tensor. The message
-            names the offending argument and spells the row count ``N``, the letter
-            :func:`_check_2d` uses for every shape it rejects.
+        ValueError: If either argument is not a 2-D five-column tensor. The message names the offending argument and
+            spells the row count ``N``, the letter :func:`_check_2d` uses for every shape it rejects.
 
     Examples:
         ```pycon
@@ -410,11 +382,10 @@ def rotated_iou(boxes_a: Tensor, boxes_b: Tensor) -> Tensor:
 def _valid_rboxes(rboxes: Tensor) -> Tensor:
     """Flag the rows that describe a real rectangle: all-finite, both extents positive.
 
-    The predicate :func:`rotated_iou`'s degenerate-case contract is written against, kept
-    separate from the overlap arithmetic because it has to be evaluated on the *input*
-    parameters. Neither half is recoverable downstream: :func:`canonicalize` reorders
-    signed extents, and every comparison against a ``NaN`` is false, so a polygon built
-    from either kind of invalid row is indistinguishable from one built from a valid one.
+    The predicate :func:`rotated_iou`'s degenerate-case contract is written against, kept separate from the overlap
+    arithmetic because it has to be evaluated on the *input* parameters. Neither half is recoverable downstream:
+    :func:`canonicalize` reorders signed extents, and every comparison against a ``NaN`` is false, so a polygon
+    built from either kind of invalid row is indistinguishable from one built from a valid one.
 
     Args:
         rboxes: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``, canonical or not.
@@ -444,26 +415,23 @@ def _valid_rboxes(rboxes: Tensor) -> Tensor:
 def _wrap_theta(theta: Tensor) -> Tensor:
     """Shift angles by whole multiples of ``pi`` into ``[-pi/4, 3*pi/4)``.
 
-    An angle already in range is passed through untouched rather than recomputed. That
-    short-circuit is what makes :func:`canonicalize` exactly idempotent: at float32
-    precision the round trip through :func:`torch.remainder` and back need not reproduce
-    its own input near the range boundary, so the second call must not attempt it.
+    An angle already in range is passed through untouched rather than recomputed. That short-circuit is what makes
+    :func:`canonicalize` exactly idempotent: at float32 precision the round trip through :func:`torch.remainder` and
+    back need not reproduce its own input near the range boundary, so the second call must not attempt it.
 
-    Shifting by ``pi`` cannot land an out-of-range angle back in range at float32 when the
-    input sits within an ulp of a boundary: an input one ulp below ``-pi/4`` has
-    ``theta - _THETA_LOW`` round to a value whose remainder is ``pi``, so the sum comes
-    back to the input itself and the second guard's subtraction returns it unchanged. The
-    two guards therefore do not close the boundary case on their own, and the final clamp
-    does. It moves such an angle by at most one ulp — under 1e-7 radians — which is the
-    price of the range being a guarantee callers may rely on rather than a near-certainty.
+    Shifting by ``pi`` cannot land an out-of-range angle back in range at float32 when the input sits within an ulp
+    of a boundary: an input one ulp below ``-pi/4`` has ``theta - _THETA_LOW`` round to a value whose remainder is
+    ``pi``, so the sum comes back to the input itself and the second guard's subtraction returns it unchanged. The
+    two guards therefore do not close the boundary case on their own, and the final clamp does. It moves such an
+    angle by at most one ulp — under 1e-7 radians — which is the price of the range being a guarantee callers may
+    rely on rather than a near-certainty.
 
-    The reduction is meaningful only while the input's own floating-point spacing stays
-    small against ``pi``, the same bound :func:`~lucid_yolo.losses.angle_loss.wrap_angle_delta`
-    states: ``|theta| < 2**23 * pi`` in float32, about ``2.6e7``. Past it the argument no
-    longer represents the angle it names — the nearest float to a given residual is a whole
-    rotation or more away — so the returned value stays in range and describes a different
-    angle. Not reachable from a parsed annotation, whose headings arrive in ``[-pi, pi]``;
-    stated because the signature accepts any tensor.
+    The reduction is meaningful only while the input's own floating-point spacing stays small against ``pi``, the same
+    bound :func:`~lucid_yolo.losses.angle_loss.wrap_angle_delta` states: ``|theta| < 2**23 * pi`` in float32, about
+    ``2.6e7``. Past it the argument no longer represents the angle it names — the nearest float to a given residual
+    is a whole rotation or more away — so the returned value stays in range and describes a different angle. Not
+    reachable from a parsed annotation, whose headings arrive in ``[-pi, pi]``; stated because the signature
+    accepts any tensor.
 
     Examples:
         ```pycon
@@ -485,9 +453,9 @@ def _wrap_theta(theta: Tensor) -> Tensor:
 def _greatest_below_high(like: Tensor) -> Tensor:
     """Return the largest value below ``3*pi/4`` representable in ``like``'s dtype.
 
-    Clamping to ``3*pi/4`` itself would leave the angle on the excluded end of the
-    half-open range, so the clamp needs the neighbour below it in the working precision —
-    which differs between float32 and float64 and cannot be written as one literal.
+    Clamping to ``3*pi/4`` itself would leave the angle on the excluded end of the half-open range, so the clamp
+    needs the neighbour below it in the working precision — which differs between float32 and float64 and cannot be
+    written as one literal.
 
     Examples:
         ```pycon
@@ -504,10 +472,9 @@ def _greatest_below_high(like: Tensor) -> Tensor:
 def _check_2d(tensor: Tensor, columns: int, name: str) -> None:
     """Raise :class:`ValueError` unless ``tensor`` is 2-D with ``columns`` columns.
 
-    The row count is spelled ``N`` in every message this raises, :func:`rotated_iou`'s
-    two operands included. Their signature distinguishes ``M`` from ``N`` because the
-    output is ``(M, N)`` — but the *predicate* each input has to satisfy is one and the
-    same, so a second letter in the rejection named a difference the check never tested.
+    The row count is spelled ``N`` in every message this raises, :func:`rotated_iou`'s two operands included. Their
+    signature distinguishes ``M`` from ``N`` because the output is ``(M, N)`` — but the *predicate* each input has
+    to satisfy is one and the same, so a second letter in the rejection named a difference the check never tested.
 
     Examples:
         ```pycon
@@ -538,11 +505,10 @@ def _check_polygons(polygons: Tensor) -> None:
 def _local_polygons(pairs: Tensor, midpoint: Tensor) -> Tensor:
     """Expand per-pair rotated boxes to corners in the frame centred on ``midpoint``.
 
-    The subtraction happens on the **centre**, before :func:`rboxes_to_polygons` adds the
-    half-extents, so the corner coordinates are born small instead of being made small
-    afterwards. That is the whole precision story of :func:`rotated_iou`: a corner
-    expanded at absolute DOTA scale is already rounded to that scale's float32 spacing,
-    and no later shift recovers it.
+    The subtraction happens on the **centre**, before :func:`rboxes_to_polygons` adds the half-extents, so the corner
+    coordinates are born small instead of being made small afterwards. That is the whole precision story of
+    :func:`rotated_iou`: a corner expanded at absolute DOTA scale is already rounded to that scale's float32
+    spacing, and no later shift recovers it.
 
     Args:
         pairs: ``(M, N, 5)`` rotated boxes, broadcast to the pair grid.
@@ -568,9 +534,8 @@ def _local_polygons(pairs: Tensor, midpoint: Tensor) -> Tensor:
 def _intersection_area(subject: Tensor, clip: Tensor) -> Tensor:
     """Clip ``subject`` against every edge of ``clip`` and return the surviving area.
 
-    One Sutherland-Hodgman pass per clip edge, each followed by a compaction back to
-    :data:`_MAX_INTERSECTION_CORNERS` slots — which loses nothing, since an intermediate
-    result cannot exceed that bound (see the constant's note).
+    One Sutherland-Hodgman pass per clip edge, each followed by a compaction back to :data:`_MAX_INTERSECTION_CORNERS`
+    slots — which loses nothing, since an intermediate result cannot exceed that bound (see the constant's note).
 
     Args:
         subject: ``(M, N, 4, 2)`` corners of the clipped quadrilateral, per pair.
@@ -603,11 +568,10 @@ def _intersection_area(subject: Tensor, clip: Tensor) -> Tensor:
 def _clip_by_edge(polygon: Tensor, valid: Tensor, start: Tensor, end: Tensor) -> tuple[Tensor, Tensor]:
     """Run one Sutherland-Hodgman step against the directed edge ``start -> end``.
 
-    Emits two slots per input vertex — the vertex itself when it is inside, and the
-    crossing point when the edge to its successor changes side — so the output shape is a
-    pure function of the input shape and no data-dependent resize is needed. The interior
-    test is ``cross >= 0``, which is **edge-inclusive** and matches the positive winding
-    :func:`rboxes_to_polygons` guarantees.
+    Emits two slots per input vertex — the vertex itself when it is inside, and the crossing point when the edge to
+    its successor changes side — so the output shape is a pure function of the input shape and no data-dependent
+    resize is needed. The interior test is ``cross >= 0``, which is **edge-inclusive** and matches the positive
+    winding :func:`rboxes_to_polygons` guarantees.
 
     Args:
         polygon: ``(M, N, K, 2)`` vertices, valid ones compacted to the front.
@@ -649,9 +613,8 @@ def _clip_by_edge(polygon: Tensor, valid: Tensor, start: Tensor, end: Tensor) ->
 def _successor(values: Tensor, valid: Tensor) -> Tensor:
     """Return each slot's cyclic successor among the live vertices.
 
-    ``valid`` is a prefix mask, so the successor of slot ``i`` is slot ``i + 1`` when that
-    slot is live and slot ``0`` otherwise — the ring closes at the first vertex rather
-    than wandering into the padding.
+    ``valid`` is a prefix mask, so the successor of slot ``i`` is slot ``i + 1`` when that slot is live and slot ``0``
+    otherwise — the ring closes at the first vertex rather than wandering into the padding.
 
     Args:
         values: ``(M, N, K, C)`` per-vertex values.
@@ -678,9 +641,8 @@ def _successor(values: Tensor, valid: Tensor) -> Tensor:
 def _compact(polygon: Tensor, valid: Tensor) -> tuple[Tensor, Tensor]:
     """Move live vertices to the front, truncate to the vertex bound, and pad with vertex 0.
 
-    Restores the prefix-mask invariant :func:`_successor` relies on, and replaces every
-    dead slot with the first live vertex so :func:`_shoelace` may run mask-free: the
-    padding edges are zero-length and contribute nothing to the area.
+    Restores the prefix-mask invariant :func:`_successor` relies on, and replaces every dead slot with the first live
+    vertex so :func:`_shoelace` may run mask-free: the padding edges are zero-length and contribute nothing to the area.
 
     Args:
         polygon: ``(M, N, K, 2)`` vertices in emission order.
@@ -709,8 +671,8 @@ def _compact(polygon: Tensor, valid: Tensor) -> tuple[Tensor, Tensor]:
 def _shoelace(polygon: Tensor) -> Tensor:
     """Return the signed area of each polygon by the shoelace formula.
 
-    Positive for the winding :func:`rboxes_to_polygons` emits. Repeated vertices
-    contribute zero, which is what lets padded rings be measured without a mask.
+    Positive for the winding :func:`rboxes_to_polygons` emits. Repeated vertices contribute zero, which is what lets
+    padded rings be measured without a mask.
 
     Args:
         polygon: ``(..., K, 2)`` vertices in ring order.

@@ -1,24 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-122 keypoint stems and coordinate decode.
 
-The keypoint path is a generic ``K``-point extension of the dual detection head,
-not a human-pose specialization. These tests pin the extension at its two
-boundaries: the opt-in head emits point-major raw coordinate offsets and raw
-per-axis uncertainty on both disjoint branches, while the pure decode composes
-only the coordinates with the existing anchor-centre and stride convention.
+The keypoint path is a generic ``K``-point extension of the dual detection head, not a human-pose specialization. These
+tests pin the extension at its two boundaries: the opt-in head emits point-major raw coordinate offsets and raw per-axis
+uncertainty on both disjoint branches, while the pure decode composes only the coordinates with the existing
+anchor-centre and stride convention.
 
-Assumption A65 deliberately leaves uncertainty unbounded until WP-123 defines
-the RLE loss. The regression test therefore drives the last convolution to
-distinct negative and positive sigma values and requires those values to arrive
-unchanged; a sigmoid, tanh, softplus, absolute value, exponential, or clamp would
-all fail that check.
+Assumption A65 deliberately leaves uncertainty unbounded until WP-123 defines the RLE loss. The regression test
+therefore drives the last convolution to distinct negative and positive sigma values and requires those values to
+arrive unchanged; a sigmoid, tanh, softplus, absolute value, exponential, or clamp would all fail that check.
 
-The composite gates at the end (WP-139) cover the same extension one level up:
-that :class:`~lucid_yolo.models.KeypointDetector` runs the stems it builds, that
-its deployed view is a parameter-sharing single-branch view rather than a copy,
-that the triple it returns feeds the decode unadapted, and that ``K`` cannot be
-defaulted into existence. The params/FLOPs golden is a separate gate and stays
-outside this module.
+The composite gates at the end (WP-139) cover the same extension one level up: that
+:class:`~lucid_yolo.models.KeypointDetector` runs the stems it builds, that its deployed view is a parameter-sharing
+single-branch view rather than a copy, that the triple it returns feeds the decode unadapted, and that ``K`` cannot be
+defaulted into existence. The params/FLOPs golden is a separate gate and stays outside this module.
 """
 
 from __future__ import annotations
@@ -27,9 +22,9 @@ from collections.abc import Callable
 
 import pytest
 import torch
+from head_pyramid_helpers import square_anchor_grid
 from torch import nn
 
-from lucid_yolo.assign.grid import make_anchor_points
 from lucid_yolo.models import KeypointDetector, build_keypoint_detector, count_params
 from lucid_yolo.models.heads import decode_keypoints
 from lucid_yolo.models.heads.detect import DualDetectionHead, _flatten_level
@@ -38,25 +33,9 @@ _CHANNELS = (16, 24, 32)
 _NUM_CLASSES = 4
 _NUM_KEYPOINTS = 3
 
-#: The head's level strides, in the (8, 16, 32) order the neck emits.
-_STRIDES = [8, 16, 32]
-
-#: Square input side for the composite gates; divisible by 32, so every level's
-#: grid is exact. Its 336 anchors differ from both the class and the point count,
-#: so no shape assertion can pass by matching the wrong axis.
+#: Square input side for the composite gates; divisible by 32, so every level's grid is exact. Its 336 anchors differ
+#: from both the class and the point count, so no shape assertion can pass by matching the wrong axis.
 _IMG_SIZE = 128
-
-
-def _anchor_grid(input_size: int) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return the shared anchor points and per-anchor strides for a square input.
-
-    Examples:
-        >>> points, strides = _anchor_grid(128)
-        >>> points.shape, strides.shape
-        (torch.Size([336, 2]), torch.Size([336]))
-    """
-    feature_sizes = [(input_size // stride, input_size // stride) for stride in _STRIDES]
-    return make_anchor_points(feature_sizes, _STRIDES)
 
 
 @pytest.fixture
@@ -77,8 +56,8 @@ class TestKeypointHead:
     ) -> None:
         """Both branches emit coordinate and sigma tensors shaped ``(B, A, K, 2)``.
 
-        A three-level head with 21 anchors and generic ``K=3`` points exercises
-        the channel-to-point reshape and the level concatenation on both paths.
+        A three-level head with 21 anchors and generic ``K=3`` points exercises the channel-to-point reshape and the
+        level concatenation on both paths.
         """
         head = DualDetectionHead(_CHANNELS, num_classes=_NUM_CLASSES, num_keypoints=_NUM_KEYPOINTS).eval()
 
@@ -100,9 +79,8 @@ class TestKeypointHead:
     ) -> None:
         """The default head owns no keypoint modules and preserves class/box outputs.
 
-        The scenario recomputes the accepted box/class loop directly before
-        invoking the extended forward, so a default-off keypoint path cannot
-        perturb the existing tensors while merely returning ``None`` extras.
+        The scenario recomputes the accepted box/class loop directly before invoking the extended forward, so a
+        default-off keypoint path cannot perturb the existing tensors while merely returning ``None`` extras.
         """
         head = DualDetectionHead(_CHANNELS, num_classes=_NUM_CLASSES).eval()
         expected: list[tuple[torch.Tensor, torch.Tensor]] = []
@@ -131,8 +109,8 @@ class TestKeypointHead:
     def test_stems_disjoint_from_both_branches_and_other_outputs(self) -> None:
         """Keypoint parameters share with neither branch nor any existing stem set.
 
-        Enabling coefficients, angles, and keypoints together makes every
-        possible accidental sharing surface present in one module tree.
+        Enabling coefficients, angles, and keypoints together makes every possible accidental sharing surface present
+        in one module tree.
         """
         head = DualDetectionHead(
             _CHANNELS,
@@ -162,9 +140,8 @@ class TestKeypointHead:
     ) -> None:
         """Distinct negative and positive sigma logits arrive unchanged from the 1x1.
 
-        Each point's final-convolution channels are programmed as
-        ``(x, y, sigma_x, sigma_y)``. Exact recovery catches both a forbidden
-        range transform and a reshape that silently uses another channel layout.
+        Each point's final-convolution channels are programmed as ``(x, y, sigma_x, sigma_y)``. Exact recovery catches
+        both a forbidden range transform and a reshape that silently uses another channel layout.
         """
         num_keypoints = 2
         head = DualDetectionHead(_CHANNELS, num_classes=_NUM_CLASSES, num_keypoints=num_keypoints).eval()
@@ -195,8 +172,8 @@ class TestDecodeKeypoints:
     def test_matches_hand_computable_anchor_offset(self) -> None:
         """The decode adds each stride-scaled offset to its anchor centre exactly.
 
-        One anchor at ``(10, 20)`` with stride 4 and two signed point offsets
-        makes every expected pixel coordinate explicit.
+        One anchor at ``(10, 20)`` with stride 4 and two signed point offsets makes every expected pixel coordinate
+        explicit.
         """
         raw_coords = torch.tensor([[[[1.0, -2.0], [-0.5, 0.25]]]])
         anchor_points = torch.tensor([[10.0, 20.0]])
@@ -210,8 +187,8 @@ class TestDecodeKeypoints:
     def test_preserves_batch_anchor_and_generic_point_axes(self) -> None:
         """A multi-batch, multi-anchor, ``K=4`` input keeps every structural axis.
 
-        Distinct anchor centres and strides are broadcast over only the batch and
-        point axes, preventing one anchor's geometry from leaking into another.
+        Distinct anchor centres and strides are broadcast over only the batch and point axes, preventing one anchor's
+        geometry from leaking into another.
         """
         raw_coords = torch.arange(2 * 3 * 4 * 2, dtype=torch.float32).reshape(2, 3, 4, 2) / 10
         anchor_points = torch.tensor([[1.0, 2.0], [10.0, 20.0], [100.0, 200.0]])
@@ -230,13 +207,12 @@ class TestKeypointDetector:
     def test_forward_emits_points_and_sigma_on_both_branches(self) -> None:
         """The composite wires the point branch through to both branches' outputs.
 
-        Catches a model that builds the stems but never runs them — the parameters
-        would be exported and counted while the points stayed unpredicted. The
-        class count, the point count, and the anchor count are mutually distinct,
-        so no shape assertion can pass by matching the wrong axis.
+        Catches a model that builds the stems but never runs them — the parameters would be exported and counted while
+        the points stayed unpredicted. The class count, the point count, and the anchor count are mutually distinct, so
+        no shape assertion can pass by matching the wrong axis.
         """
         model = KeypointDetector("n", num_classes=_NUM_CLASSES, num_keypoints=_NUM_KEYPOINTS).eval()
-        anchor_points, _ = _anchor_grid(_IMG_SIZE)
+        anchor_points, _ = square_anchor_grid(_IMG_SIZE)
 
         with torch.no_grad():
             out = model(torch.zeros(1, 3, _IMG_SIZE, _IMG_SIZE))
@@ -253,12 +229,10 @@ class TestKeypointDetector:
     def test_deployed_view_drops_one_to_many_branch_entirely(self) -> None:
         """The deployed model holds no one-to-many parameter, point stems included.
 
-        The R6 convention the keypoint golden's GFLOP column is read under. A
-        deployed view that still referenced the training-only branch would export
-        it, count it, and make the NMS-free claim false for the artifact that
-        ships — and the point stems are the easiest thing to leave behind, since
-        they hang off the branch rather than the head. Parameter identity proves
-        the view shares the trained weights instead of copying them.
+        The R6 convention the keypoint golden's GFLOP column is read under. A deployed view that still referenced the
+        training-only branch would export it, count it, and make the NMS-free claim false for the artifact that ships
+        — and the point stems are the easiest thing to leave behind, since they hang off the branch rather than the
+        head. Parameter identity proves the view shares the trained weights instead of copying them.
         """
         model = KeypointDetector("n", num_classes=_NUM_CLASSES, num_keypoints=_NUM_KEYPOINTS).eval()
 
@@ -275,14 +249,13 @@ class TestKeypointDetector:
     def test_deployed_triple_decodes_into_dense_point_coordinates(self) -> None:
         """The deployed triple flows through the point decode without adaptation.
 
-        The end-to-end proof that the head's outputs and the decode's inputs agree
-        on layout: a transposed point axis or a mismatched anchor ordering would
-        raise here rather than surfacing as quietly displaced points during a later
-        OKS evaluation run.
+        The end-to-end proof that the head's outputs and the decode's inputs agree on layout: a transposed point axis
+        or a mismatched anchor ordering would raise here rather than surfacing as quietly displaced points during a
+        later OKS evaluation run.
         """
         model = build_keypoint_detector("n", num_classes=_NUM_CLASSES, num_keypoints=_NUM_KEYPOINTS).eval()
         deployed = model.deploy()
-        anchor_points, strides = _anchor_grid(_IMG_SIZE)
+        anchor_points, strides = square_anchor_grid(_IMG_SIZE)
 
         with torch.no_grad():
             cls, box, keypoints = deployed(torch.zeros(1, 3, _IMG_SIZE, _IMG_SIZE))
@@ -304,11 +277,10 @@ class TestKeypointDetector:
     def test_rejects_omitted_point_count(self, factory: Callable[..., KeypointDetector]) -> None:
         """Building without ``num_keypoints`` raises instead of picking a count.
 
-        ``K`` is a property of the dataset's annotation schema, so a default would
-        be a silent claim about data the model has never seen — the same refusal
-        :class:`~lucid_yolo.ptl.module.DetectionLitModule` makes for
-        ``task="keypoints"``. Keyword-only and required is what turns that refusal
-        into a construction-time error rather than a wrongly shaped checkpoint.
+        ``K`` is a property of the dataset's annotation schema, so a default would be a silent claim about data the
+        model has never seen — the same refusal :class:`~lucid_yolo.ptl.module.DetectionLitModule` makes for
+        ``task="keypoints"``. Keyword-only and required is what turns that refusal into a construction-time error
+        rather than a wrongly shaped checkpoint.
         """
         with pytest.raises(TypeError):
             factory("n", num_classes=_NUM_CLASSES)

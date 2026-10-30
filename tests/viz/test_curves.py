@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """The curve figure carries the panels a run's CSV can fill, and no others (WP-189).
 
-Every assertion reads the figure's **axes** — how many, what each is titled, whether a
-panel is switched off — and never a rendered pixel, for the reason ``tests/viz/test_overlay.py``
-gives: a raster moves with a font metric and a backend version, and the axes are what the
-code decided. The CSVs are written by the tests, column by column, because the panel count
-is a function of which columns a run logged and that is the claim under test.
+Every assertion reads the figure's **axes** — how many, what each is titled, whether a panel is switched off — and
+never a rendered pixel, for the reason ``tests/viz/test_overlay.py`` gives: a raster moves with a font metric and a
+backend version, and the axes are what the code decided. The CSVs are written by the tests, column by column, because
+the panel count is a function of which columns a run logged and that is the claim under test.
 """
 
 from __future__ import annotations
@@ -19,9 +18,8 @@ from lucid_yolo._viz.curves import build_run_figure, epoch_means, load_series, p
 if TYPE_CHECKING:
     from pathlib import Path
 
-#: The columns every run logs, and one row of each. Panel 1 (``val/mAP``), panel 2 (the
-#: two totals) and panel 3 (one o2o term) are all fed, so a three-panel figure draws
-#: every panel it has rather than an empty legend.
+#: The columns every run logs, and one row of each. Panel 1 (``val/mAP``), panel 2 (the two totals) and panel 3 (one
+#: o2o term) are all fed, so a three-panel figure draws every panel it has rather than an empty legend.
 _DETECTION_HEADER = "epoch,step,val/mAP,train/loss,val/loss,val/o2o_cls"
 _DETECTION_ROWS = ("0,10,0.10,2.0,1.5,0.5", "1,20,0.20,1.5,1.2,0.4")
 
@@ -56,8 +54,8 @@ class TestLoadSeries:
     def test_keeps_only_rows_carry_column(self, tmp_path: Path) -> None:
         """A step row without the validation column is skipped rather than read as zero.
 
-        Lightning writes a sparse table — a step row carries only the training metrics —
-        so a reader that took every row would plot a zero at every training step.
+        Lightning writes a sparse table — a step row carries only the training metrics — so a reader that took every
+        row would plot a zero at every training step.
         """
         path = _write_metrics(tmp_path, "epoch,step,val/mAP,train/loss", ("0,9,,2.0", "0,10,0.1,", "1,20,0.3,"))
 
@@ -68,8 +66,8 @@ class TestLoadSeries:
     def test_column_run_never_logged_empty(self, tmp_path: Path) -> None:
         """Asking for an absent column yields two empty lists, not a ``KeyError``.
 
-        The panel logic keys off emptiness — a run predating ``val/mAP`` still plots —
-        so absence has to be a value the caller can test, not an exception.
+        The panel logic keys off emptiness — a run predating ``val/mAP`` still plots — so absence has to be a value
+        the caller can test, not an exception.
         """
         path = _write_metrics(tmp_path, "epoch,step,train/loss", ("0,1,2.0",))
 
@@ -79,8 +77,8 @@ class TestLoadSeries:
 def test_epoch_means_collapse_per_step_series_to_one_point_per_epoch() -> None:
     """Three samples over two epochs become two means, in epoch order.
 
-    The training sawtooth is what this smooths: without it the untrained opening loss
-    sets the axis range for the whole run.
+    The training sawtooth is what this smooths: without it the untrained opening loss sets the axis range for the
+    whole run.
     """
     assert epoch_means([0, 0, 1], [1.0, 3.0, 5.0]) == ([0, 1], [2.0, 5.0])
 
@@ -91,8 +89,8 @@ class TestBuildRunFigure:
     def test_detection_run_gets_three_panels(self, detection_metrics: Path) -> None:
         """A CSV with none of the task-specific columns draws exactly the three shared panels.
 
-        The three-panel geometry is the committed detection figure's, so a fourth panel
-        appearing on a detection run would move every coordinate in a regenerated SVG.
+        The three-panel geometry is the committed detection figure's, so a fourth panel appearing on a detection run
+        would move every coordinate in a regenerated SVG.
         """
         figure = build_run_figure(detection_metrics, "det")
 
@@ -114,8 +112,8 @@ class TestBuildRunFigure:
     def test_task_column_adds_own_fourth_panel(self, tmp_path: Path, column: str, title: str) -> None:
         """One task-specific column is enough to add the fourth panel, titled for that task.
 
-        Which panel appears is decided by the columns and nothing else — there is no
-        ``--task`` flag — so a run's CSV is the whole input.
+        Which panel appears is decided by the columns and nothing else — there is no ``--task`` flag — so a run's CSV
+        is the whole input.
         """
         path = _write_metrics(tmp_path, f"{_DETECTION_HEADER},{column}", tuple(f"{row},0.3" for row in _DETECTION_ROWS))
 
@@ -127,8 +125,8 @@ class TestBuildRunFigure:
     def test_run_without_any_metric_switches_first_panel_off(self, tmp_path: Path) -> None:
         """No ``val/mAP`` and no rotated pair leaves panel 1 present but axis-less.
 
-        The older runs predate the headline column; they still plot, with the first
-        panel saying so rather than drawing an empty frame.
+        The older runs predate the headline column; they still plot, with the first panel saying so rather than
+        drawing an empty frame.
         """
         path = _write_metrics(tmp_path, "epoch,step,train/loss,val/loss,val/o2o_cls", ("0,10,2.0,1.5,0.5",))
 
@@ -141,8 +139,8 @@ class TestBuildRunFigure:
     def test_close_mosaic_epoch_marked_on_metric_panel(self, detection_metrics: Path) -> None:
         """``close_mosaic`` adds one vertical line at that epoch to the first panel only.
 
-        The marker is what lets a reader attribute a late-run kink to the augmentation
-        switch rather than to the model.
+        The marker is what lets a reader attribute a late-run kink to the augmentation switch rather than to the
+        model.
         """
         figure = build_run_figure(detection_metrics, "det", close_mosaic=1)
 
@@ -158,8 +156,8 @@ class TestPlotCurves:
     def test_returns_report_figure_with_every_panel(self, detection_metrics: Path) -> None:
         """The notebook figure has the same panels the script's figure has.
 
-        One implementation behind both callers is the point of the move; a panel that
-        differed between them would be a figure nothing tests.
+        One implementation behind both callers is the point of the move; a panel that differed between them would be a
+        figure nothing tests.
         """
         figure = plot_curves(detection_metrics)
 
@@ -170,8 +168,8 @@ class TestPlotCurves:
     def test_title_defaults_to_run_directory_name(self, detection_metrics: Path) -> None:
         """With no title, the suptitle is ``version_8`` — the directory the CSV sits in.
 
-        A reader scrolling past several runs in a notebook tells them apart by that
-        name, which is also how Lightning names the run on disk.
+        A reader scrolling past several runs in a notebook tells them apart by that name, which is also how
+        Lightning names the run on disk.
         """
         assert plot_curves(detection_metrics).get_suptitle() == "version_8"
 

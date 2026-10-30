@@ -1,46 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
 """Per-image target container carried through the augmentation pipeline.
 
-The :class:`Targets` dataclass is the single mutable-shape record every geometric
-transform (letterbox, affine, mosaic, mixup, flip — WP-009…013) reads and
-rewrites. It holds all target modalities the reproduction touches so one
-transform call keeps axis-aligned boxes, instance polygons and rotated boxes in
-lock-step (blueprint sec. 5.9: "all geometric transforms must operate
-consistently on boxes, polygon/instance masks, and rotated boxes").
+The :class:`Targets` dataclass is the single mutable-shape record every geometric transform (letterbox, affine,
+mosaic, mixup, flip — WP-009…013) reads and rewrites. It holds all target modalities the reproduction touches so
+one transform call keeps axis-aligned boxes, instance polygons and rotated boxes in lock-step (blueprint sec. 5.9:
+"all geometric transforms must operate consistently on boxes, polygon/instance masks, and rotated boxes").
 
 Conventions:
     * ``boxes`` — ``xyxy`` pixel coordinates, ``float32``.
     * ``labels`` — integer class ids, ``int64``, one per box.
-    * ``polygons`` — per-instance point rings; either absent (empty list) or one
-      ring per box.
-    * ``rboxes`` — rotated boxes in **long-edge** form ``(cx, cy, w, h, theta)``
-      with ``w >= h`` and ``theta`` in radians on ``[-pi/4, 3*pi/4)``. This module
-      only *carries* rotated boxes; canonicalization (the ``w >= h`` / angle-range
-      guarantee) is implemented and enforced in WP-055, so ``__post_init__`` here
-      validates shape and dtype only, never the angle range.
-    * ``difficult`` — R18's per-instance ``difficult`` flag, on the shared instance
-      axis. Omitted means "no instance is difficult", which is what every
-      non-oriented dataset means (WP-088).
-    * ``keypoints`` / ``keypoint_vis`` — ``(N, K, 2)`` float32 xy coordinates and
-      matching ``(N, K)`` int64 visibility values on the shared instance axis.
+    * ``polygons`` — per-instance point rings; either absent (empty list) or one ring per box.
+    * ``rboxes`` — rotated boxes in **long-edge** form ``(cx, cy, w, h, theta)`` with ``w >= h`` and ``theta`` in
+      radians on ``[-pi/4, 3*pi/4)``. This module only *carries* rotated boxes; canonicalization (the ``w >= h`` /
+      angle-range guarantee) is implemented and enforced in WP-055, so ``__post_init__`` here validates shape and
+      dtype only, never the angle range.
+    * ``difficult`` — R18's per-instance ``difficult`` flag, on the shared instance axis. Omitted means "no instance
+      is difficult", which is what every non-oriented dataset means (WP-088).
+    * ``keypoints`` / ``keypoint_vis`` — ``(N, K, 2)`` float32 xy coordinates and matching ``(N, K)`` int64 visibility
+      values on the shared instance axis.
 
 The ``difficult`` channel (A48, A51):
-    R18 marks instances a detector is not penalised for missing *or* for finding,
-    and :func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map` implements that rule
-    — but only if the flag reaches it. Filtering difficult instances at load instead
-    (``keep_difficult=False``) deletes the ground truth an ignorable detection would
-    have matched, so every such detection is scored as a false positive and the
-    metric is silently depressed. A48 therefore makes ``keep_difficult=True`` a
-    requirement of the *evaluation* loader, and this field is the channel that
-    obligation needs: without somewhere to put the flag, keeping the instance and
-    dropping the instance are the same thing downstream.
+    R18 marks instances a detector is not penalised for missing *or* for finding, and
+    :func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map` implements that rule — but only if the flag reaches it.
+    Filtering difficult instances at load instead (``keep_difficult=False``) deletes the ground truth an ignorable
+    detection would have matched, so every such detection is scored as a false positive and the metric is silently
+    depressed. A48 therefore makes ``keep_difficult=True`` a requirement of the *evaluation* loader, and this field
+    is the channel that obligation needs: without somewhere to put the flag, keeping the instance and dropping the
+    instance are the same thing downstream.
 
-    The flag survives :meth:`Targets.filter`, :meth:`Targets.concat`,
-    :meth:`Targets.clone`, the letterbox transform (the only geometric transform on
-    the evaluation path) and the loader's packed transport. Train-time
-    multi-image assemblies rebuild their instance axis and are documented at each
-    site; the flag is not consumed in training at all (A39 leaves that policy open),
-    so this WP evaluates per tile and trains on whatever the loader kept.
+    The flag survives :meth:`Targets.filter`, :meth:`Targets.concat`, :meth:`Targets.clone`, the letterbox transform
+    (the only geometric transform on the evaluation path) and the loader's packed transport. Train-time multi-image
+    assemblies rebuild their instance axis and are documented at each site; the flag is not consumed in training at
+    all (A39 leaves that policy open), so this WP evaluates per tile and trains on whatever the loader kept.
 
 Angles are radians throughout. Images are CHW ``float`` tensors elsewhere in the
 pipeline; this container is image-agnostic and stores geometry only.
@@ -118,27 +109,23 @@ def _validate_mask(mask: Tensor, expected_len: int, name: str) -> None:
 class Targets:
     """Geometry for a single image, kept aligned across the transform pipeline.
 
-    The ``boxes``/``labels``/``polygons`` triple shares one instance axis of
-    length ``N``: ``labels`` has one entry per box and ``polygons``, when present,
-    has one ring per box. ``rboxes`` lives on an independent axis of length ``M``
-    and carries no labels in this container (rotated-target labelling lands with
-    the OBB head in Phase 8).
+    The ``boxes``/``labels``/``polygons`` triple shares one instance axis of length ``N``: ``labels`` has one entry
+    per box and ``polygons``, when present, has one ring per box. ``rboxes`` lives on an independent axis of length
+    ``M`` and carries no labels in this container (rotated-target labelling lands with the OBB head in Phase 8).
 
     Attributes:
         boxes: ``(N, 4)`` float32 axis-aligned boxes in ``xyxy`` pixel coords.
         labels: ``(N,)`` int64 class ids, one per box.
-        polygons: List of ``(P_i, 2)`` float32 instance rings; length ``0`` (no
-            masks) or ``N`` (one ring per box).
-        rboxes: ``(M, 5)`` float32 long-edge rotated boxes
-            ``(cx, cy, w, h, theta)``; empty ``(0, 5)`` when there are none.
-        difficult: ``(N,)`` bool R18 difficult flags on the shared instance axis.
-            Defaults to empty, which ``__post_init__`` expands to an all-``False``
-            row per instance — so "omitted" and "nothing is difficult" are the same
-            statement and every consumer may read the field unconditionally.
-        keypoints: ``(N, K, 2)`` float32 xy pixel coordinates. Its count is either
-            zero (absent) or ``N`` (one K-point set per box).
-        keypoint_vis: ``(N, K)`` int64 visibility values paired with ``keypoints``.
-            This container preserves values without constraining their meaning.
+        polygons: List of ``(P_i, 2)`` float32 instance rings; length ``0`` (no masks) or ``N`` (one ring per box).
+        rboxes: ``(M, 5)`` float32 long-edge rotated boxes ``(cx, cy, w, h, theta)``; empty ``(0, 5)`` when there are
+            none.
+        difficult: ``(N,)`` bool R18 difficult flags on the shared instance axis. Defaults to empty, which
+            ``__post_init__`` expands to an all-``False`` row per instance — so "omitted" and "nothing is difficult"
+            are the same statement and every consumer may read the field unconditionally.
+        keypoints: ``(N, K, 2)`` float32 xy pixel coordinates. Its count is either zero (absent) or ``N`` (one K-point
+            set per box).
+        keypoint_vis: ``(N, K)`` int64 visibility values paired with ``keypoints``. This container preserves values
+            without constraining their meaning.
 
     Examples:
         ```pycon
@@ -236,10 +223,9 @@ class Targets:
     def _resolve_difficult(self) -> None:
         """Expand an omitted ``difficult`` to one ``False`` per instance, then validate it.
 
-        Filling the default here rather than leaving it empty is what lets every
-        consumer index the field alongside ``labels`` without first asking whether the
-        producer supplied it — the alternative is an ``Optional`` that each of them
-        re-defaults, differently.
+        Filling the default here rather than leaving it empty is what lets every consumer index the field alongside
+        ``labels`` without first asking whether the producer supplied it — the alternative is an ``Optional`` that each
+        of them re-defaults, differently.
         """
         count = self.boxes.shape[0]
         if self.difficult.numel() == 0 and count:
@@ -254,9 +240,8 @@ class Targets:
         """Return a deep copy whose every tensor is independent of ``self``.
 
         Returns:
-            A new :class:`Targets` with cloned box/label/rbox/keypoint/visibility
-            tensors and a fresh list of cloned polygon rings; mutating either leaves
-            the other intact.
+            A new :class:`Targets` with cloned box/label/rbox/keypoint/visibility tensors and a fresh list of cloned
+            polygon rings; mutating either leaves the other intact.
 
         Examples:
             ```pycon
@@ -283,24 +268,23 @@ class Targets:
     def filter(self, keep: Tensor, rkeep: Tensor | None = None) -> Targets:
         """Select a subset of targets, keeping every modality aligned.
 
-        ``keep`` selects along the shared instance axis (boxes, labels, keypoints and,
-        when present, polygons). Because rotated boxes live on an independent axis,
-        they need their own mask: when ``rboxes`` is non-empty ``rkeep`` is
-        **required**, and when ``rboxes`` is empty ``rkeep`` must be omitted. This
-        keeps the two axes explicit rather than silently coupling their lengths.
+        ``keep`` selects along the shared instance axis (boxes, labels, keypoints and, when present, polygons). Because
+        rotated boxes live on an independent axis, they need their own mask: when ``rboxes`` is non-empty ``rkeep`` is
+        **required**, and when ``rboxes`` is empty ``rkeep`` must be omitted. This keeps the two axes explicit rather
+        than silently coupling their lengths.
 
         Args:
             keep: ``(N,)`` bool mask over the instance axis.
-            rkeep: ``(M,)`` bool mask over the rotated-box axis. Required iff
-                ``rboxes`` is non-empty; must be ``None`` otherwise.
+            rkeep: ``(M,)`` bool mask over the rotated-box axis. Required iff ``rboxes`` is non-empty; must be
+                ``None`` otherwise.
 
         Returns:
-            A new :class:`Targets` holding only the selected instances, keypoint rows,
-            and rotated boxes; the returned tensors are independent copies.
+            A new :class:`Targets` holding only the selected instances, keypoint rows, and rotated boxes; the returned
+            tensors are independent copies.
 
         Raises:
-            ValueError: If a mask has the wrong length, or ``rkeep`` is missing
-                for non-empty ``rboxes`` / supplied for empty ``rboxes``.
+            ValueError: If a mask has the wrong length, or ``rkeep`` is missing for non-empty ``rboxes`` / supplied for
+                empty ``rboxes``.
             TypeError: If a mask is not boolean.
 
         Examples:
@@ -355,21 +339,19 @@ class Targets:
     def concat(cls, items: list[Targets]) -> Targets:
         """Concatenate several images' targets into one (mosaic/mix assembly).
 
-        Boxes, labels and rotated boxes are concatenated along their axes. Polygon and
-        keypoint presence must be consistent: either every contributing instance carries
-        that modality or none does — a mix is rejected rather than silently dropped.
+        Boxes, labels and rotated boxes are concatenated along their axes. Polygon and keypoint presence must be
+        consistent: either every contributing instance carries that modality or none does — a mix is rejected rather
+        than silently dropped.
 
         Args:
-            items: Targets to merge, in order. An empty list yields
-                :meth:`empty`.
+            items: Targets to merge, in order. An empty list yields :meth:`empty`.
 
         Returns:
-            A single :class:`Targets` with the merged instances, keypoint rows, and
-            rotated boxes.
+            A single :class:`Targets` with the merged instances, keypoint rows, and rotated boxes.
 
         Raises:
-            ValueError: If polygon/keypoint presence is mixed across ``items``, or
-                present items carry different keypoint counts.
+            ValueError: If polygon/keypoint presence is mixed across ``items``, or present items carry different
+                keypoint counts.
 
         Examples:
             ```pycon
@@ -432,10 +414,9 @@ class Targets:
     def _shared_keypoint_count(items: Sequence[Targets]) -> int:
         """Return the point count ``K`` that every item carrying point sets agrees on.
 
-        An instance-free item holds the canonical ``(0, 0, 2)`` empty, whose point axis is
-        ``0`` rather than its batch's ``K``, so only items with at least one point set have a
-        say. Both batch-level joins read ``K`` here: :meth:`concat`, which keeps only those
-        items, and the loader's packed transport
+        An instance-free item holds the canonical ``(0, 0, 2)`` empty, whose point axis is ``0`` rather than its
+        batch's ``K``, so only items with at least one point set have a say. Both batch-level joins read ``K`` here:
+        :meth:`concat`, which keeps only those items, and the loader's packed transport
         (:func:`~lucid_yolo.ptl.datamodule.pack_targets`), which reshapes the empties to it.
 
         Args:
@@ -479,9 +460,8 @@ class Targets:
         """Return a valid, fully-empty target set (zero instances, no rotated boxes or keypoints).
 
         Returns:
-            A :class:`Targets` with ``(0, 4)`` boxes, ``(0,)`` labels, no polygons
-            and ``(0, 5)`` rboxes / ``(0, 0, 2)`` keypoints — a safe identity for
-            :meth:`concat` and a valid input to :meth:`filter`.
+            A :class:`Targets` with ``(0, 4)`` boxes, ``(0,)`` labels, no polygons and ``(0, 5)`` rboxes /
+            ``(0, 0, 2)`` keypoints — a safe identity for :meth:`concat` and a valid input to :meth:`filter`.
 
         Examples:
             ```pycon
@@ -512,31 +492,28 @@ class Targets:
     ) -> Targets:
         """Build targets from one quadrilateral per instance: its envelope box and its rotated fit.
 
-        Both modalities are derived from the *same* quad, which is what makes ``boxes[i]`` and
-        ``rboxes[i]`` one object rather than two lists that happen to be ordered alike — the
-        shared instance axis the three oriented readings (COCO ``oriented=True``, YOLO's
-        nine-field rows, DOTA's ``labelTxt``) and every rotated transform rely on. ``boxes`` is
-        :func:`~lucid_yolo.data.transforms.boxes_from_polygons` of the quads and ``rboxes`` is
-        :func:`~lucid_yolo.data.rotated_geom.polygons_to_rboxes` of them stacked; ``polygons``
-        stays empty, the quad being carried by ``rboxes`` up to the rectangle fit. Parsing a
-        quad out of its file, and refusing one with the file's name in the message, stays with
-        each reader.
+        Both modalities are derived from the *same* quad, which is what makes ``boxes[i]`` and ``rboxes[i]`` one object
+        rather than two lists that happen to be ordered alike — the shared instance axis the three oriented readings
+        (COCO ``oriented=True``, YOLO's nine-field rows, DOTA's ``labelTxt``) and every rotated transform rely on.
+        ``boxes`` is :func:`~lucid_yolo.data.transforms.boxes_from_polygons` of the quads and ``rboxes`` is
+        :func:`~lucid_yolo.data.rotated_geom.polygons_to_rboxes` of them stacked; ``polygons`` stays empty, the
+        quad being carried by ``rboxes`` up to the rectangle fit. Parsing a quad out of its file, and refusing one
+        with the file's name in the message, stays with each reader.
 
         Args:
             quads: One ``(4, 2)`` float32 quadrilateral per instance, in instance order.
             labels: ``(N,)`` int64 class ids aligned with ``quads``.
             difficult: Optional ``(N,)`` bool R18 flags; omitted means no instance is difficult.
-            keypoints: Optional ``(N, K, 2)`` float32 coordinates, given together with
-                ``keypoint_vis``.
+            keypoints: Optional ``(N, K, 2)`` float32 coordinates, given together with ``keypoint_vis``.
             keypoint_vis: Optional ``(N, K)`` int64 visibility paired with ``keypoints``.
 
         Returns:
-            Targets whose boxes, labels, rotated boxes and any channel given share one
-            instance axis; every modality empty when ``quads`` is.
+            Targets whose boxes, labels, rotated boxes and any channel given share one instance axis; every modality
+            empty when ``quads`` is.
 
         Raises:
-            ValueError: If a quad is not ``(4, 2)``, or a channel's length disagrees with
-                ``quads`` (the latter from the constructor's own validation).
+            ValueError: If a quad is not ``(4, 2)``, or a channel's length disagrees with ``quads`` (the latter from
+                the constructor's own validation).
 
         Examples:
             ```pycon

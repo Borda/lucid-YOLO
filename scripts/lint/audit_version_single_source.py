@@ -1,20 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Single-source-of-version audit for ``pyproject.toml`` / ``lucid_yolo.__init__`` (WP-001, split off WP-117).
 
-``pyproject.toml`` once carried its own ``version`` string beside
-``lucid_yolo.__version__`` and the two had already drifted apart (``0.1.0``
-against ``0.0.1.dev0``) -- a build published one number while every runtime
-consumer reported the other. The packaging metadata is now declared dynamic and
-read from the module attribute, and this script pins that arrangement: no
-static ``version`` key in ``[project]``, ``dynamic`` and
-``[tool.setuptools.dynamic]`` wired to the module attribute, and the attribute
-itself a bare string literal setuptools can resolve without importing torch.
+``pyproject.toml`` once carried its own ``version`` string beside ``lucid_yolo.__version__`` and the two had
+already drifted apart (``0.1.0`` against ``0.0.1.dev0``) -- a build published one number while every runtime
+consumer reported the other. The packaging metadata is now declared dynamic and read from the module attribute,
+and this script pins that arrangement: no static ``version`` key in ``[project]``, ``dynamic`` and
+``[tool.setuptools.dynamic]`` wired to the module attribute, and the attribute itself a bare string literal
+setuptools can resolve without importing torch.
 
-Deliberately *not* checked here: ``importlib.metadata.version("lucid-yolo")``
-against ``__version__``. An editable install freezes its metadata at install
-time, so that assertion would fail on every version bump until someone
-reinstalled -- a check that fails for a reason unrelated to the property it
-claims to guard.
+Deliberately *not* checked here: ``importlib.metadata.version("lucid-yolo")`` against ``__version__``. An
+editable install freezes its metadata at install time, so that assertion would fail on every version bump until
+someone reinstalled -- a check that fails for a reason unrelated to the property it claims to guard.
 
 Examples:
     Command-line usage (exit status is the process return code)::
@@ -39,11 +35,10 @@ DEFAULT_INIT = REPO_ROOT / "src" / "lucid_yolo" / "__init__.py"
 DEFAULT_README = REPO_ROOT / "README.md"
 VERSION_ATTR = "lucid_yolo.__version__"
 
-#: The README's own statement of what the current release is, as the Versioning section
-#: writes it. Packaging metadata was the drift this script was opened for; prose is the
-#: drift it missed -- WP-175 found the README naming ``0.4.0`` while ``__version__`` had
-#: reached ``0.7.0``, three releases with nothing to notice them. The most-read file in the
-#: repository is a version consumer too, so it is held to the same single source.
+#: The README's own statement of what the current release is, as the Versioning section writes it. Packaging
+#: metadata was the drift this script was opened for; prose is the drift it missed -- WP-175 found the README
+#: naming ``0.4.0`` while ``__version__`` had reached ``0.7.0``, three releases with nothing to notice them. The
+#: most-read file in the repository is a version consumer too, so it is held to the same single source.
 README_VERSION_RE = re.compile(r"^Current release: \*\*(?P<version>[^*]+)\*\*", re.MULTILINE)
 
 
@@ -143,13 +138,11 @@ def _version_literals(init_path: Path) -> list[object]:
 def check_readme_names_the_current_version(readme_path: Path, init_path: Path) -> list[str]:
     """``README.md``'s "Current release" states the version the module attribute carries.
 
-    The README is read far more than ``pyproject.toml`` and drifts more quietly: nothing
-    fails when a release bumps ``__version__`` and leaves the prose behind, so the file
-    that introduces the project keeps naming a release two or three minors old. Matching
-    on the literal ``Current release: **X**`` line rather than on any version-shaped
-    string keeps the check pinned to the one sentence that makes the claim -- every other
-    version in the file (frozen golden sets, changelog references) is history and must not
-    move.
+    The README is read far more than ``pyproject.toml`` and drifts more quietly: nothing fails when a release bumps
+    ``__version__`` and leaves the prose behind, so the file that introduces the project keeps naming a release
+    two or three minors old. Matching on the literal ``Current release: **X**`` line rather than on any version-shaped
+    string keeps the check pinned to the one sentence that makes the claim -- every other version in the file
+    (frozen golden sets, changelog references) is history and must not move.
 
     Args:
         readme_path: ``README.md`` to read.
@@ -187,9 +180,8 @@ def check_readme_names_the_current_version(readme_path: Path, init_path: Path) -
 def check_version_is_a_plain_literal(init_path: Path) -> list[str]:
     """``__version__`` is a bare string literal, so setuptools resolves it without importing.
 
-    A computed value (``importlib.metadata``, an f-string, a read from a file)
-    would still be a valid attribute, but setuptools would have to *import* the
-    package to evaluate it -- pulling torch into every build and every
+    A computed value (``importlib.metadata``, an f-string, a read from a file) would still be a valid attribute,
+    but setuptools would have to *import* the package to evaluate it -- pulling torch into every build and every
     ``pip install`` of a source distribution.
 
     Examples:

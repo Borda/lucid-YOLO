@@ -1,18 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """Type-generic geometric transform protocol and shared geometry helpers.
 
-Every augmentation in Phase 1 (letterbox, affine, mosaic, mixup, flip —
-WP-009…013) and Phase 8 (rotated-aware variants) conforms to
-:class:`GeometricTransform`: it maps a CHW image and its :class:`~lucid_yolo.data.targets.Targets`
+Every augmentation in Phase 1 (letterbox, affine, mosaic, mixup, flip — WP-009…013) and Phase 8 (rotated-aware
+variants) conforms to :class:`GeometricTransform`: it maps a CHW image and its :class:`~lucid_yolo.data.targets.Targets`
 to a transformed pair. :class:`Compose` chains such transforms.
 
-The two pure helpers here are the single source of geometric truth the concrete
-transforms build on: :func:`apply_affine_to_points` applies a homogeneous
-``3x3`` matrix to a batch of points (the primitive behind box, polygon and
-rotated-box warping), and :func:`boxes_from_polygons` derives axis-aligned boxes
-from polygon rings (used whenever a polygon is clipped and its enclosing box must
-be recomputed). Keeping them small and exact means the box/polygon/rbox paths
-stay consistent by construction rather than by three parallel reimplementations.
+The two pure helpers here are the single source of geometric truth the concrete transforms build on:
+:func:`apply_affine_to_points` applies a homogeneous ``3x3`` matrix to a batch of points (the primitive behind box,
+polygon and rotated-box warping), and :func:`boxes_from_polygons` derives axis-aligned boxes from polygon rings (used
+whenever a polygon is clipped and its enclosing box must be recomputed). Keeping them small and exact means the
+box/polygon/rbox paths stay consistent by construction rather than by three parallel reimplementations.
 """
 
 from __future__ import annotations
@@ -35,9 +32,8 @@ _AFFINE_SHAPE = (3, 3)
 class GeometricTransform(Protocol):
     """Callable mapping an image and its targets to a transformed pair.
 
-    Implementations must transform ``image`` and ``targets`` jointly so that
-    every modality carried by :class:`~lucid_yolo.data.targets.Targets` stays
-    geometrically consistent with the returned image.
+    Implementations must transform ``image`` and ``targets`` jointly so that every modality carried by
+    :class:`~lucid_yolo.data.targets.Targets` stays geometrically consistent with the returned image.
 
     Examples:
         ```pycon
@@ -57,8 +53,7 @@ class Compose:
     """Apply a sequence of :class:`GeometricTransform` in order.
 
     Args:
-        transforms: The transforms to apply left-to-right. An empty sequence is
-            the identity.
+        transforms: The transforms to apply left-to-right. An empty sequence is the identity.
 
     Examples:
         ```pycon
@@ -94,9 +89,8 @@ class Compose:
 def apply_affine_to_points(points: Tensor, matrix: Tensor) -> Tensor:
     """Apply a homogeneous ``3x3`` transform to a batch of 2-D points.
 
-    Each point ``(x, y)`` is mapped to ``matrix @ [x, y, 1]`` and de-homogenised
-    by its third coordinate, so both affine and projective matrices are handled
-    exactly (for affine matrices the divisor is ``1``).
+    Each point ``(x, y)`` is mapped to ``matrix @ [x, y, 1]`` and de-homogenised by its third coordinate, so both
+    affine and projective matrices are handled exactly (for affine matrices the divisor is ``1``).
 
     Args:
         points: ``(K, 2)`` point coordinates.
@@ -132,12 +126,10 @@ def boxes_from_polygons(polygons: list[Tensor]) -> Tensor:
     """Derive axis-aligned ``xyxy`` boxes as the extent of each polygon ring.
 
     Args:
-        polygons: List of ``(P_i, 2)`` float32 point rings. An empty list yields
-            an empty ``(0, 4)`` box tensor.
+        polygons: List of ``(P_i, 2)`` float32 point rings. An empty list yields an empty ``(0, 4)`` box tensor.
 
     Returns:
-        ``(N, 4)`` float32 boxes, one per input ring, as ``(x_min, y_min, x_max,
-        y_max)``.
+        ``(N, 4)`` float32 boxes, one per input ring, as ``(x_min, y_min, x_max, y_max)``.
 
     Raises:
         ValueError: If any ring is not ``(P, 2)`` or has zero points (no extent).

@@ -1,15 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Task-Aligned Assigner (TAL) for the anchor-free detection head (WP-025).
 
-Transcribed by hand from the Task-aligned One-stage Object Detection paper
-(R4, arXiv:2108.07755) and the reproduction's technical specification section
-3.3.3. TAL replaces IoU-threshold label assignment with a single *alignment*
-metric that couples the classification and localization tasks, so the anchors
-selected as positives are exactly those a jointly-good prediction would fire on.
+Transcribed by hand from the Task-aligned One-stage Object Detection paper (R4, arXiv:2108.07755) and the
+reproduction's technical specification section 3.3.3. TAL replaces IoU-threshold label assignment with a single
+*alignment* metric that couples the classification and localization tasks, so the anchors selected as positives are
+exactly those a jointly-good prediction would fire on.
 
-For a ground-truth box with class ``c`` and an anchor whose predicted class
-probability for ``c`` is ``s`` and whose predicted box has IoU ``u`` with the
-ground truth, the alignment metric is::
+For a ground-truth box with class ``c`` and an anchor whose predicted class probability for ``c`` is ``s`` and whose
+predicted box has IoU ``u`` with the ground truth, the alignment metric is::
 
     t = s ** alpha * u ** beta
 
@@ -21,24 +19,19 @@ with ``alpha = 1`` and ``beta = 6`` (A2). Assignment proceeds per image:
    anchors as positives (``k`` degrades to the eligible count when it is larger).
 3. **Conflict resolution.** An anchor selected by several ground truths is kept
    only for the one giving it the highest ``t``.
-4. **Target normalization.** Positive anchors carry a soft weight rather than a
-   hard 1. Following R4's target-normalization rule, each ground truth's
-   positives are rescaled by ``u_max / t_max`` — the largest IoU over its
-   positives divided by the largest ``t`` over its positives — so the
-   best-aligned anchor of each ground truth reaches a weight of ``u_max`` and
-   the others fall off in proportion to their ``t``.
+4. **Target normalization.** Positive anchors carry a soft weight rather than a hard 1. Following R4's
+   target-normalization rule, each ground truth's positives are rescaled by ``u_max / t_max`` — the largest IoU over
+   its positives divided by the largest ``t`` over its positives — so the best-aligned anchor of each ground truth
+   reaches a weight of ``u_max`` and the others fall off in proportion to their ``t``.
 
-Background convention for the returned tensors: ``gt_index`` and
-``target_labels`` are ``-1``, ``target_boxes`` are zero, and ``align_weights``
-are zero at every non-positive anchor.
+Background convention for the returned tensors: ``gt_index`` and ``target_labels`` are ``-1``, ``target_boxes`` are
+zero, and ``align_weights`` are zero at every non-positive anchor.
 
-Oriented ground truths (WP-061, A25) enter through the optional ``gt_rboxes``
-argument of :meth:`TaskAlignedAssigner.__call__`, which swaps the centre-inside
-test for the point-in-rotated-rect test of
-:func:`~lucid_yolo.data.rotated_geom.points_in_rboxes`. It changes **step 1 only**:
-the alignment metric, the IoU, the returned targets and the weights all keep
-running on the axis-aligned ``gt_boxes``. Omitting the argument leaves every
-tensor operation on the axis-aligned path exactly as it was.
+Oriented ground truths (WP-061, A25) enter through the optional ``gt_rboxes`` argument of
+:meth:`TaskAlignedAssigner.__call__`, which swaps the centre-inside test for the point-in-rotated-rect test of
+:func:`~lucid_yolo.data.rotated_geom.points_in_rboxes`. It changes **step 1 only**: the alignment metric, the IoU,
+the returned targets and the weights all keep running on the axis-aligned ``gt_boxes``. Omitting the argument leaves
+every tensor operation on the axis-aligned path exactly as it was.
 """
 
 from __future__ import annotations
@@ -66,10 +59,9 @@ _RBOX_DIM = 5
 class AssignResult:
     """Per-anchor assignment produced by :class:`TaskAlignedAssigner`.
 
-    All tensors are batched with a leading ``B`` (images) and ``A`` (anchors)
-    axis. A non-positive (background) anchor is marked by ``fg_mask`` being
-    ``False`` and carries the documented background sentinels in the other
-    fields (``-1`` index/label, zero box, zero weight).
+    All tensors are batched with a leading ``B`` (images) and ``A`` (anchors) axis. A non-positive (background) anchor
+    is marked by ``fg_mask`` being ``False`` and carries the documented background sentinels in the other fields
+    (``-1`` index/label, zero box, zero weight).
 
     Attributes:
         fg_mask: ``(B, A)`` bool; ``True`` at positive (foreground) anchors.
@@ -129,11 +121,10 @@ _NATIVE_BOX_IOU = _box_iou_cross
 def _rotated_inside(anchor_points: Tensor, gt_rboxes: Tensor) -> Tensor:
     """Point-in-rotated-rect containment for every GT and anchor; ``(B, N, A)``.
 
-    Calls :func:`~lucid_yolo.data.rotated_geom.points_in_rboxes` once per **image**
-    rather than once on the batch flattened into its box axis. The primitive
-    materializes a ``(P, M, 2)`` offset tensor, so folding ``B`` into ``M`` would grow
-    that intermediate by a factor of ``B`` for anchor/box pairs no image ever reads.
-    The loop is over images — a handful — never over boxes.
+    Calls :func:`~lucid_yolo.data.rotated_geom.points_in_rboxes` once per **image** rather than once on the batch
+    flattened into its box axis. The primitive materializes a ``(P, M, 2)`` offset tensor, so folding ``B`` into ``M``
+    would grow that intermediate by a factor of ``B`` for anchor/box pairs no image ever reads. The loop is over
+    images — a handful — never over boxes.
 
     Args:
         anchor_points: ``(A, 2)`` anchor-centre ``(x, y)`` pixels.
@@ -164,9 +155,8 @@ def _rotated_inside(anchor_points: Tensor, gt_rboxes: Tensor) -> Tensor:
 def _check_rbox_batch(gt_rboxes: Tensor, gt_boxes: Tensor) -> None:
     """Raise :class:`ValueError` unless ``gt_rboxes`` is ``(B, N, 5)`` alongside ``gt_boxes``.
 
-    The rotated ground truths pair one-to-one with the axis-aligned ones: entry
-    ``(b, n)`` of each describes the same object, the rotated one deciding candidacy
-    and the axis-aligned one everything downstream.
+    The rotated ground truths pair one-to-one with the axis-aligned ones: entry ``(b, n)`` of each describes the same
+    object, the rotated one deciding candidacy and the axis-aligned one everything downstream.
 
     Examples:
         ```pycon
@@ -183,22 +173,18 @@ def _check_rbox_batch(gt_rboxes: Tensor, gt_boxes: Tensor) -> None:
 def _check_hyperparameters(alpha: float, beta: float, eps: float) -> None:
     """Raise :class:`ValueError` unless the exponents and the union guard are usable.
 
-    These three are the assigner's numerical safeguards, and each of them has
-    values that switch it off rather than tune it — which is why they are checked
-    here rather than left to fail somewhere downstream as a ``NaN`` weight.
+    These three are the assigner's numerical safeguards, and each of them has values that switch it off rather than tune
+    it — which is why they are checked here rather than left to fail somewhere downstream as a ``NaN`` weight.
 
-    ``eps`` guards the IoU union division (:func:`_box_iou_cross`). At ``eps = 0``
-    a pair of zero-area boxes divides ``0 / 0`` and the IoU comes out ``NaN``
-    instead of the ``0.0`` overlap the guard exists to produce; a negative ``eps``
-    is worse, since it can flip the sign of a small union and hand top-k a
-    *negative* alignment for an anchor that genuinely overlaps.
+    ``eps`` guards the IoU union division (:func:`_box_iou_cross`). At ``eps = 0`` a pair of zero-area boxes divides
+    ``0 / 0`` and the IoU comes out ``NaN`` instead of the ``0.0`` overlap the guard exists to produce; a negative
+    ``eps`` is worse, since it can flip the sign of a small union and hand top-k a *negative* alignment for an anchor
+    that genuinely overlaps.
 
-    A non-finite exponent makes ``t = s**alpha * u**beta`` non-finite at every
-    anchor, so the ranking carries no information at all. A negative one inverts
-    it: the worst-aligned anchor scores highest and top-k reads that as the best
-    candidate, which is a silently wrong assignment rather than a crash. Zero is
-    allowed for either exponent — it drops that factor from the metric, an
-    unusual but coherent request (``beta = 0`` is pure classification alignment).
+    A non-finite exponent makes ``t = s**alpha * u**beta`` non-finite at every anchor, so the ranking carries no
+    information at all. A negative one inverts it: the worst-aligned anchor scores highest and top-k reads that as the
+    best candidate, which is a silently wrong assignment rather than a crash. Zero is allowed for either exponent — it
+    drops that factor from the metric, an unusual but coherent request (``beta = 0`` is pure classification alignment).
 
     Args:
         alpha: Exponent on the classification score; must be finite and ``>= 0``.
@@ -231,26 +217,20 @@ def _check_hyperparameters(alpha: float, beta: float, eps: float) -> None:
 def _check_labels(gt_labels: Tensor, gt_mask: Tensor, num_classes: int) -> None:
     """Raise :class:`ValueError` unless every real ground-truth label names a predicted class.
 
-    :meth:`TaskAlignedAssigner._alignment_metric` gathers each ground truth's
-    predicted score by using its label as a column index, behind a
-    ``clamp(min=0)`` that exists for the padding slots. That clamp silently
-    absorbs a **negative** label: the ground truth is then scored against class 0,
-    assigned on that score, and trained towards its own (different) label, with
-    nothing anywhere reporting it. A label at or above ``num_classes`` is not
-    absorbed but fails inside ``torch.gather`` as an index error that names no
-    tensor a caller would recognise — and on an accelerator, not even reliably at
-    the call that caused it. Checking the range up front turns both into one
-    message naming the bound.
+    :meth:`TaskAlignedAssigner._alignment_metric` gathers each ground truth's predicted score by using its label as a
+    column index, behind a ``clamp(min=0)`` that exists for the padding slots. That clamp silently absorbs a
+    **negative** label: the ground truth is then scored against class 0, assigned on that score, and trained towards its
+    own (different) label, with nothing anywhere reporting it. A label at or above ``num_classes`` is not absorbed but
+    fails inside ``torch.gather`` as an index error that names no tensor a caller would recognise — and on an
+    accelerator, not even reliably at the call that caused it. Checking the range up front turns both into one message
+    naming the bound.
 
-    The two bounds have different scopes, because the gather does. Its index
-    tensor is built from **every** slot, padded ones included — nothing there
-    consults ``gt_mask`` — so the upper bound is a precondition on the whole
-    tensor: a padding slot holding ``num_classes`` fails the gather just as a real
-    one does, whatever the mask says. The lower bound applies to real ground
-    truths only, since that is precisely the case the ``clamp(min=0)`` does not
-    genuinely neutralize: at a padding slot the clamped row is discarded by
-    ``candidate_mask`` and never reaches a target, while at a real one it is kept
-    and scored against class 0. Both tests are vacuously true for an empty batch.
+    The two bounds have different scopes, because the gather does. Its index tensor is built from **every** slot, padded
+    ones included — nothing there consults ``gt_mask`` — so the upper bound is a precondition on the whole tensor: a
+    padding slot holding ``num_classes`` fails the gather just as a real one does, whatever the mask says. The lower
+    bound applies to real ground truths only, since that is precisely the case the ``clamp(min=0)`` does not genuinely
+    neutralize: at a padding slot the clamped row is discarded by ``candidate_mask`` and never reaches a target, while
+    at a real one it is kept and scored against class 0. Both tests are vacuously true for an empty batch.
 
     Args:
         gt_labels: ``(B, N)`` long class ids of the padded ground truths.
@@ -290,10 +270,9 @@ def _check_labels(gt_labels: Tensor, gt_mask: Tensor, num_classes: int) -> None:
 class TaskAlignedAssigner:
     """Task-Aligned label assigner for the anchor-free detection head.
 
-    The assigner is stateless apart from its hyper-parameters and holds no
-    learnable parameters; a single instance is reused across the training run.
-    All work runs under ``torch.no_grad`` — assignment produces targets, never
-    gradients.
+    The assigner is stateless apart from its hyper-parameters and holds no learnable parameters; a single instance is
+    reused across the training run. All work runs under ``torch.no_grad`` — assignment produces targets,
+    never gradients.
 
     Args:
         topk: Number of highest-alignment anchors kept per ground truth. When a
@@ -462,23 +441,19 @@ class TaskAlignedAssigner:
     ) -> AssignResult:
         """Run the unchanged pipeline after the caller has selected its validation boundary.
 
-        Only the CUDA loss recorder disables ``check_labels``: it validates both
-        current label bounds before copying inputs into its masked workspace.
-        Public assignment keeps the checks here, including their error order.
+        Only the CUDA loss recorder disables ``check_labels``: it validates both current label bounds before copying
+        inputs into its masked workspace. Public assignment keeps the checks here, including their error order.
         """
         with torch.no_grad():
             batch, num_anchors = pred_scores.shape[0], pred_scores.shape[1]
-            # Guarded twice, for two costs of the same read. `__debug__`: reading the
-            # verdict is a device sync, the only one the assignment still pays (see
-            # `_resolve_conflicts`), so `python -O` runs sync-free and a bad label
-            # reverts to the silent mis-scoring `_check_labels` describes. `is_compiling`:
-            # under `torch.compile` (WP-184) that same read is a graph break — Dynamo
-            # cannot trace a Python `if` over a tensor value — so the check is skipped
-            # while a compiled region is traced, and since the trace records what ran,
-            # the compiled step never performs it: neither the upper bound nor the
-            # lower bound is checked there, on any batch, the traced first one included.
-            # Public eager calls still check both. The loss recorder validates the current
-            # labels before capture/replay and bypasses only these duplicate checks; the
+            # Guarded twice, for two costs of the same read. `__debug__`: reading the verdict is a device sync, the
+            # only one the assignment still pays (see `_resolve_conflicts`), so `python -O` runs sync-free and a bad
+            # label reverts to the silent mis-scoring `_check_labels` describes. `is_compiling`: under `torch.compile`
+            # (WP-184) that same read is a graph break — Dynamo cannot trace a Python `if` over a tensor value —
+            # so the check is skipped while a compiled region is traced, and since the trace records what ran,
+            # the compiled step never performs it: neither the upper bound nor the lower bound is checked there,
+            # on any batch, the traced first one included. Public eager calls still check both. The loss recorder
+            # validates the current labels before capture/replay and bypasses only these duplicate checks; the
             # existing compiled step continues to rely on in-range loader labels.
             if check_labels and __debug__ and not torch.compiler.is_compiling():
                 _check_labels(gt_labels, gt_mask, pred_scores.shape[-1])
@@ -501,17 +476,14 @@ class TaskAlignedAssigner:
     ) -> Tensor:
         """Eligibility mask ``(B, N, A)``: anchor centre inside a real GT box.
 
-        Subclasses (see :class:`lucid_yolo.assign.stal.SmallTargetAssigner`) override
-        this single step to filter against a surrogate box while leaving every
-        downstream stage on the original ground truth; the base implementation is
-        stateless and ignores ``self``.
+        Subclasses (see :class:`lucid_yolo.assign.stal.SmallTargetAssigner`) override this single step to filter
+        against a surrogate box while leaving every downstream stage on the original ground truth; the base
+        implementation is stateless and ignores ``self``.
 
-        With ``gt_rboxes`` supplied the containment test becomes the
-        point-in-rotated-rect test of
-        :func:`~lucid_yolo.data.rotated_geom.points_in_rboxes` and ``gt_boxes`` is not
-        read here at all — it stays the box every later stage scores against. Both
-        tests are edge-inclusive, so an anchor exactly on a boundary counts as a
-        candidate either way (A25 inherits that choice from the primitive).
+        With ``gt_rboxes`` supplied the containment test becomes the point-in-rotated-rect test of
+        :func:`~lucid_yolo.data.rotated_geom.points_in_rboxes` and ``gt_boxes`` is not read here at all — it stays
+        the box every later stage scores against. Both tests are edge-inclusive, so an anchor exactly on a boundary
+        counts as a candidate either way (A25 inherits that choice from the primitive).
         """
         if gt_rboxes is not None:
             _check_rbox_batch(gt_rboxes, gt_boxes)
@@ -535,8 +507,8 @@ class TaskAlignedAssigner:
     ) -> tuple[Tensor, Tensor]:
         """Alignment metric ``t`` and cross IoU, both ``(B, N, A)``.
 
-        ``t`` is zeroed outside the candidate set so it can feed top-k directly;
-        the raw (unmasked) IoU is returned for the target normalization.
+        ``t`` is zeroed outside the candidate set so it can feed top-k directly; the raw (unmasked) IoU is returned
+        for the target normalization.
         """
         if _box_iou_cross is _NATIVE_BOX_IOU:
             fused = _cuda_metric(
@@ -556,20 +528,16 @@ class TaskAlignedAssigner:
     def _select_topk(self, align_metric: Tensor, candidate_mask: Tensor) -> Tensor:
         """Keep each GT's top-``k`` anchors by alignment; ``(B, N, A)`` bool.
 
-        Non-candidates are pushed *below* every candidate before the ranking rather
-        than merely zeroed alongside them. Zeroing alone is not enough: ``t`` is zero
-        at a candidate too whenever the prediction misses its ground truth entirely —
-        the state a freshly initialized head is in, since :func:`decode_ltrb` applies
-        no non-negativity and inverted distances decode to zero-IoU boxes. With the
-        whole row tied at zero, ``topk`` fills its ``k`` slots from the global tie
-        order, which need not contain a single one of *this* ground truth's
-        candidates, and the intersection below then returns zero positives for a
-        ground truth that had several. Filling non-candidates with ``-1`` (the
-        sentinel :meth:`_resolve_conflicts` already uses, and safe because ``t`` is
-        non-negative by construction) makes the ranking pick candidates first, so a
-        ground truth with ``c`` candidates always keeps ``min(k, c)`` of them. The
-        intersection with ``candidate_mask`` still matters when ``k`` exceeds ``c``:
-        those surplus slots land on the ``-1`` fill and are dropped here.
+        Non-candidates are pushed *below* every candidate before the ranking rather than merely zeroed alongside them.
+        Zeroing alone is not enough: ``t`` is zero at a candidate too whenever the prediction misses its ground truth
+        entirely — the state a freshly initialized head is in, since :func:`decode_ltrb` applies no non-negativity and
+        inverted distances decode to zero-IoU boxes. With the whole row tied at zero, ``topk`` fills its ``k`` slots
+        from the global tie order, which need not contain a single one of *this* ground truth's candidates, and the
+        intersection below then returns zero positives for a ground truth that had several. Filling non-candidates with
+        ``-1`` (the sentinel :meth:`_resolve_conflicts` already uses, and safe because ``t`` is non-negative by
+        construction) makes the ranking pick candidates first, so a ground truth with ``c`` candidates always keeps
+        ``min(k, c)`` of them. The intersection with ``candidate_mask`` still matters when ``k`` exceeds ``c``: those
+        surplus slots land on the ``-1`` fill and are dropped here.
         """
         k = min(self.topk, align_metric.shape[-1])
         ranked = align_metric.masked_fill(~candidate_mask, -1.0)  # (B, N, A)
@@ -582,18 +550,14 @@ class TaskAlignedAssigner:
     def _resolve_conflicts(mask_pos: Tensor, align_metric: Tensor) -> Tensor:
         """Give each anchor to the highest-``t`` GT that selected it; ``(B, N, A)``.
 
-        Resolution runs unconditionally, with no early exit for the common case in
-        which no anchor was claimed twice. That skip is decidable —
-        ``selected_per_anchor.max() <= 1`` settles it — but only on the *host*, so
-        taking it costs a device sync on every assignment call to save work the
-        ``torch.where`` below already discards anchor by anchor. Measured at
-        640-input shapes (``B=16``, ``A=8400``, ``N=20``, four repeats of a
-        median-of-50 over the public ``__call__``): dropping the sync is 2-5%
-        faster on MPS in both the contested and the uncontested regime, and within
-        run-to-run noise on CPU, where the delta flips sign across repeats. The two
-        forms are bit-identical on every returned field — with nothing contested,
-        ``contested`` is all-``False`` and ``torch.where`` returns ``mask_pos``
-        untouched — so the skip was only ever an optimization, and a negative one.
+        Resolution runs unconditionally, with no early exit for the common case in which no anchor was claimed twice.
+        That skip is decidable — ``selected_per_anchor.max() <= 1`` settles it — but only on the *host*, so taking it
+        costs a device sync on every assignment call to save work the ``torch.where`` below already discards anchor
+        by anchor. Measured at 640-input shapes (``B=16``, ``A=8400``, ``N=20``, four repeats of a median-of-50 over
+        the public ``__call__``): dropping the sync is 2-5% faster on MPS in both the contested and the uncontested
+        regime, and within run-to-run noise on CPU, where the delta flips sign across repeats. The two forms are
+        bit-identical on every returned field — with nothing contested, ``contested`` is all-``False`` and
+        ``torch.where`` returns ``mask_pos`` untouched — so the skip was only ever an optimization, and a negative one.
         """
         fused = _cuda_conflicts(mask_pos, align_metric)
         if fused is not None:
@@ -603,10 +567,9 @@ class TaskAlignedAssigner:
         contested = (selected_per_anchor > 1).unsqueeze(1)  # (B, 1, A)
         masked_align = align_metric.masked_fill(~mask_pos, -1.0)
         best_gt = masked_align.argmax(dim=1)  # (B, A) — a GT that selected the anchor
-        # A one-hot over the GT axis, written as a comparison rather than
-        # `F.one_hot(best_gt, num_gt)`: `one_hot` takes its class count as a concrete
-        # Python int, which pins `N` to one value inside a compiled graph (WP-184) and
-        # recompiles the step for every distinct padded instance count. Same values.
+        # A one-hot over the GT axis, written as a comparison rather than `F.one_hot(best_gt, num_gt)`: `one_hot`
+        # takes its class count as a concrete Python int, which pins `N` to one value inside a compiled graph (WP-184)
+        # and recompiles the step for every distinct padded instance count. Same values.
         gt_index = torch.arange(num_gt, device=best_gt.device).view(1, -1, 1)
         is_best = best_gt.unsqueeze(1) == gt_index  # (B, N, A)
         return torch.where(contested, is_best & mask_pos, mask_pos)
@@ -614,12 +577,11 @@ class TaskAlignedAssigner:
     def _finalize_mask(self, mask_pos: Tensor, align_metric: Tensor) -> Tensor:
         """Post-conflict hook on the positive mask; base assigner is a no-op.
 
-        Runs after conflict resolution and immediately before the targets are
-        gathered, so it sees a mask in which every anchor already belongs to at
-        most one ground truth. The base implementation returns ``mask_pos``
-        unchanged and ignores ``self``; subclasses override this single seam to
-        reduce the mask further (see :class:`lucid_yolo.assign.one_to_one.UniqueAssigner`,
-        which keeps a single positive per ground truth for the one-to-one branch).
+        Runs after conflict resolution and immediately before the targets are gathered, so it sees a mask in which
+        every anchor already belongs to at most one ground truth. The base implementation returns ``mask_pos`` unchanged
+        and ignores ``self``; subclasses override this single seam to reduce the mask further (see
+        :class:`lucid_yolo.assign.one_to_one.UniqueAssigner`, which keeps a single positive per ground truth for the
+        one-to-one branch).
 
         Args:
             mask_pos: ``(B, N, A)`` bool positive mask after conflict resolution.
@@ -658,15 +620,13 @@ class TaskAlignedAssigner:
         iou_pos = iou * mask_pos_f
         t_max = align_pos.amax(dim=-1, keepdim=True)  # (B, N, 1)
         u_max = iou_pos.amax(dim=-1, keepdim=True)  # (B, N, 1)
-        # The denominator is floored at the dtype's smallest normal, not at ``self.eps``.
-        # ``t_max = s * u_max**6`` collapses as the sixth power of the overlap, so any
-        # *absolute* floor is eventually larger than the quantity it guards: at IoU 0.01,
-        # ``t_max`` is ~5e-13 and a 1e-9 floor shrinks every one of that ground truth's
-        # weights by ~2000x, training a positive as background while ``fg_mask`` still
-        # calls it foreground. Flooring at ``tiny`` only ever guards a true 0/0, and there
-        # ``align_pos`` is zero too (``t_max`` is its own row maximum), so the product is
-        # zero rather than NaN. Sub-normal ``t_max`` — IoU below ~1e-6 — still under-scales,
-        # but such a positive carries a vanishing ``u_max`` weight either way.
+        # The denominator is floored at the dtype's smallest normal, not at ``self.eps``. ``t_max = s * u_max**6``
+        # collapses as the sixth power of the overlap, so any *absolute* floor is eventually larger than the quantity it
+        # guards: at IoU 0.01, ``t_max`` is ~5e-13 and a 1e-9 floor shrinks every one of that ground truth's weights
+        # by ~2000x, training a positive as background while ``fg_mask`` still calls it foreground. Flooring at ``tiny``
+        # only ever guards a true 0/0, and there ``align_pos`` is zero too (``t_max`` is its own row maximum), so the
+        # product is zero rather than NaN. Sub-normal ``t_max`` — IoU below ~1e-6 — still under-scales, but such a
+        # positive carries a vanishing ``u_max`` weight either way.
         floor = torch.finfo(align_pos.dtype).tiny
         norm_align = align_pos * (u_max / t_max.clamp(min=floor))  # (B, N, A)
         align_weights = norm_align.amax(dim=1)  # (B, A); one owning GT per anchor

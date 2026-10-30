@@ -1,20 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """Model-card audit: the wiring-gate figure a card prints is the one in the golden it cites.
 
-Each ``docs/model_cards/*.md`` states, on one line, what ``scripts/overfit_micro.py`` measures
-for its task: a bold ``**value ± tolerance**`` pair and the golden that records it, written
-``goldens/gpu/overfit_micro_<task>.json``. The figures were copied by hand, and the goldens
-were resealed under them (WP-186) without the cards following, so three cards disagreed with
-their goldens while every gate stayed green.
+Each ``docs/model_cards/*.md`` states, on one line, what ``scripts/overfit_micro.py`` measures for its task: a
+bold ``**value ± tolerance**`` pair and the golden that records it, written ``goldens/gpu/overfit_micro_<task>.json``.
+The figures were copied by hand, and the goldens were resealed under them (WP-186) without the cards following,
+so three cards disagreed with their goldens while every gate stayed green.
 
-The anchor is that one line -- the one naming a ``goldens/gpu/overfit_micro_*.json`` file --
-and only its bold pair is compared. A historical figure ("first stood at 0.3357 in WP-132")
-is plain text beside a work-package link, so it is exempt by construction: it describes the
-past and is allowed to differ from the present golden. A card prints its figure to the
-precision it chooses, so the golden is rounded to the card's own decimals before comparing.
+The anchor is that one line -- the one naming a ``goldens/gpu/overfit_micro_*.json`` file -- and only its bold
+pair is compared. A historical figure ("first stood at 0.3357 in WP-132") is plain text beside a work-package
+link, so it is exempt by construction: it describes the past and is allowed to differ from the present golden. A card
+prints its figure to the precision it chooses, so the golden is rounded to the card's own decimals before comparing.
 
-Run ``python scripts/lint/audit_model_card_figures.py`` (exit ``0`` clean, ``1`` on any
-disagreement). ``--repo-root`` points it at another tree; the tests use throwaway ones.
+Run ``python scripts/lint/audit_model_card_figures.py`` (exit ``0`` clean, ``1`` on any disagreement). ``--repo-root``
+points it at another tree; the tests use throwaway ones.
 """
 
 from __future__ import annotations
@@ -70,8 +68,8 @@ def check_line(line: str, repo_root: Path) -> list[str]:
         repo_root: Repository root the cited path is resolved against.
 
     Returns:
-        One message per disagreement, or per structural problem (no single bold pair, an
-        unreadable golden, a golden without exactly one tolerance).
+        One message per disagreement, or per structural problem (no single bold pair, an unreadable golden, a
+        golden without exactly one tolerance).
 
     Examples:
         >>> import json, tempfile
@@ -108,8 +106,8 @@ def check_line(line: str, repo_root: Path) -> list[str]:
 def check_card(card: Path, repo_root: Path) -> list[str]:
     """Every wiring-gate disagreement on one card, each prefixed with ``<card>:<line>``.
 
-    A card that cites no ``goldens/gpu/overfit_micro_*.json`` at all is itself a finding:
-    the figure it should carry has nothing to be checked against.
+    A card that cites no ``goldens/gpu/overfit_micro_*.json`` at all is itself a finding: the figure it should carry
+    has nothing to be checked against.
 
     Examples:
         >>> import tempfile

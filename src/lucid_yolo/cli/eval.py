@@ -7,23 +7,20 @@ One command, no task flag::
     lucid-eval --checkpoint runs/obb.ckpt --data_root /data/dota_tiles --split val
 
 Which protocol runs is read from the checkpoint's ``task``: ``detect`` and ``segment``
-take :mod:`lucid_yolo.eval.detect_eval` (dual-path COCO, with the twelve ``segm_``
-statistics when the checkpoint has a mask branch), ``obb`` takes
-:mod:`lucid_yolo.eval.rotated_eval` (rotated mAP, reported per tile **and** per whole
-source image once the tiles are merged, WP-107), and ``keypoints`` takes
-:mod:`lucid_yolo.eval.pose_eval` (box AP against the person-keypoints ground truth plus
-the ten ``oks_`` statistics, WP-134). That is the rule the
-detection evaluator already applied to masks — "driven by the checkpoint's own task, not
-by a flag the caller has to remember" — one level up: a caller who names the wrong task
-gets a wrong report, and a caller who names none cannot.
+take :mod:`lucid_yolo.eval.detect_eval` (dual-path COCO, with the twelve ``segm_`` statistics when the checkpoint has a
+mask branch), ``obb`` takes :mod:`lucid_yolo.eval.rotated_eval` (rotated mAP, reported per tile **and** per whole
+source image once the tiles are merged, WP-107), and ``keypoints`` takes :mod:`lucid_yolo.eval.pose_eval` (box AP
+against the person-keypoints ground truth plus the ten ``oks_`` statistics, WP-134). That is the rule the detection
+evaluator already applied to masks — "driven by the checkpoint's own task, not by a flag the caller has to remember"
+— one level up: a caller who names the wrong task gets a wrong report, and a caller who names none cannot.
 
-``img_size`` and ``batch_size`` follow the same source. Both stay unset until the task is
-known, so an oriented run gets the tier's 1024 px crop side and a COCO run gets 640, and
-neither caller has to remember which; an explicit value always wins.
+``img_size`` and ``batch_size`` follow the same source. Both stay unset until the task is known, so an oriented run
+gets the tier's 1024 px crop side and a COCO run gets 640, and neither caller has to remember which; an explicit
+value always wins.
 
-Explicit protocol-specific arguments are refused when the checkpoint's task does not
-use them. Unset arguments retain the protocol's defaults. COCO annotation and image
-paths can be overridden independently without changing the default val2017 layout.
+Explicit protocol-specific arguments are refused when the checkpoint's task does not use them. Unset arguments
+retain the protocol's defaults. COCO annotation and image paths can be overridden independently without changing the
+default val2017 layout.
 
 Provenance: R1 Table 7, R1 sec. 4.4; R18 sec. 4. Assumptions: A9, A10, A37, A46, A47, A48.
 """
@@ -49,19 +46,17 @@ if TYPE_CHECKING:
 
 __all__ = ["DEFAULT_BATCH_SIZE", "DEFAULT_IMG_SIZE", "evaluate", "main"]
 
-#: Row order of the two tables below: the oriented task first, then every other task in
-#: registry order. Kept rather than tidied because the order is visible: ``lucid-eval``,
-#: ``lucid-predict`` and ``lucid-export`` list these keys, in this order, in the refusal
-#: they raise for an unknown task.
+#: Row order of the two tables below: the oriented task first, then every other task in registry order. Kept rather
+#: than tidied because the order is visible: ``lucid-eval``, ``lucid-predict`` and ``lucid-export`` list these keys,
+#: in this order, in the refusal they raise for an unknown task.
 _TABLE_ORDER: tuple[Task, ...] = (Task.OBB, *(task for task in Task if task is not Task.OBB))
 
 #: Letterbox side used when ``img_size`` is not given, per checkpoint task, read off
-#: :attr:`~lucid_yolo.tasks.TaskSpec.img_size`. The oriented tier trains on 1024 px crops
-#: (R18 sec. 4); COCO runs at 640 (R1 sec. 4.4).
+#: :attr:`~lucid_yolo.tasks.TaskSpec.img_size`. The oriented tier trains on 1024 px crops (R18 sec. 4);
+#: COCO runs at 640 (R1 sec. 4.4).
 DEFAULT_IMG_SIZE: dict[str, int] = {task.value: task.spec.img_size for task in _TABLE_ORDER}
-#: Batch size used when ``batch_size`` is not given, read off
-#: :attr:`~lucid_yolo.tasks.TaskSpec.eval_batch_size`. A 1024 px tile is 2.5x the pixels
-#: of a 640 px image, so the oriented default is smaller for the same memory.
+#: Batch size used when ``batch_size`` is not given, read off :attr:`~lucid_yolo.tasks.TaskSpec.eval_batch_size`.
+#: A 1024 px tile is 2.5x the pixels of a 640 px image, so the oriented default is smaller for the same memory.
 DEFAULT_BATCH_SIZE: dict[str, int] = {task.value: task.spec.eval_batch_size for task in _TABLE_ORDER}
 
 
@@ -76,24 +71,19 @@ _EVAL_OPTIONS: dict[Task, frozenset[str]] = {
 def _resolve_eval_backend(requested: str) -> tuple[str, str | None]:
     """Resolve the box/segm scoring engine, per WP-138's own "safe to default" call.
 
-    hotcoco ships prebuilt wheels for this project's real target platforms
-    (macOS/Linux/Windows, cp39-abi3), which is why ``"auto"`` — the default —
-    picks it without hedging. The fallback exists for what R36 documented rather
-    than what is expected here: no musllinux wheel, so an
-    Alpine-style deploy falls back to a source build that needs a Rust
-    toolchain this project has no way to guarantee. An explicit
-    ``eval_backend="hotcoco"`` is a stated requirement, not a preference, and
-    raises rather than silently substituting an engine the caller did not ask
-    for — the same "explicit override wins, and is trusted" shape
-    ``--data.layout`` already has (A63).
+    hotcoco ships prebuilt wheels for this project's real target platforms (macOS/Linux/Windows, cp39-abi3),
+    which is why ``"auto"`` — the default — picks it without hedging. The fallback exists for what R36 documented
+    rather than what is expected here: no musllinux wheel, so an Alpine-style deploy falls back to a source build
+    that needs a Rust toolchain this project has no way to guarantee. An explicit ``eval_backend="hotcoco"`` is a
+    stated requirement, not a preference, and raises rather than silently substituting an engine the caller did not
+    ask for — the same "explicit override wins, and is trusted" shape ``--data.layout`` already has (A63).
 
     Args:
         requested: ``"auto"``, ``"hotcoco"`` or ``"faster_coco_eval"``.
 
     Returns:
-        ``(engine, fallback_reason)`` — ``fallback_reason`` is ``None`` unless
-        ``"auto"`` fell back, in which case it is hotcoco's own probe failure,
-        recorded in the report rather than only printed.
+        ``(engine, fallback_reason)`` — ``fallback_reason`` is ``None`` unless ``"auto"`` fell back, in which
+        case it is hotcoco's own probe failure, recorded in the report rather than only printed.
 
     Examples:
         ```pycon
@@ -117,20 +107,18 @@ def _resolve_eval_backend(requested: str) -> tuple[str, str | None]:
 def _check_arguments(batch_size: int | None, img_size: int | None, limit: int) -> None:
     """Refuse the argument values the three protocols below would otherwise run on.
 
-    One check at the single entry point all three pass through, rather than one per
-    protocol: :mod:`~lucid_yolo.eval.detect_eval`, :mod:`~lucid_yolo.eval.pose_eval` and
-    :mod:`~lucid_yolo.eval.rotated_eval` each read ``limit`` and ``batch_size`` in their
-    own idiom, and three copies of one rule are three chances for one to be edited alone.
-    What those idioms do with a value outside its domain is why this is not merely tidy.
-    ``if limit:`` is true for ``-5``, so ``images[:-5]`` scores every image *but* the last
-    five while the banner prints the truncated count as though it were the request; on the
-    oriented path ``len(predictions) >= -5`` holds after the first batch, so the run breaks
-    out immediately and reports a number from a handful of tiles; and
-    ``math.ceil(len(images) / 0)`` raises from inside the progress-bar construction rather
-    than at the flag that caused it.
+    One check at the single entry point all three pass through, rather than one per protocol:
+    :mod:`~lucid_yolo.eval.detect_eval`, :mod:`~lucid_yolo.eval.pose_eval` and :mod:`~lucid_yolo.eval.rotated_eval`
+    each read ``limit`` and ``batch_size`` in their own idiom, and three copies of one rule are three chances for
+    one to be edited alone. What those idioms do with a value outside its domain is why this is not merely tidy.
+    ``if limit:`` is true for ``-5``, so ``images[:-5]`` scores every image *but* the last five while the banner
+    prints the truncated count as though it were the request; on the oriented path ``len(predictions) >= -5`` holds
+    after the first batch, so the run breaks out immediately and reports a number from a handful of tiles; and
+    ``math.ceil(len(images) / 0)`` raises from inside the progress-bar construction rather than at the flag
+    that caused it.
 
-    ``None`` is not a value here but "unset": both defaults are resolved from the
-    checkpoint's own task once it is known, out of tables this module owns.
+    ``None`` is not a value here but "unset": both defaults are resolved from the checkpoint's own task once it is
+    known, out of tables this module owns.
 
     Args:
         batch_size: The caller's ``batch_size``, or ``None`` to take the task default.
@@ -138,8 +126,8 @@ def _check_arguments(batch_size: int | None, img_size: int | None, limit: int) -
         limit: The caller's ``limit``; ``0`` scores everything.
 
     Raises:
-        ValueError: If ``limit`` is negative, if ``batch_size`` is below ``1``, or if
-            ``img_size`` is not a positive multiple of every head stride.
+        ValueError: If ``limit`` is negative, if ``batch_size`` is below ``1``, or if ``img_size`` is not a positive
+            multiple of every head stride.
 
     Examples:
         ```pycon
@@ -311,21 +299,19 @@ def evaluate(  # noqa: PLR0913 - Explicit CLI options supply jsonargparse's flag
         device: ``auto``, ``cpu``, ``mps`` or ``cuda``.
         limit: Score only the first N images or tiles; ``0`` scores all.
         output: Write the JSON report here.
-        eval_backend: COCO box/mask scoring engine; defaults to auto, which prefers
-            hotcoco and falls back to faster_coco_eval when unavailable. An explicit
-            engine must be usable. OBB does not accept this option. Keypoint OKS
-            statistics always use faster_coco_eval.
-        ann_file: COCO only; annotation JSON path. Defaults to annotations/instances_val2017.json
-            under data_root, or annotations/person_keypoints_val2017.json for keypoints.
+        eval_backend: COCO box/mask scoring engine; defaults to auto, which prefers hotcoco and falls back to
+            faster_coco_eval when unavailable. An explicit engine must be usable. OBB does not accept this option.
+            Keypoint OKS statistics always use faster_coco_eval.
+        ann_file: COCO only; annotation JSON path. Defaults to annotations/instances_val2017.json under data_root,
+            or annotations/person_keypoints_val2017.json for keypoints.
         images_dir: COCO only; image directory. Defaults to val2017 under data_root.
 
     Returns:
         The protocol's exit code.
 
     Raises:
-        ValueError: If ``limit``, ``batch_size`` or ``img_size`` is outside its domain
-            (:func:`_check_arguments`), the checkpoint's task is unsupported, or an
-            explicit option is unused by that task.
+        ValueError: If ``limit``, ``batch_size`` or ``img_size`` is outside its domain (:func:`_check_arguments`),
+            the checkpoint's task is unsupported, or an explicit option is unused by that task.
 
     Examples:
         ```pycon
@@ -335,8 +321,8 @@ def evaluate(  # noqa: PLR0913 - Explicit CLI options supply jsonargparse's flag
 
         ```
 
-        The arguments are checked before the checkpoint is opened, so a refused flag
-        costs nothing and names itself rather than the file it never got to:
+        The arguments are checked before the checkpoint is opened, so a refused flag costs nothing and names
+        itself rather than the file it never got to:
 
         ```pycon
         >>> evaluate(Path("/nonexistent.ckpt"), Path("/data"), limit=-5)
@@ -354,8 +340,8 @@ def evaluate(  # noqa: PLR0913 - Explicit CLI options supply jsonargparse's flag
     # makes each protocol choice explicit; tests/test_tasks.py::TestTask pins the
     # declared members, and tests/cli/test_task_dispatch.py pins table exhaustiveness.
     require_one_of("task", task, tuple(DEFAULT_IMG_SIZE))
-    # None distinguishes omission from explicitly passing even a protocol's default,
-    # including values supplied by --config. Validate before backend setup or scoring.
+    # None distinguishes omission from explicitly passing even a protocol's default, including values supplied by
+    # --config. Validate before backend setup or scoring.
     options = _EVAL_OPTIONS[Task(task)]
     for name, value in (
         ("split", split),

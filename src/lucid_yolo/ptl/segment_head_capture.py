@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Record segmentation prediction groups at their native gradient boundaries.
 
-Box/class predictions, mask coefficients, prototypes and semantic logits have
-separate backward nodes. In particular, an unused coefficient or prototype
-output leaves its parameters' gradients absent, as the native empty-mask path
-does. No assignment, loss or optimizer expression is recorded or rewritten.
+Box/class predictions, mask coefficients, prototypes and semantic logits have separate backward nodes. In particular,
+an unused coefficient or prototype output leaves its parameters' gradients absent, as the native empty-mask path does.
+No assignment, loss or optimizer expression is recorded or rewritten.
 """
 
 from __future__ import annotations
@@ -124,9 +123,8 @@ def _stage_breach(owner: nn.Module, modules: tuple[nn.Module, ...] | None = None
 def _members(owner: nn.Module) -> tuple[tuple[nn.Module, ...], tuple[Tensor, ...], tuple[Tensor, ...]]:
     """Enumerate current topology once for the three checks that consume it.
 
-    Direct registries have the same preorder and identity deduplication as
-    ``named_parameters``/``named_buffers``. Nothing is cached across calls: a
-    replacement, alias or child-order change still reaches the certificate.
+    Direct registries have the same preorder and identity deduplication as ``named_parameters``/``named_buffers``.
+    Nothing is cached across calls: a replacement, alias or child-order change still reaches the certificate.
     """
     modules = tuple(owner.modules())
     params = {id(p): p for module in modules for p in module._parameters.values() if p is not None}
@@ -137,8 +135,8 @@ def _members(owner: nn.Module) -> tuple[tuple[nn.Module, ...], tuple[Tensor, ...
 def _parameter_breach(parameters: tuple[Tensor, ...], buffers: tuple[Tensor, ...], device: torch.device) -> str | None:
     """Read live tensor contracts and hooks independently of the attribute certificate.
 
-    Lazy negative/conjugate views can change values with the same pointer and
-    strides. Keep them native rather than replaying their earlier dispatch bits.
+    Lazy negative/conjugate views can change values with the same pointer and strides. Keep them native rather than
+    replaying their earlier dispatch bits.
     """
     if not parameters or any(
         type(x) not in (Tensor, nn.Parameter)
@@ -213,10 +211,10 @@ class _RecordedGroup:
     def run(self, inputs: _Tensors) -> _Tensors:
         """Replay once, or preserve the static activations a previous backward still needs.
 
-        Live gradients leave the group's static gradient buffers at forward time, before the
-        replay (:func:`~lucid_yolo.ptl._graph_replay.copy_out_live_gradients`). The hold keeps
-        any other replay of this group from running before this one's backward, so nothing can
-        alias those buffers again before that backward writes them; the post-hook releases it.
+        Live gradients leave the group's static gradient buffers at forward time, before the replay
+        (:func:`~lucid_yolo.ptl._graph_replay.copy_out_live_gradients`). The hold keeps any other replay of this
+        group from running before this one's backward, so nothing can alias those buffers again before that backward
+        writes them; the post-hook releases it.
         """
         if self.pending_backward or _input_signature(inputs) != self.signature or self.spans.reached_by(list(inputs)):
             return self.adapter.eager(inputs)
@@ -277,9 +275,9 @@ def _feature_breach(features: _Tensors, precision: tuple[object, ...]) -> str | 
 class _AttributePlan:
     """Retain attribute bindings while independently checking mutable registries and sequences.
 
-    Stored values stay alive, so a fresh object cannot reuse a recorded identity.
-    Tensor identities/storage, hooks, precision and class dispatch are checked
-    separately on every call; an unchanged dictionary object certifies none of them.
+    Stored values stay alive, so a fresh object cannot reuse a recorded identity. Tensor identities/storage, hooks,
+    precision and class dispatch are checked separately on every call; an unchanged dictionary object
+    certifies none of them.
     """
 
     def __init__(self, modules: tuple[nn.Module, ...]) -> None:
@@ -315,19 +313,18 @@ class _AttributePlan:
 class _SegmentHeadCapture:
     """Own at most sixteen recordings, discarded by copying, serialization and the fit lifecycle.
 
-    The model keeps its original modules and state-dict keys. Recording wrappers
-    live only in this ordinary Python holder; no live module forward is replaced.
+    The model keeps its original modules and state-dict keys. Recording wrappers live only in this ordinary Python
+    holder; no live module forward is replaced.
 
-    A replayed group's ``coefficients``, ``prototypes`` and ``semantic`` outputs are the graphed callable's
-    static CUDA-graph tensors, not copies; the box and class predictions are concatenation copies. The next
-    replay of that group overwrites them in place, so a consumer must finish with them, and with any ``.grad``
-    adopted from their backward, inside the training step that produced them and clone whatever it keeps
-    across steps.
+    A replayed group's ``coefficients``, ``prototypes`` and ``semantic`` outputs are the graphed callable's static
+    CUDA-graph tensors, not copies; the box and class predictions are concatenation copies. The next replay of that
+    group overwrites them in place, so a consumer must finish with them, and with any ``.grad`` adopted from their
+    backward, inside the training step that produced them and clone whatever it keeps across steps.
 
-    Each prediction group records the input signature of its first eligible call once per fit: shape, stride,
-    dtype, device, gradient flag and CUDA stream. A call with any other signature, a partial batch included,
-    runs the native routine and records nothing more, while the recorded graphs keep their private pools
-    reserved until the fit ends.
+    Each prediction group records the input signature of its first eligible call once per fit: shape, stride, dtype,
+    device, gradient flag and CUDA stream. A call with any other signature, a partial batch included, runs the
+    native routine and records nothing more, while the recorded graphs keep their private pools reserved until the
+    fit ends.
 
     Examples:
         ```pycon
@@ -347,8 +344,8 @@ class _SegmentHeadCapture:
     def clear(self) -> None:
         """Reset the holder, then drain recorded streams before their private pools are released.
 
-        The reset comes first, so a failing drain still leaves an empty holder; the recordings stay
-        alive in a local reference until every stream they ran on has finished.
+        The reset comes first, so a failing drain still leaves an empty holder; the recordings stay alive in a local
+        reference until every stream they ran on has finished.
         """
         entries = getattr(self, "entries", {})
         self.entries: dict[tuple[int, str], _RecordedGroup] = {}

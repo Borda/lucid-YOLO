@@ -9,77 +9,62 @@ One command, no task flag::
     lucid-predict --checkpoint runs/obb.ckpt --image aerial.png --output rboxes.json
     lucid-predict --checkpoint runs/pose.ckpt --image street.jpg --output poses.json
 
-The task is read from the checkpoint, exactly as ``lucid-eval`` reads it: a caller who
-names the wrong task gets a wrong answer, and a caller who names none cannot. A
-``detect`` checkpoint answers with boxes, a ``segment`` one additionally with each
-detection's instance mask, an ``obb`` one with rotated boxes, and a ``keypoints`` one with
-each detection's point set, through the four entry points of :mod:`lucid_yolo.predict`.
-Which of the four runs is decided here, once, from the checkpoint's own task; each entry
-point additionally refuses the other three by name, because
-:meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward` would happily return
-axis-aligned boxes for any of them. The keypoint branch arrived at WP-152, a release
-after the task it serves: until then the dispatch's final ``else`` was detection, written
-before a fourth task existed.
+The task is read from the checkpoint, exactly as ``lucid-eval`` reads it: a caller who names the wrong task gets a
+wrong answer, and a caller who names none cannot. A ``detect`` checkpoint answers with boxes, a ``segment`` one
+additionally with each detection's instance mask, an ``obb`` one with rotated boxes, and a ``keypoints`` one with each
+detection's point set, through the four entry points of :mod:`lucid_yolo.predict`. Which of the four runs is
+decided here, once, from the checkpoint's own task; each entry point additionally refuses the other three by name,
+because :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward` would happily return axis-aligned boxes for any of
+them. The keypoint branch arrived at WP-152, a release after the task it serves: until then the dispatch's final
+``else`` was detection, written before a fourth task existed.
 
-``--ema``, ``--device`` and ``--output`` keep ``lucid-eval``'s spellings and semantics,
-so the two commands cannot disagree about what a flag means. ``--img_size`` defaults from
-the checkpoint's task through the same :data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE`
-table, rather than restating ``640`` here.
+``--ema``, ``--device`` and ``--output`` keep ``lucid-eval``'s spellings and semantics, so the two commands cannot
+disagree about what a flag means. ``--img_size`` defaults from the checkpoint's task through the same
+:data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE` table, rather than restating ``640`` here.
 
 Assumptions:
-    The roadmap row says nothing about output shape, so: stdout gets one line per
-    detection, and ``--output`` writes a JSON object ``{"info", "image", "decoder",
-    "conf_threshold", "masks", "detections"}``, plus an optional ``boxes`` or
-    ``keypoints`` key on the reports that have one (below), whose ``detections`` are records of ``box``
-    (``xyxy``, original-image pixels), ``score`` and ``label`` — mirroring
-    ``lucid-eval``'s report, which also nests the checkpoint provenance under ``info``.
-    Labels are contiguous class indices; a single image carries no category map. The
-    parent directory of ``--output`` is created, which is WP-105's fix and not a
-    convenience: the expensive part has already run by the time the file is written.
+    The roadmap row says nothing about output shape, so: stdout gets one line per detection, and ``--output``
+    writes a JSON object ``{"info", "image", "decoder", "conf_threshold", "masks", "detections"}``, plus an optional
+    ``boxes`` or ``keypoints`` key on the reports that have one (below), whose ``detections`` are records of ``box``
+    (``xyxy``, original-image pixels), ``score`` and ``label`` — mirroring ``lucid-eval``'s report, which also
+    nests the checkpoint provenance under ``info``. Labels are contiguous class indices; a single image carries no
+    category map. The parent directory of ``--output`` is created, which is WP-105's fix and not a convenience: the
+    expensive part has already run by the time the file is written.
 
-    Masks ride in that same file as **COCO RLE** — each segmentation record gains a
-    ``segmentation`` of ``{"size": [height, width], "counts": "..."}`` — and the report's
-    top-level ``masks`` key names the encoding (``"coco-rle"``, or ``null`` for a
-    detection checkpoint), so a reader learns what it is holding from the file rather
-    than from this docstring. The encoder is
-    :func:`faster_coco_eval.mask.encode`, already a direct dependency and already the
-    encoder every ``segm_`` statistic is measured through, so a predicted mask on disk
+    Masks ride in that same file as **COCO RLE** — each segmentation record gains a ``segmentation`` of
+    ``{"size": [height, width], "counts": "..."}`` — and the report's top-level ``masks`` key names the encoding
+    (``"coco-rle"``, or ``null`` for a detection checkpoint), so a reader learns what it is holding from the file
+    rather than from this docstring. The encoder is :func:`faster_coco_eval.mask.encode`, already a direct dependency
+    and already the encoder every ``segm_`` statistic is measured through, so a predicted mask on disk
     and a scored mask are the same object in the same format. Nothing here invents one.
 
-    The alternatives were weighed and lost: a polygon contour needs a contour tracer and
-    is lossy on masks with holes, which the box crop routinely produces; a sidecar
-    ``.npz`` splits one prediction across two files, so a report can be moved or archived
-    into a state where it silently describes masks that are no longer there; and
-    carrying only mask-derived scalars answers a smaller question than the one a caller
-    running a segmentation checkpoint asked. RLE keeps one file, adds no dependency, and
-    round-trips exactly.
+    The alternatives were weighed and lost: a polygon contour needs a contour tracer and is lossy on masks with
+    holes, which the box crop routinely produces; a sidecar ``.npz`` splits one prediction across two files,
+    so a report can be moved or archived into a state where it silently describes masks that are no longer there; and
+    carrying only mask-derived scalars answers a smaller question than the one a caller running a segmentation
+    checkpoint asked. RLE keeps one file, adds no dependency, and round-trips exactly.
 
-    A keypoint report keeps ``box`` and adds ``keypoints`` to each record: the
-    detection's points as ``[[x, y], ...]`` in the same original-image pixels, in the
-    head's own point order. The report's top-level ``keypoints`` key names that layout
-    (``"xy-pairs"``) for the reason ``masks`` names the mask encoding, and the layout is
-    worth naming because COCO's own keypoint field is a **flat triplet** list carrying a
-    visibility flag. This one is neither flat nor triplets: nothing in this project
-    predicts visibility, so a third column would be an invented number. ``info`` gains
-    ``num_keypoints``, since ``K`` is a property of whichever schema supplied the points
-    (A64) and a reader should not have to re-load the checkpoint to tell a 17-point human
-    pose from a 15-point letter one. Both keys appear on keypoint reports only.
+    A keypoint report keeps ``box`` and adds ``keypoints`` to each record: the detection's points as
+    ``[[x, y], ...]`` in the same original-image pixels, in the head's own point order. The report's top-level
+    ``keypoints`` key names that layout (``"xy-pairs"``) for the reason ``masks`` names the mask encoding,
+    and the layout is worth naming because COCO's own keypoint field is a **flat triplet** list carrying a visibility
+    flag. This one is neither flat nor triplets: nothing in this project predicts visibility, so a third column would
+    be an invented number. ``info`` gains ``num_keypoints``, since ``K`` is a property of whichever schema
+    supplied the points (A64) and a reader should not have to re-load the checkpoint to tell a 17-point human pose
+    from a 15-point letter one. Both keys appear on keypoint reports only.
 
-    An oriented report replaces ``box`` with **two** derived geometries of the same
-    object: ``rbox``, the A45 five-tuple exactly as
-    :func:`~lucid_yolo.predict.predict_oriented` returned it, and ``polygon``, its four
-    corners as ``[x1, y1, ..., x4, y4]``. Neither is a second arithmetic — the corners
-    come from :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons`, the same function
-    :func:`~lucid_yolo.data.tiles.annotation_records` writes rotated ground truth with,
-    and that record likewise carries one object as two derived geometries. Both are
-    written because each answers a question the other cannot: the tuple is what
-    reproduces the library's own answer and carries the canonical angle A23 guarantees,
-    while the ring is what DOTA's protocol states an oriented object in and what a reader
-    can draw without knowing this project's angle convention. The report's top-level
-    ``boxes`` key names that convention (``"obb-longedge-rad"``) for the same reason
-    ``masks`` names the mask encoding: the file should say what it holds. It appears on
-    oriented reports only — the ``box`` of the other two is plain ``xyxy`` and was
-    already shipped without it.
+    An oriented report replaces ``box`` with **two** derived geometries of the same object: ``rbox``, the A45
+    five-tuple exactly as :func:`~lucid_yolo.predict.predict_oriented` returned it, and ``polygon``, its four
+    corners as ``[x1, y1, ..., x4, y4]``. Neither is a second arithmetic — the corners come from
+    :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons`, the same function
+    :func:`~lucid_yolo.data.tiles.annotation_records` writes rotated ground truth with, and that record likewise
+    carries one object as two derived geometries. Both are written because each answers a question the other cannot:
+    the tuple is what reproduces the library's own answer and carries the canonical angle A23 guarantees, while the
+    ring is what DOTA's protocol states an oriented object in and what a reader can draw without knowing
+    this project's angle convention. The report's top-level ``boxes`` key names that convention
+    (``"obb-longedge-rad"``) for the same reason ``masks`` names the mask encoding: the file should say what it holds.
+    It appears on oriented reports only — the ``box`` of the other two is plain ``xyxy`` and was already shipped
+    without it.
 
 Provenance: R1 sec. 3.2.1, R1 Eq. 7, R1 Eq. 13, R3 sec. 4, R1 sec. 4.4, R18 sec. 4, R14.
 Assumptions: A9, A10, A23, A37, A45, A64.
@@ -103,9 +88,9 @@ from lucid_yolo.data.rotated_geom import rboxes_to_polygons
 from lucid_yolo.decode.common import BOX_CORNERS, LABEL_COLUMN, RBOX_COLUMNS, SCORE_COLUMN
 from lucid_yolo.eval.checkpoint import load_eval_module, pick_device
 
-# ``DecodePath`` is imported at runtime, not under TYPE_CHECKING: jsonargparse resolves
-# the signature's annotations through ``get_type_hints`` to build the parser, and a name
-# only the type checker can see is not in the module globals it resolves against.
+# ``DecodePath`` is imported at runtime, not under TYPE_CHECKING: jsonargparse resolves the signature's annotations
+# through ``get_type_hints`` to build the parser, and a name only the type checker can see is not in the module
+# globals it resolves against.
 from lucid_yolo.predict import (
     DEFAULT_CONF_THRESHOLD,
     DecodePath,
@@ -135,43 +120,41 @@ __all__ = [
     "predict",
 ]
 
-#: Value of the report's ``masks`` key when the checkpoint has a mask branch: the name of
-#: the encoding the ``segmentation`` records carry, so the file says what it holds.
-#: A detection report carries ``null`` there rather than omitting the key, which would
-#: make "this checkpoint has no masks" and "this report predates masks" the same reading.
+#: Value of the report's ``masks`` key when the checkpoint has a mask branch: the name of the encoding the
+#: ``segmentation`` records carry, so the file says what it holds. A detection report carries ``null`` there rather
+#: than omitting the key, which would make "this checkpoint has no masks" and "this report predates masks" the
+#: same reading.
 _MASK_FORMAT = "coco-rle"
 
-#: Value of a keypoint report's ``keypoints`` key: the layout its ``keypoints`` records
-#: are written in -- one ``[x, y]`` pair per point, in the head's own point order, in
-#: original-image pixels. Named because COCO's own keypoint field is a flat triplet list
-#: carrying a visibility flag, and this one is neither flat nor triplets: nothing here
-#: predicts visibility, so writing a third column would be inventing a number.
+#: Value of a keypoint report's ``keypoints`` key: the layout its ``keypoints`` records are written in
+#: -- one ``[x, y]`` pair per point, in the head's own point order, in original-image pixels. Named because
+#: COCO's own keypoint field is a flat triplet list carrying a visibility flag, and this one is neither flat nor
+#: triplets: nothing here predicts visibility, so writing a third column would be inventing a number.
 _KEYPOINT_FORMAT = "xy-pairs"
 
-#: Coordinate count of a rotated box's corner ring, ``[x1, y1, ..., x4, y4]``. Named so
-#: the flattening reads as "one ring per row" rather than as an inferred dimension, which
-#: an image with nothing above the threshold would leave ambiguous.
+#: Coordinate count of a rotated box's corner ring, ``[x1, y1, ..., x4, y4]``. Named so the flattening reads as
+#: "one ring per row" rather than as an inferred dimension, which an image with nothing above the threshold would
+#: leave ambiguous.
 _RING_VALUES = 8
 
-#: Value of an oriented report's ``boxes`` key: the convention its ``rbox`` records are
-#: written in — the long-edge form of :mod:`lucid_yolo.data.rotated_geom` with ``theta``
-#: in **radians**. Named in the file because angle conventions are the thing oriented
-#: formats silently disagree about (degrees, and a ``(0, 90]`` range, are both common).
+#: Value of an oriented report's ``boxes`` key: the convention its ``rbox`` records are written in — the long-edge
+#: form of :mod:`lucid_yolo.data.rotated_geom` with ``theta`` in **radians**. Named in the file because angle
+#: conventions are the thing oriented formats silently disagree about (degrees, and a ``(0, 90]`` range, are both
+#: common).
 _OBB_BOX_FORMAT = "obb-longedge-rad"
 
 
 class DetectionRecord(TypedDict):
     """One detection as the report and the stdout summary carry it.
 
-    A ``TypedDict`` rather than a dataclass because this *is* the JSON object — it goes
-    to :func:`json.dumps` unchanged — while still naming its keys, so a renamed field is
-    a type error here instead of a ``KeyError`` in whatever reads the report.
+    A ``TypedDict`` rather than a dataclass because this *is* the JSON object — it goes to :func:`json.dumps`
+    unchanged — while still naming its keys, so a renamed field is a type error here instead of a ``KeyError`` in
+    whatever reads the report.
 
     Attributes:
         box: The ``xyxy`` corners in original-image pixels.
         score: Confidence in ``[0, 1]``.
-        label: Contiguous class index (not a dataset category id — see the module
-            docstring).
+        label: Contiguous class index (not a dataset category id — see the module docstring).
     """
 
     box: list[float]
@@ -183,12 +166,11 @@ class RleMask(TypedDict):
     """One instance mask in COCO run-length encoding, as JSON carries it.
 
     Attributes:
-        size: The ``[height, width]`` of the **original** image the mask lives on, which
-            is also what makes the record self-contained: a reader decodes it without
-            knowing the letterbox side the model ran at.
-        counts: The compressed RLE string. :func:`faster_coco_eval.mask.encode` returns
-            these as ``bytes``; JSON has no such type, so they are decoded as ASCII here,
-            exactly as the COCO annotation format stores them.
+        size: The ``[height, width]`` of the **original** image the mask lives on, which is also what makes the
+            record self-contained: a reader decodes it without knowing the letterbox side the model ran at.
+        counts: The compressed RLE string. :func:`faster_coco_eval.mask.encode` returns these as ``bytes``;
+            JSON has no such type, so they are decoded as ASCII here, exactly as the COCO annotation
+            format stores them.
     """
 
     size: list[int]
@@ -198,23 +180,20 @@ class RleMask(TypedDict):
 class OrientedDetectionRecord(TypedDict):
     """One oriented detection as the report and the stdout summary carry it.
 
-    Deliberately **not** a subclass of :class:`DetectionRecord`: it has no ``box``,
-    because its geometry is not corners, and inheriting one to leave it out is not
-    something a ``TypedDict`` can express. A reader therefore learns which report it is
-    holding from the key it finds, before it has parsed a number.
+    Deliberately **not** a subclass of :class:`DetectionRecord`: it has no ``box``, because its geometry is not
+    corners, and inheriting one to leave it out is not something a ``TypedDict`` can express. A reader therefore
+    learns which report it is holding from the key it finds, before it has parsed a number.
 
     Attributes:
-        rbox: The A45 box columns ``[cx, cy, w, h, theta]`` in original-image pixels,
-            canonical per A23 — ``w >= h`` and ``theta`` in radians on
-            ``[-pi/4, 3*pi/4)``, measured from ``+x`` towards ``+y`` on the y-down grid.
-        polygon: The same rectangle's four corners, ``[x1, y1, ..., x4, y4]``, in the
-            clockwise-as-displayed winding
-            :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons` defines. Redundant
-            with ``rbox`` by construction and useful for exactly that reason: it is
-            drawable and comparable without this project's angle convention.
+        rbox: The A45 box columns ``[cx, cy, w, h, theta]`` in original-image pixels, canonical per A23 —
+            ``w >= h`` and ``theta`` in radians on ``[-pi/4, 3*pi/4)``, measured from ``+x`` towards ``+y``
+            on the y-down grid.
+        polygon: The same rectangle's four corners, ``[x1, y1, ..., x4, y4]``, in the clockwise-as-displayed winding
+            :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons` defines. Redundant with ``rbox``
+            by construction and useful for exactly that reason: it is drawable and comparable without this project's
+            angle convention.
         score: Confidence in ``[0, 1]``.
-        label: Contiguous class index (not a dataset category id — see the module
-            docstring).
+        label: Contiguous class index (not a dataset category id — see the module docstring).
     """
 
     rbox: list[float]
@@ -226,15 +205,12 @@ class OrientedDetectionRecord(TypedDict):
 class KeypointDetectionRecord(DetectionRecord):
     """A detection record that also carries its point set.
 
-    Inherits rather than restates, for the reason
-    :class:`SegmentedDetectionRecord` does: a reader of either report parses ``box``,
-    ``score`` and ``label`` the same way, and the added field is visibly the one thing
-    that differs.
+    Inherits rather than restates, for the reason :class:`SegmentedDetectionRecord` does: a reader of either report
+    parses ``box``, ``score`` and ``label`` the same way, and the added field is visibly the one thing that differs.
 
     Attributes:
-        keypoints: The detection's points as ``[[x, y], ...]`` in the same
-            original-image coordinates as ``box``, in the head's own point order. The
-            length is the checkpoint's ``K``, never assumed (A64).
+        keypoints: The detection's points as ``[[x, y], ...]`` in the same original-image coordinates as
+            ``box``, in the head's own point order. The length is the checkpoint's ``K``, never assumed (A64).
     """
 
     keypoints: list[list[float]]
@@ -243,12 +219,11 @@ class KeypointDetectionRecord(DetectionRecord):
 class SegmentedDetectionRecord(DetectionRecord):
     """A detection record that also carries its instance mask.
 
-    Inherits rather than restates, so a reader of either report parses ``box``, ``score``
-    and ``label`` the same way and the mask is visibly the one added field.
+    Inherits rather than restates, so a reader of either report parses ``box``, ``score`` and ``label`` the same way
+    and the mask is visibly the one added field.
 
     Attributes:
-        segmentation: The detection's mask as :class:`RleMask`, in the same
-            original-image coordinates as ``box``.
+        segmentation: The detection's mask as :class:`RleMask`, in the same original-image coordinates as ``box``.
     """
 
     segmentation: RleMask
@@ -318,43 +293,37 @@ def predict(
 ) -> int:
     """Predict boxes, instance masks, rotated boxes or keypoints for one image.
 
-    Which of the four happens is the checkpoint's ``task``, not a flag: a ``segment``
-    checkpoint run as a detector would answer plausibly with its mask branch unread, an
-    ``obb`` one with its angle branch unread, and that is precisely the mistake a flag
-    lets a caller make.
+    Which of the four happens is the checkpoint's ``task``, not a flag: a ``segment`` checkpoint run as a detector
+    would answer plausibly with its mask branch unread, an ``obb`` one with its angle branch unread, and that is
+    precisely the mistake a flag lets a caller make.
 
     Args:
-        checkpoint: Lightning ``.ckpt`` to predict with; its task must be ``detect``,
-            ``segment``, ``obb`` or ``keypoints``.
+        checkpoint: Lightning ``.ckpt`` to predict with; its task must be ``detect``, ``segment``,
+            ``obb`` or ``keypoints``.
         image: Image file to run on.
-        ema: Predict with the EMA shadow stored in the checkpoint rather than raw
-            weights.
-        decoder: ``e2e`` for the suppression-free top-k path over the one-to-one branch,
-            ``nms`` for the confidence-threshold plus class-wise suppression path over
-            the dense branch. Defaults to ``e2e`` — it is the path this architecture
-            exists to demonstrate, and the one a deployment would ship; ``nms`` is the
-            comparison column, run on an ``obb`` checkpoint by the rotated suppression
+        ema: Predict with the EMA shadow stored in the checkpoint rather than raw weights.
+        decoder: ``e2e`` for the suppression-free top-k path over the one-to-one branch, ``nms`` for the
+            confidence-threshold plus class-wise suppression path over the dense branch. Defaults to ``e2e``
+            — it is the path this architecture exists to demonstrate, and the one a deployment would ship;
+            ``nms`` is the comparison column, run on an ``obb`` checkpoint by the rotated suppression
             decoder (WP-091b), which compares rotated overlaps rather than upright ones.
-        conf_threshold: Detections at or below this score are dropped, with their masks.
-            In ``[0, 1]``: a negative cut admits the decoders' score-zero padding rows,
-            which are not detections at any threshold and would reach the report as
-            phantom objects at plausible coordinates.
+        conf_threshold: Detections at or below this score are dropped, with their masks. In ``[0, 1]``: a negative
+            cut admits the decoders' score-zero padding rows, which are not detections at any threshold
+            and would reach the report as phantom objects at plausible coordinates.
         img_size: Letterbox side. Defaults per the checkpoint's task, and must be a
             positive multiple of every head stride.
-        device: ``auto``, ``cpu``, ``mps`` or ``cuda``; a named backend this machine does
-            not have is refused rather than failing later inside ``.to(device)``.
+        device: ``auto``, ``cpu``, ``mps`` or ``cuda``; a named backend this machine does not have is refused
+            rather than failing later inside ``.to(device)``.
         output: Write the JSON report here; the parent directory is created if absent.
 
     Returns:
         ``0``; a failure here raises rather than returning a code.
 
     Raises:
-        ValueError: If the checkpoint's ``task`` is unknown, if ``device`` names a backend
-            that is not available
-            (:func:`~lucid_yolo.eval.checkpoint.pick_device`), or if ``decoder``,
-            ``conf_threshold`` or ``img_size`` is outside its domain — the four entry
-            points of :mod:`lucid_yolo.predict` own that check, so this command and a
-            direct library call refuse the same values with the same message.
+        ValueError: If the checkpoint's ``task`` is unknown, if ``device`` names a backend that is not available
+            (:func:`~lucid_yolo.eval.checkpoint.pick_device`), or if ``decoder``, ``conf_threshold`` or ``img_size``
+            is outside its domain — the four entry points of :mod:`lucid_yolo.predict` own that check, so this
+            command and a direct library call refuse the same values with the same message.
 
     Examples:
         ```pycon
@@ -371,8 +340,8 @@ def predict(
     info["decoder"] = decoder
     resolved_img_size = DEFAULT_IMG_SIZE[task] if img_size is None else img_size
     run_on = pick_device(device)
-    # require_one_of refuses unknown tasks before dispatch; the library also refuses
-    # incompatible checkpoints and names the task the checkpoint actually carries.
+    # require_one_of refuses unknown tasks before dispatch; the library also refuses incompatible
+    # checkpoints and names the task the checkpoint actually carries.
     prediction = _PREDICT_TASKS[Task(task)](
         module,
         image,
@@ -403,18 +372,17 @@ def predict(
             "masks": mask_format,
             "detections": records,
         }
-        # Added rather than always present, so the two shipped report shapes are untouched:
-        # `box` has meant `xyxy` since WP-089 and needs no announcement, while `rbox` is
-        # new and its angle convention is the thing oriented formats disagree about.
+        # Added rather than always present, so the two shipped report shapes are untouched: `box` has meant `xyxy`
+        # since WP-089 and needs no announcement, while `rbox` is new and its angle convention is the thing oriented
+        # formats disagree about.
         if box_format is not None:
             payload["boxes"] = box_format
-        # Added rather than always present, for the same reason `boxes` is: the other
-        # shipped report shapes stay byte-identical, and a reader finds this key exactly
-        # when the records carry a point set.
+        # Added rather than always present, for the same reason `boxes` is: the other shipped report shapes stay
+        # byte-identical, and a reader finds this key exactly when the records carry a point set.
         if keypoint_format is not None:
             payload["keypoints"] = keypoint_format
-        # Created rather than required, for the reason `detect_eval.run` states: the
-        # forward pass is the expensive part and this file is its only durable form.
+        # Created rather than required, for the reason `detect_eval.run` states: the forward pass is the
+        # expensive part and this file is its only durable form.
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(_report_json(payload))
         print(f"report -> {output}")
@@ -426,8 +394,8 @@ def _refuse_non_finite(value: object, where: str) -> None:
 
     Args:
         value: The payload or any node inside it.
-        where: Dotted path of ``value`` within the report, used in the message so the
-            offending field is named rather than merely reported to exist.
+        where: Dotted path of ``value`` within the report, used in the message so the offending field is named
+            rather than merely reported to exist.
 
     Raises:
         ValueError: If ``value`` is, or contains, a non-finite float.
@@ -461,19 +429,16 @@ def _refuse_non_finite(value: object, where: str) -> None:
 def _report_json(payload: dict[str, object]) -> str:
     """Serialize a report payload, refusing anything JSON cannot represent.
 
-    **The boundary refuses rather than sanitises.** ``NaN`` and ``Infinity`` are not
-    JSON: :func:`json.dumps` emits them as bare tokens by default, which Python's own
-    :func:`json.loads` accepts and a strict parser — every browser, ``jq``, most other
-    languages' standard libraries — rejects, so the report reads as valid until someone
-    outside Python opens it. Substituting ``null`` or ``0.0`` instead would produce a
-    file that parses everywhere and quietly misstates a detection's geometry, which is
-    the worse of the two failures: a run that produced a non-finite box did something
-    the caller needs to know about, and a report is the wrong place to absorb it.
+    **The boundary refuses rather than sanitises.** ``NaN`` and ``Infinity`` are not JSON: :func:`json.dumps`
+    emits them as bare tokens by default, which Python's own :func:`json.loads` accepts and a strict parser — every
+    browser, ``jq``, most other languages' standard libraries — rejects, so the report reads as valid until someone
+    outside Python opens it. Substituting ``null`` or ``0.0`` instead would produce a file that parses everywhere
+    and quietly misstates a detection's geometry, which is the worse of the two failures: a run that produced a
+    non-finite box did something the caller needs to know about, and a report is the wrong place to absorb it.
 
-    Two layers, deliberately. :func:`_refuse_non_finite` walks the payload so the error
-    names the field; ``allow_nan=False`` then backs it up at the encoder, so a numeric
-    field added to a record later is refused even if the walk has not been taught about
-    its container.
+    Two layers, deliberately. :func:`_refuse_non_finite` walks the payload so the error names the field;
+    ``allow_nan=False`` then backs it up at the encoder, so a numeric field added to a record later is refused even if
+    the walk has not been taught about its container.
 
     Args:
         payload: The report object, as :func:`predict` assembles it.
@@ -506,9 +471,8 @@ def _to_records(detections: Tensor) -> list[DetectionRecord]:
             :func:`~lucid_yolo.predict.predict_image` returns them.
 
     Returns:
-        One :class:`DetectionRecord` per row. The class column is stored as a float in
-        the A9 tuple and is narrowed back to ``int`` here, at the boundary where the
-        report is written.
+        One :class:`DetectionRecord` per row. The class column is stored as a float in the A9 tuple and is narrowed
+        back to ``int`` here, at the boundary where the report is written.
     """
     return [
         DetectionRecord(
@@ -529,9 +493,8 @@ def _to_oriented_records(detections: Tensor) -> list[OrientedDetectionRecord]:
 
     Returns:
         One :class:`OrientedDetectionRecord` per row. The corners come from
-        :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons` applied to the whole
-        stack at once, so the ``polygon`` of row ``n`` is that row's own ``rbox`` and the
-        two cannot describe different rectangles.
+        :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons` applied to the whole stack at once, so the
+        ``polygon`` of row ``n`` is that row's own ``rbox`` and the two cannot describe different rectangles.
     """
     rings = rboxes_to_polygons(detections[:, :RBOX_COLUMNS]).reshape(-1, _RING_VALUES)
     return [
@@ -554,11 +517,9 @@ def _to_keypoint_records(detections: Tensor, keypoints: Tensor) -> list[Keypoint
             ``n``, as :class:`~lucid_yolo.predict.KeypointPrediction` pairs them.
 
     Returns:
-        One :class:`KeypointDetectionRecord` per row. ``strict=True`` on the zip is the
-        point, exactly as it is for the mask records: the pairing is what
-        :class:`~lucid_yolo.predict.KeypointPrediction` exists to protect, and a length
-        mismatch that silently truncated would attach every pose to the wrong box from
-        the mismatch onward.
+        One :class:`KeypointDetectionRecord` per row. ``strict=True`` on the zip is the point, exactly as it is
+        for the mask records: the pairing is what :class:`~lucid_yolo.predict.KeypointPrediction` exists to protect,
+        and a length mismatch that silently truncated would attach every pose to the wrong box from the mismatch onward.
     """
     return [
         KeypointDetectionRecord(**record, keypoints=[[float(x), float(y)] for x, y in points])
@@ -569,8 +530,8 @@ def _to_keypoint_records(detections: Tensor, keypoints: Tensor) -> list[Keypoint
 def _keypoint_lines(records: Sequence[KeypointDetectionRecord]) -> list[str]:
     """Render one stdout line per posed detection.
 
-    The point count is printed rather than the points: ``K`` is often 17 and a terminal
-    line carrying 34 coordinates is not read by anyone. The report file carries them all.
+    The point count is printed rather than the points: ``K`` is often 17 and a terminal line carrying 34 coordinates
+    is not read by anyone. The report file carries them all.
     """
     return [
         f"  class={record['label']} score={record['score']:.3f} "
@@ -592,9 +553,8 @@ def _detection_lines(records: Sequence[DetectionRecord]) -> list[str]:
 def _oriented_lines(records: Sequence[OrientedDetectionRecord]) -> list[str]:
     """Render one stdout line per oriented detection.
 
-    The angle is printed in degrees beside the tuple it is stored in radians in: a
-    heading is what a reader of this line is checking by eye, and ``2.6`` radians is not
-    a number anyone recognises as pointing anywhere.
+    The angle is printed in degrees beside the tuple it is stored in radians in: a heading is what a reader of this
+    line is checking by eye, and ``2.6`` radians is not a number anyone recognises as pointing anywhere.
     """
     return [
         f"  class={record['label']} score={record['score']:.3f} "
@@ -609,16 +569,13 @@ def _to_segmented_records(detections: Tensor, masks: Tensor) -> list[DetectionRe
 
     Args:
         detections: Detections of shape ``(N, 6)`` in original-image coordinates.
-        masks: Boolean masks ``(N, orig_height, orig_width)``, row ``n`` belonging to
-            detection ``n``, as :class:`~lucid_yolo.predict.SegmentedPrediction` pairs
-            them.
+        masks: Boolean masks ``(N, orig_height, orig_width)``, row ``n`` belonging to detection ``n``, as
+            :class:`~lucid_yolo.predict.SegmentedPrediction` pairs them.
 
     Returns:
-        One :class:`SegmentedDetectionRecord` per row. ``strict=True`` on the zip is the
-        point: the pairing is what
-        :class:`~lucid_yolo.predict.SegmentedPrediction` exists to protect, and a length
-        mismatch that silently truncated would attach every mask to the wrong box from
-        the mismatch onward.
+        One :class:`SegmentedDetectionRecord` per row. ``strict=True`` on the zip is the point: the pairing is what
+        :class:`~lucid_yolo.predict.SegmentedPrediction` exists to protect, and a length mismatch that silently
+        truncated would attach every mask to the wrong box from the mismatch onward.
     """
     return [
         SegmentedDetectionRecord(**record, segmentation=rle)
@@ -629,10 +586,9 @@ def _to_segmented_records(detections: Tensor, masks: Tensor) -> list[DetectionRe
 def _encode_masks(masks: Tensor) -> list[RleMask]:
     """Run-length encode a mask stack into the JSON-carryable COCO form.
 
-    The whole stack goes through :func:`faster_coco_eval.mask.encode` in one call, which
-    wants the instance axis **last** and the array Fortran-ordered — the layout COCO's
-    RLE is defined over, column-major within each instance. An empty stack encodes to an
-    empty list, which is the report of an image with nothing above the threshold.
+    The whole stack goes through :func:`faster_coco_eval.mask.encode` in one call, which wants the instance axis
+    **last** and the array Fortran-ordered — the layout COCO's RLE is defined over, column-major within each instance.
+    An empty stack encodes to an empty list, which is the report of an image with nothing above the threshold.
     """
     stack = np.asfortranarray(masks.permute(1, 2, 0).to(torch.uint8).numpy())
     return [

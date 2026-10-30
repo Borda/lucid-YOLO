@@ -1,25 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Phase-2 parameter/FLOP fidelity gate for the detector family (WP-023).
 
-Holds the five built scale variants to the published R1 Table 7 numbers: the full
-model's parameter count within +/-2% and the deployed NMS-free inference model's
-conventional GFLOPs within +/-5%, for every scale. The gate validates the
-clean-room block/head assumptions (A3/A4/A9) that the papers leave underspecified
-— it is the blueprint's Phase-2 escalation site. A second test asserts the frozen
-``goldens/params_flops_det.json`` regression lock still reproduces.
+Holds the five built scale variants to the published R1 Table 7 numbers: the full model's parameter count within +/-2%
+and the deployed NMS-free inference model's conventional GFLOPs within +/-5%, for every scale. The gate validates the
+clean-room block/head assumptions (A3/A4/A9) that the papers leave underspecified — it is the blueprint's Phase-2
+escalation site. A second test asserts the frozen ``goldens/params_flops_det.json`` regression lock still reproduces.
 
-The module has since grown three siblings, and they are not all the same kind of
-gate. Two hold a published table, each with its own protocol, tolerance, and
-frozen golden: segmentation against R1 Table S9 (640 px, 80 classes) and oriented
-detection against R1 Table S11 (**1024** px, **15** classes). The protocol
-constants are deliberately not shared between them. The fourth, keypoints, has a
-frozen golden and **no** published table to gate against, because R14 states a
-loss and an evaluation protocol and no architecture at all — see the comment
-above :func:`test_kp_params_flops_golden`.
+The module has since grown three siblings, and they are not all the same kind of gate. Two hold a published table, each
+with its own protocol, tolerance, and frozen golden: segmentation against R1 Table S9 (640 px, 80 classes) and oriented
+detection against R1 Table S11 (**1024** px, **15** classes). The protocol constants are deliberately not shared between
+them. The fourth, keypoints, has a frozen golden and **no** published table to gate against, because R14 states a loss
+and an evaluation protocol and no architecture at all — see the comment above :func:`test_kp_params_flops_golden`.
 
-Params count the full checkpoint (both dual-head branches); GFLOPs exclude the
-training-only one-to-many branch — the R6/YOLOv10 reporting convention (see
-:mod:`lucid_yolo.models.build`).
+Params count the full checkpoint (both dual-head branches); GFLOPs exclude the training-only one-to-many branch — the
+R6/YOLOv10 reporting convention (see :mod:`lucid_yolo.models.build`).
 """
 
 from __future__ import annotations
@@ -29,10 +23,9 @@ from scripts.check_goldens import DEFAULT_GOLDENS_DIR, check_golden
 
 from lucid_yolo.models import build_detector, build_obb_detector, build_segmenter, count_flops, count_params
 
-#: Published detection numbers at a 640-pixel input, R1 Table 7 (verified verbatim
-#: against the arXiv HTML): (params in millions, conventional GFLOPs). Rounded to
-#: 0.1 M / 0.1 G in the paper, so tolerances are taken relative to the printed
-#: value.
+#: Published detection numbers at a 640-pixel input, R1 Table 7 (verified verbatim against the arXiv HTML): (params in
+#: millions, conventional GFLOPs). Rounded to 0.1 M / 0.1 G in the paper, so tolerances are taken relative to the
+#: printed value.
 _TABLE7: dict[str, tuple[float, float]] = {
     "n": (2.4, 5.4),
     "s": (9.5, 20.7),
@@ -48,10 +41,23 @@ _FLOP_TOL = 0.05
 #: COCO class count the published table is measured at.
 _NUM_CLASSES = 80
 
-#: Input side for the train/eval-mode probes. They assert module state, never a
-#: FLOP value, so the smallest 32-divisible canvas that still traces is enough —
-#: the 640 px protocol would cost seconds per case for an identical assertion.
+#: Input side for the train/eval-mode probes. They assert module state, never a FLOP value, so the smallest 32-divisible
+#: canvas that still traces is enough — the 640 px protocol would cost seconds per case for an identical assertion.
 _MODE_PROBE_IMG_SIZE = 64
+
+
+def _assert_golden_reproduces(golden_name: str) -> None:
+    """Assert the frozen golden ``goldens/<golden_name>`` still reproduces, naming the first failing metric.
+
+    Examples:
+        >>> callable(_assert_golden_reproduces)  # runs a full model measurement, so not called here
+        True
+    """
+    result = check_golden(DEFAULT_GOLDENS_DIR / golden_name)
+
+    assert result.passed, result.error or next(
+        f"{c.metric}: expected {c.expected}, got {c.actual}" for c in result.comparisons if not c.passed
+    )
 
 
 @pytest.mark.parametrize(
@@ -76,19 +82,18 @@ def test_det_vs_table7(variant: str, published_params_m: float, published_gflops
 
 
 def test_det_params_flops_golden() -> None:
-    """The frozen goldens/params_flops_det.json regression lock still reproduces."""
-    result = check_golden(DEFAULT_GOLDENS_DIR / "params_flops_det.json")
+    """The frozen goldens/params_flops_det.json regression lock still reproduces.
 
-    assert result.passed, result.error or next(
-        f"{c.metric}: expected {c.expected}, got {c.actual}" for c in result.comparisons if not c.passed
-    )
+    Locks the detector's per-scale params and GFLOPs to the measured values at the 640 px / 80-class protocol, so an
+    architecture change that stays inside the Table 7 tolerances still has to move the golden deliberately.
+    """
+    _assert_golden_reproduces("params_flops_det.json")
 
 
-#: Published segmentation numbers at a 640-pixel input, R1 Table S9 (transcribed
-#: verbatim from the arXiv PDF, page 28): (params in millions, FLOPs in billions).
-#: The E2E and non-E2E rows carry an identical pair per scale, so the table does
-#: not distinguish the deployed model from the full one; the convention used here
-#: is the one that lands Table 7 within tolerance for detection.
+#: Published segmentation numbers at a 640-pixel input, R1 Table S9 (transcribed verbatim from the arXiv PDF, page 28):
+#: (params in millions, FLOPs in billions). The E2E and non-E2E rows carry an identical pair per scale, so the table
+#: does not distinguish the deployed model from the full one; the convention used here is the one that lands Table 7
+#: within tolerance for detection.
 _TABLE_S9: dict[str, tuple[float, float]] = {
     "n": (2.7, 9.1),
     "s": (10.4, 34.2),
@@ -97,11 +102,10 @@ _TABLE_S9: dict[str, tuple[float, float]] = {
     "x": (62.8, 313.5),
 }
 
-#: Segmentation parameter tolerance, wider than detection's +/-2%. The segmentation
-#: head's sizing rests on five registered assumptions (A14 K=32, A15 proto grid,
-#: A18 protonet stack, A34 coefficient stem, A35 fusion projections) rather than on
-#: published structure, so it cannot claim detection-grade parity. The binding
-#: scale is ``s`` at +2.5%; every other scale lands inside +/-1.5%.
+#: Segmentation parameter tolerance, wider than detection's +/-2%. The segmentation head's sizing rests on five
+#: registered assumptions (A14 K=32, A15 proto grid, A18 protonet stack, A34 coefficient stem, A35 fusion projections)
+#: rather than on published structure, so it cannot claim detection-grade parity. The binding scale is ``s`` at +2.5%;
+#: every other scale lands inside +/-1.5%.
 _SEG_PARAM_TOL = 0.03
 
 
@@ -127,19 +131,18 @@ def test_seg_vs_tableS9(variant: str, published_params_m: float, published_gflop
 
 
 def test_seg_params_flops_golden() -> None:
-    """The frozen goldens/params_flops_seg.json regression lock still reproduces."""
-    result = check_golden(DEFAULT_GOLDENS_DIR / "params_flops_seg.json")
+    """The frozen goldens/params_flops_seg.json regression lock still reproduces.
 
-    assert result.passed, result.error or next(
-        f"{c.metric}: expected {c.expected}, got {c.actual}" for c in result.comparisons if not c.passed
-    )
+    Locks the segmenter's per-scale params and GFLOPs to the measured values, so a change to the mask branches that
+    stays inside the Table S9 tolerances still has to move the golden deliberately.
+    """
+    _assert_golden_reproduces("params_flops_seg.json")
 
 
-#: Published OBB numbers, R1 Table S11 (DOTA-v1.0, one-to-one branch, no NMS):
-#: (params in millions, FLOPs in billions). Measured at a **1024**-pixel input over
-#: DOTA's **15** categories — both differ from the 640/80 protocol of the tables
-#: above, so neither constant is shared with them. The table's mAP columns need
-#: training and belong to WP-063/WP-088; only the size columns are gateable here.
+#: Published OBB numbers, R1 Table S11 (DOTA-v1.0, one-to-one branch, no NMS): (params in millions, FLOPs in billions).
+#: Measured at a **1024**-pixel input over DOTA's **15** categories — both differ from the 640/80 protocol of the tables
+#: above, so neither constant is shared with them. The table's mAP columns need training and belong to WP-063/WP-088;
+#: only the size columns are gateable here.
 _TABLE_S11: dict[str, tuple[float, float]] = {
     "n": (2.5, 14.0),
     "s": (9.8, 55.1),
@@ -152,30 +155,23 @@ _TABLE_S11: dict[str, tuple[float, float]] = {
 _OBB_NUM_CLASSES = 15
 _OBB_IMG_SIZE = 1024
 
-#: OBB parameter tolerance, wider than detection's +/-2% and segmentation's +/-3%.
-#: Measured deltas at the selected ``channels // 2`` angle-stem width: n +2.56%,
-#: **s +3.27%**, m -0.90%, l -1.40%, x -1.65%. The binding scale is ``s``, and it
-#: is what sets this constant — the three large scales land inside +/-1.7%, and
-#: the two small ones overshoot.
+#: OBB parameter tolerance, wider than detection's +/-2% and segmentation's +/-3%. Measured deltas at the selected
+#: ``channels // 2`` angle-stem width: n +2.56%, **s +3.27%**, m -0.90%, l -1.40%, x -1.65%. The binding scale is ``s``,
+#: and it is what sets this constant — the three large scales land inside +/-1.7%, and the two small ones overshoot.
 #:
 #: The asymmetry is real rather than slack in the measurement, and
-#: :func:`~lucid_yolo.models.heads.detect._angle_stem_width` holds the evidence:
-#: neither ``// 2`` nor ``// 3`` is uniformly right. ``// 3`` undershoots m/l/x at
-#: 0.63-0.66 of Table S11's implied angle-branch increment; ``// 2`` lands at
-#: 1.04-1.09 there but overshoots ``s`` at 1.62. Table S11 rounds params to 0.1 M,
-#: so ``n`` (+/-59% on the implied increment) and ``s`` (+/-21%) cannot discriminate
-#: between the two rules at all, while ``x`` (+/-3.5%) discriminates decisively and
-#: selects ``// 2``. This tolerance therefore admits a rule chosen where the
-#: evidence is sharp, at the cost of the scales where it is not; A20 stays ``open``
-#: and this is not a claim of Table S11 parity.
+#: :func:`~lucid_yolo.models.heads.detect._angle_stem_width` holds the evidence: neither ``// 2`` nor ``// 3`` is
+#: uniformly right. ``// 3`` undershoots m/l/x at 0.63-0.66 of Table S11's implied angle-branch increment; ``// 2``
+#: lands at 1.04-1.09 there but overshoots ``s`` at 1.62. Table S11 rounds params to 0.1 M, so ``n`` (+/-59% on the
+#: implied increment) and ``s`` (+/-21%) cannot discriminate between the two rules at all, while ``x`` (+/-3.5%)
+#: discriminates decisively and selects ``// 2``. This tolerance therefore admits a rule chosen where the evidence is
+#: sharp, at the cost of the scales where it is not; A20 stays ``open`` and this is not a claim of Table S11 parity.
 _OBB_PARAM_TOL = 0.035
 
-#: The OBB FLOP measurement reuses the shared :data:`_FLOP_TOL` of +/-5%, but with
-#: far less room than the detection and segmentation gates: measured GFLOP deltas
-#: are n **+4.84%**, s +1.52%, m -2.69%, l +2.43%, x +1.95%. The ``n`` scale sits
-#: **0.16 points** from failing. Any future change that adds width or depth to the
-#: angle branch will break this gate at ``n`` before it improves the param fit
-#: anywhere, so re-measure GFLOPs at ``n`` first, not params at ``x``.
+#: The OBB FLOP measurement reuses the shared :data:`_FLOP_TOL` of +/-5%, but with far less room than the detection and
+#: segmentation gates: measured GFLOP deltas are n **+4.84%**, s +1.52%, m -2.69%, l +2.43%, x +1.95%. The ``n`` scale
+#: sits **0.16 points** from failing. Any future change that adds width or depth to the angle branch will break this
+#: gate at ``n`` before it improves the param fit anywhere, so re-measure GFLOPs at ``n`` first, not params at ``x``.
 
 
 @pytest.mark.parametrize(
@@ -200,60 +196,52 @@ def test_obb_vs_tableS11(variant: str, published_params_m: float, published_gflo
 
 
 def test_obb_params_flops_golden() -> None:
-    """The frozen goldens/params_flops_obb.json regression lock still reproduces."""
-    result = check_golden(DEFAULT_GOLDENS_DIR / "params_flops_obb.json")
+    """The frozen goldens/params_flops_obb.json regression lock still reproduces.
 
-    assert result.passed, result.error or next(
-        f"{c.metric}: expected {c.expected}, got {c.actual}" for c in result.comparisons if not c.passed
-    )
+    Locks the oriented detector's per-scale params and GFLOPs at the 1024 px / 15-class protocol, which is where the
+    ``n`` scale sits 0.16 points from the Table S11 FLOP tolerance and so needs the exact lock beside the loose gate.
+    """
+    _assert_golden_reproduces("params_flops_obb.json")
 
 
-# The keypoint task has a golden and no published-table gate — not because no
-# table exists, as this comment said until 2026-09-17, but because the model does
-# not meet the one that does. R1 Table S10 publishes every pose scale's size at
-# 640 px (n 2.9 M / 7.5 G ... x 57.6 M / 201.7 G); measured at its protocol (1
-# class, 17 points, the full two-branch model as the gates above count it) this
-# model is 13.0% under on params and 26.5% under on FLOPs at ``n``, -4.5% / -10.8%
-# at ``s``, and within the sibling tolerances only from ``l`` on (A77). The point
-# stem reuses A28's shared width; R1's is wider at the small scales. A
-# ``_TABLE_S10`` gate is WP-180's, shipped together with the width it selects, the
-# way ``_TABLE_S11`` shipped with A20's ``// 2`` — a gate that fails at every
-# scale would certify nothing, and a gate with a tolerance widened to pass would
-# certify less.
+# The keypoint task has a golden and no published-table gate — not because no table exists, as this comment said until
+# 2026-09-17, but because the model does not meet the one that does. R1 Table S10 publishes every pose scale's size at
+# 640 px (n 2.9 M / 7.5 G ... x 57.6 M / 201.7 G); measured at its protocol (1 class, 17 points, the full two-branch
+# model as the gates above count it) this model is 13.0% under on params and 26.5% under on FLOPs at ``n``, -4.5% /
+# -10.8% at ``s``, and within the sibling tolerances only from ``l`` on (A77). The point stem reuses A28's shared width;
+# R1's is wider at the small scales. A ``_TABLE_S10`` gate is WP-180's, shipped together with the width it selects, the
+# way ``_TABLE_S11`` shipped with A20's ``// 2`` — a gate that fails at every scale would certify nothing, and a gate
+# with a tolerance widened to pass would certify less.
 #
-# What remains meanwhile is a pure regression lock, at detection's own protocol
-# (640 px, 80 classes) so that the keypoint golden minus the detection golden is
-# exactly what the point stems cost. It catches an architecture change; it
+# What remains meanwhile is a pure regression lock, at detection's own protocol (640 px, 80 classes) so that the
+# keypoint golden minus the detection golden is exactly what the point stems cost. It catches an architecture change; it
 # certifies no parity.
 def test_kp_params_flops_golden() -> None:
-    """The frozen goldens/params_flops_kp.json regression lock still reproduces."""
-    result = check_golden(DEFAULT_GOLDENS_DIR / "params_flops_kp.json")
+    """The frozen goldens/params_flops_kp.json regression lock still reproduces.
 
-    assert result.passed, result.error or next(
-        f"{c.metric}: expected {c.expected}, got {c.actual}" for c in result.comparisons if not c.passed
-    )
+    The only size gate the keypoint task has: a regression lock at detection's own 640 px / 80-class protocol, so the
+    keypoint golden minus the detection golden is exactly what the point stems cost. It certifies no published parity.
+    """
+    _assert_golden_reproduces("params_flops_kp.json")
 
 
 class TestCountFlopsTrainingMode:
     """``count_flops`` must leave every module's train/eval mode exactly as it found it.
 
-    Counting requires eval mode, so the counter toggles it — and a ``deploy()`` view
-    is not a private module to toggle. It is freshly constructed but holds *shared*
-    references to its parent's backbone, neck, and one-to-one branch, so anything
-    done to its mode is done to three quarters of the parent detector. Its own
-    ``training`` flag is always ``True`` regardless of the parent's, which made the
-    single-flag save/restore restore the wrong value: measuring an eval-mode
-    detector's FLOPs pushed its backbone, neck, and o2o branch into train mode, and
-    the parent went on reporting ``eval``. A following forward would then use batch
-    statistics and mutate BN running statistics, with nothing reporting it.
+    Counting requires eval mode, so the counter toggles it — and a ``deploy()`` view is not a private module to toggle.
+    It is freshly constructed but holds *shared* references to its parent's backbone, neck, and one-to-one branch, so
+    anything done to its mode is done to three quarters of the parent detector. Its own ``training`` flag is always
+    ``True`` regardless of the parent's, which made the single-flag save/restore restore the wrong value: measuring an
+    eval-mode detector's FLOPs pushed its backbone, neck, and o2o branch into train mode, and the parent went on
+    reporting ``eval``. A following forward would then use batch statistics and mutate BN running statistics, with
+    nothing reporting it.
     """
 
     def test_eval_parent_stays_eval_through_deployed_view(self) -> None:
         """Counting a deploy() view of an eval model leaves every shared submodule in eval.
 
-        The measured failure: ``build_detector("n", 4).eval()`` then
-        ``count_flops(model.deploy(), 64)`` left ``model.training`` False while
-        ``backbone``/``neck``/``o2o`` were all True — the split-brain state that makes
+        The measured failure: ``build_detector("n", 4).eval()`` then ``count_flops(model.deploy(), 64)`` left
+        ``model.training`` False while ``backbone``/``neck``/``o2o`` were all True — the split-brain state that makes
         the leak invisible to a caller checking the top-level flag.
         """
         model = build_detector("n", _NUM_CLASSES).eval()
@@ -265,9 +253,8 @@ class TestCountFlopsTrainingMode:
     def test_train_parent_stays_train_through_deployed_view(self) -> None:
         """Counting a deploy() view of a training model leaves every shared submodule in train.
 
-        The other direction, which the old single-flag restore happened to get right
-        for the wrong reason: restoration must reinstate the recorded mode, not
-        unconditionally call ``train()``.
+        The other direction, which the old single-flag restore happened to get right for the wrong reason: restoration
+        must reinstate the recorded mode, not unconditionally call ``train()``.
         """
         model = build_detector("n", _NUM_CLASSES).train()
 
@@ -275,12 +262,12 @@ class TestCountFlopsTrainingMode:
 
         assert all(submodule.training for submodule in model.modules())
 
-    @pytest.mark.parametrize("training", [pytest.param(True, id="train"), pytest.param(False, id="eval")])
+    @pytest.mark.parametrize("training", [True, False])
     def test_full_detector_mode_survives_counting(self, training: bool) -> None:
         """Counting the full detector directly restores its own mode, both ways.
 
-        The non-view path, which shares nothing and was already correct — pinned so
-        the per-module restoration cannot regress it while fixing the view.
+        The non-view path, which shares nothing and was already correct — pinned so the per-module restoration cannot
+        regress it while fixing the view.
         """
         model = build_detector("n", _NUM_CLASSES).train(training)
 

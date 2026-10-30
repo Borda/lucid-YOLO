@@ -61,14 +61,29 @@ def _bits_equal(first: list[nn.Parameter], second: list[nn.Parameter]) -> None:
         assert torch.equal(a.grad.contiguous().view(torch.uint8), b.grad.contiguous().view(torch.uint8))
 
 
+def _clipping_module(plugin: Precision) -> DetectionLitModule:
+    """Build a norm-capture module whose trainer clips by norm at 2.0 through ``plugin``.
+
+    Examples:
+        ```pycon
+        >>> _clipping_module(Precision())._capture_gradient_norm_active
+        True
+
+        ```
+    """
+    module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
+    module._trainer = SimpleNamespace(precision_plugin=plugin, gradient_clip_val=2.0, gradient_clip_algorithm=None)
+    module._capture_gradient_norm_active = True
+    return module
+
+
 def test_cpu_refusal_is_native_and_retirement_skips_scans() -> None:
     """An unsupported owner warns once and never scans gradients again during that fit."""
     first, second = _parameters("cpu", torch.float32), _parameters("cpu", torch.float32)
     owner = _GradientNormCapture()
-    # Isolate the CPU-tensor diagnostic from the installed torch version: `run` checks
-    # `_SUPPORTED` before the dense-CUDA-tensor check, and pyproject.toml's floor is
-    # torch>=2.4, so a real pre-2.9 install would otherwise retire with the unrelated
-    # version-verification reason and never reach the message this test asserts.
+    # Isolate the CPU-tensor diagnostic from the installed torch version: `run` checks `_SUPPORTED` before the
+    # dense-CUDA-tensor check, and pyproject.toml's floor is torch>=2.4, so a real pre-2.9 install would otherwise
+    # retire with the unrelated version-verification reason and never reach the message this test asserts.
     with (
         patch("lucid_yolo.ptl.gradient_norm_capture._SUPPORTED", True),
         pytest.warns(UserWarning, match="ordinary dense.*CUDA"),
@@ -175,9 +190,7 @@ def test_failed_norm_cleanup_preserves_trainer_exception() -> None:
 )
 def test_inherited_stock_clipping_reaches_norm_holder(plugin: Precision) -> None:
     """Stock precision subclasses reach the holder's real CPU refusal and native scaling."""
-    module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
-    module._trainer = SimpleNamespace(precision_plugin=plugin, gradient_clip_val=2.0, gradient_clip_algorithm=None)
-    module._capture_gradient_norm_active = True
+    module = _clipping_module(plugin)
     first, second = _parameters("cpu", torch.float32), _parameters("cpu", torch.float32)
     optimizer = torch.optim.SGD(first, lr=0.1)
     with patch.object(implementation, "_SUPPORTED", True), pytest.warns(UserWarning, match="ordinary dense.*CUDA"):
@@ -286,9 +299,7 @@ def test_cuda_nonfinite_norm_replay_matches_native(nonfinite: str) -> None:
 @skip_unless_norm_replay
 def test_cuda_clipping_hook_tracks_trainer_limit_changes() -> None:
     """Changing Trainer's clipping limit between hooks reuses the norm graph with current native scaling."""
-    module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
-    module._trainer = SimpleNamespace(precision_plugin=Precision(), gradient_clip_val=2.0, gradient_clip_algorithm=None)
-    module._capture_gradient_norm_active = True
+    module = _clipping_module(Precision())
     first, second = _parameters("cuda", torch.float32), _parameters("cuda", torch.float32)
     optimizer = torch.optim.SGD(first, lr=0.1)
     graph = None
@@ -404,10 +415,8 @@ def test_custom_precision_clipping_retires_and_keeps_native_calls() -> None:
             self.calls += 1
             torch.nn.utils.clip_grad_norm_(self.main_params(optimizer), clip_val)
 
-    module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
     plugin = CustomPrecision()
-    module._trainer = SimpleNamespace(precision_plugin=plugin, gradient_clip_val=2.0, gradient_clip_algorithm=None)
-    module._capture_gradient_norm_active = True
+    module = _clipping_module(plugin)
     parameters = _parameters("cpu", torch.float32)
     optimizer = torch.optim.SGD(parameters, lr=0.1)
     with pytest.warns(UserWarning, match="customized clipping"):
@@ -421,15 +430,12 @@ def test_custom_precision_clipping_retires_and_keeps_native_calls() -> None:
 def test_conflicting_trainer_and_argument_limits_raise_like_native() -> None:
     """A caller's explicit limit contradicting `Trainer(gradient_clip_val=...)` must still refuse.
 
-    Dispatch only ever sees this exact combination through a direct call: the one real
-    caller, the precision plugin's own hook dispatch, always passes the trainer's own value
-    back in, so the two can never disagree there. A subclass or a test calling the hook
-    directly with a different value must still get native's rejection, not a silently
-    recorded clip at the wrong limit.
+    Dispatch only ever sees this exact combination through a direct call: the one real caller, the precision plugin's
+    own hook dispatch, always passes the trainer's own value back in, so the two can never disagree there. A subclass or
+    a test calling the hook directly with a different value must still get native's rejection, not a silently recorded
+    clip at the wrong limit.
     """
-    module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
-    module._trainer = SimpleNamespace(precision_plugin=Precision(), gradient_clip_val=2.0, gradient_clip_algorithm=None)
-    module._capture_gradient_norm_active = True
+    module = _clipping_module(Precision())
     parameters = _parameters("cpu", torch.float32)
     optimizer = torch.optim.SGD(parameters, lr=0.1)
     with (
@@ -440,9 +446,9 @@ def test_conflicting_trainer_and_argument_limits_raise_like_native() -> None:
     assert not run_mock.called
 
 
-def test_older_runtime_keeps_new_option_native(monkeypatch: pytest.MonkeyPatch) -> None:
+@patch("lucid_yolo.ptl.module._NORM_CAPTURE_SUPPORTED", False)
+def test_older_runtime_keeps_new_option_native() -> None:
     """The new flag can be loaded on older runtimes without touching the newer norm API."""
-    monkeypatch.setattr("lucid_yolo.ptl.module._NORM_CAPTURE_SUPPORTED", False)
     module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
     module._trainer = SimpleNamespace(accelerator=CUDAAccelerator(), strategy=SingleDeviceStrategy(device="cuda"))
     with pytest.warns(UserWarning, match="verified only on torch>=2.9") as recorded:

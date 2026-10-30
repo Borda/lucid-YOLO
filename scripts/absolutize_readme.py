@@ -1,37 +1,32 @@
 # SPDX-License-Identifier: Apache-2.0
 """Rewrite the README's repository-relative links to absolute ones, for a PyPI build (WP-113b).
 
-``pyproject.toml`` hands ``README.md`` to setuptools as the long description, and PyPI
-renders that description with no notion of the repository it came from: every relative
-target — ``docs/ASSUMPTIONS.md``, ``docs/figures/det_smoke_training.svg`` — resolves
-against ``pypi.org`` and renders as a dead link or a broken image. The same file has to
-stay relative in the git tree, where relative is what works, so the rewrite belongs to
-the moment of packaging rather than to the file.
+``pyproject.toml`` hands ``README.md`` to setuptools as the long description, and PyPI renders that description
+with no notion of the repository it came from: every relative target — ``docs/ASSUMPTIONS.md``,
+``docs/figures/det_smoke_training.svg`` — resolves against ``pypi.org`` and renders as a dead link or a broken image.
+The same file has to stay relative in the git tree, where relative is what works, so the rewrite belongs to the
+moment of packaging rather than to the file.
 
-Nothing here runs implicitly. A build is only a *release* build when the operator says
-so, and says which ref the links are pinned to: ``--ref v0.4.0`` or the environment
-variable ``LUCID_YOLO_RELEASE_REF``. Without one, the script refuses and the ordinary
-``make build`` ships the file exactly as committed.
+Nothing here runs implicitly. A build is only a *release* build when the operator says so, and says which ref the
+links are pinned to: ``--ref v0.4.0`` or the environment variable ``LUCID_YOLO_RELEASE_REF``. Without one, the script
+refuses and the ordinary ``make build`` ships the file exactly as committed.
 
-The ref must be a tag or a full commit sha, never a branch. A wheel's README is a
-snapshot of one tree, and a link into ``main`` describes whatever that branch holds when
-a reader clicks it — which is how a released page starts documenting code that shipped
-years later.
+The ref must be a tag or a full commit sha, never a branch. A wheel's README is a snapshot of one tree, and a link
+into ``main`` describes whatever that branch holds when a reader clicks it — which is how a released page starts
+documenting code that shipped years later.
 
-Two link classes, two hosts. Images resolve through ``raw.githubusercontent.com``, which
-serves file bytes; document links resolve through ``github.com/<owner>/<repo>/blob``,
-which serves the rendered page a reader wants. In-page anchors, ``mailto:`` and already
-absolute URLs are left alone.
+Two link classes, two hosts. Images resolve through ``raw.githubusercontent.com``, which serves file bytes; document
+links resolve through ``github.com/<owner>/<repo>/blob``, which serves the rendered page a reader wants. In-page
+anchors, ``mailto:`` and already absolute URLs are left alone.
 
 Usage::
 
     python scripts/absolutize_readme.py --ref v0.4.0   # rewrite, keeping a backup
     python scripts/absolutize_readme.py --revert       # restore the committed file
 
-``make dist-pypi TAG=v0.4.0`` does both around a build, reverting whether or not the
-build succeeded. The distribution is not publishable to PyPI under D20's direct-reference
-pin; the rewrite exists for the long description's links, which are broken for any reader
-meeting the package outside this repository.
+``make dist-pypi TAG=v0.4.0`` does both around a build, reverting whether or not the build succeeded. The
+distribution is not publishable to PyPI under D20's direct-reference pin; the rewrite exists for the long
+description's links, which are broken for any reader meeting the package outside this repository.
 """
 
 from __future__ import annotations
@@ -50,15 +45,13 @@ from scripts._common import REPO_ROOT
 #: at runtime under ``python -OO`` and typed as ``str | None``.
 _DESCRIPTION = "Rewrite the README's repository-relative links to absolute ones, for a PyPI build."
 
-#: Markdown inline link or image: ``[text](target)``, with a leading ``!`` for images.
-#: Reference-style links and angle-bracketed targets are deliberately unmatched — the
-#: README uses neither, and a regex that guessed at them would rewrite less predictably
-#: than one that visibly does not handle them.
+#: Markdown inline link or image: ``[text](target)``, with a leading ``!`` for images. Reference-style links and
+#: angle-bracketed targets are deliberately unmatched — the README uses neither, and a regex that guessed at them
+#: would rewrite less predictably than one that visibly does not handle them.
 MARKDOWN_LINK = re.compile(r"(!?)\[([^\]]*)\]\(([^)\s]+)\)")
 
-#: ``src="..."`` inside a raw HTML tag. The README is markdown, but an HTML ``<img>`` is
-#: the usual way a figure gets a width attribute, and one arriving later must not slip
-#: past this rewrite silently.
+#: ``src="..."`` inside a raw HTML tag. The README is markdown, but an HTML ``<img>`` is the usual way a figure gets
+#: a width attribute, and one arriving later must not slip past this rewrite silently.
 HTML_SRC = re.compile(r'(<img\b[^>]*?\bsrc=")([^"]+)(")', flags=re.IGNORECASE)
 
 #: Targets that are already resolvable from anywhere: absolute URLs, protocol-relative

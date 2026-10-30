@@ -1,17 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for the one-to-one UniqueAssigner (WP-028).
 
-UniqueAssigner extends STAL with a ``topk2 = 1`` reduction: after the base
-pipeline (small-target candidate filter, alignment scoring, top-``k`` select,
-conflict resolution) produces its positive mask, each ground truth keeps only
-its single highest-alignment anchor. These tests cover the invariant directly on
-a 4x4 stride-8 grid whose 16 anchor centres sit at x, y in {4, 12, 20, 28}: a GT
-with many candidates collapses to exactly one positive; every real GT on a
-multi-GT scene keeps exactly one; and the two documented collision outcomes —
-the losing GT falls back to another candidate when one remains, and gets zero
-when its only candidate is claimed by a better-aligned GT. Expected anchors are
-computed by hand from the grid geometry and the alignment metric
-``t = s * u**6``, never lifted from a reference implementation.
+UniqueAssigner extends STAL with a ``topk2 = 1`` reduction: after the base pipeline (small-target candidate filter,
+alignment scoring, top-``k`` select, conflict resolution) produces its positive mask, each ground truth keeps only its
+single highest-alignment anchor. These tests cover the invariant directly on a 4x4 stride-8 grid whose 16 anchor
+centres sit at x, y in {4, 12, 20, 28}: a GT with many candidates collapses to exactly one positive; every real GT on a
+multi-GT scene keeps exactly one; and the two documented collision outcomes — the losing GT falls back to another
+candidate when one remains, and gets zero when its only candidate is claimed by a better-aligned GT. Expected anchors
+are computed by hand from the grid geometry and the alignment metric ``t = s * u**6``, never lifted from a reference
+implementation.
 """
 
 from __future__ import annotations
@@ -20,7 +17,7 @@ import pytest
 import torch
 from torch import Tensor
 
-from lucid_yolo.assign import SmallTargetAssigner, UniqueAssigner, make_anchor_points
+from lucid_yolo.assign import AssignResult, SmallTargetAssigner, UniqueAssigner, make_anchor_points
 
 #: The anchor whose centre (12, 12) is the lone stride-8 candidate of an 8x8 GT.
 _CENTRE_ANCHOR = 5
@@ -38,6 +35,26 @@ def _grid_points() -> Tensor:
     """
     points, _ = make_anchor_points([(4, 4)], [8])
     return points
+
+
+def _assign_unique(gt: Tensor, aligned: dict[int, int]) -> AssignResult:
+    """Run a ``topk=7`` UniqueAssigner on the 4x4 grid, every ground truth real and of class 0.
+
+    Every anchor scores 0.9 for class 0. The box predicted at anchor ``a`` copies ground truth ``aligned[a]``; every
+    other anchor predicts a zero box, so only the listed anchors align with anything.
+
+    Examples:
+        >>> gt = torch.tensor([[[8.0, 8.0, 16.0, 16.0]]])
+        >>> int(_assign_unique(gt, {5: 0}).gt_index[0, 5])
+        0
+    """
+    pred_boxes = torch.zeros(1, 16, 4)
+    for anchor, owner in aligned.items():
+        pred_boxes[0, anchor] = gt[0, owner]
+    count = gt.shape[1]
+    labels = torch.zeros(1, count, dtype=torch.long)
+    mask = torch.ones(1, count, dtype=torch.bool)
+    return UniqueAssigner(topk=7)(torch.full((1, 16, 1), 0.9), pred_boxes, _grid_points(), gt, labels, mask)
 
 
 def test_reduces_many_candidates_to_one() -> None:
@@ -61,14 +78,8 @@ def test_reduces_many_candidates_to_one() -> None:
 def test_exactly_one_positive_per_gt() -> None:
     """Two well-separated GTs each keep exactly one positive on disjoint anchors."""
     gt = torch.tensor([[[0.0, 0.0, 16.0, 16.0], [16.0, 16.0, 32.0, 32.0]]])  # (1, 2, 4)
-    pred_boxes = torch.zeros(1, 16, 4)
-    pred_boxes[0, 0] = gt[0, 0]  # anchor (4, 4): best for GT 0
-    pred_boxes[0, 15] = gt[0, 1]  # anchor (28, 28): best for GT 1
-    scores = torch.full((1, 16, 1), 0.9)
-    labels = torch.tensor([[0, 0]])
-    mask = torch.tensor([[True, True]])
 
-    out = UniqueAssigner(topk=7)(scores, pred_boxes, _grid_points(), gt, labels, mask)
+    out = _assign_unique(gt, {0: 0, 15: 1})  # anchor (4, 4) best for GT 0; anchor (28, 28) best for GT 1
 
     assert int(out.fg_mask.sum()) == 2
     assert int((out.gt_index[0] == 0).sum()) == 1
@@ -80,20 +91,14 @@ def test_exactly_one_positive_per_gt() -> None:
 def test_collision_loser_falls_back_when_candidate_remains() -> None:
     """When two GTs' best anchor collides, the loser keeps another candidate.
 
-    GT 0 (8x8) has the single candidate anchor (12, 12); GT 1 (32x32) covers
-    every anchor including (12, 12). The shared anchor predicts GT 0's box, so it
-    aligns far better with GT 0 (IoU 1.0) than GT 1 (IoU 0.0625); conflict
-    resolution gives it to GT 0, and GT 1 falls back to one of its remaining
-    candidates. Both GTs end with exactly one positive on distinct anchors.
+    GT 0 (8x8) has the single candidate anchor (12, 12); GT 1 (32x32) covers every anchor including (12, 12). The
+    shared anchor predicts GT 0's box, so it aligns far better with GT 0 (IoU 1.0) than GT 1 (IoU 0.0625); conflict
+    resolution gives it to GT 0, and GT 1 falls back to one of its remaining candidates. Both GTs end with exactly one
+    positive on distinct anchors.
     """
     gt = torch.tensor([[[8.0, 8.0, 16.0, 16.0], [0.0, 0.0, 32.0, 32.0]]])
-    pred_boxes = torch.zeros(1, 16, 4)
-    pred_boxes[0, _CENTRE_ANCHOR] = gt[0, 0]  # aligns with GT 0, not GT 1
-    scores = torch.full((1, 16, 1), 0.9)
-    labels = torch.tensor([[0, 0]])
-    mask = torch.tensor([[True, True]])
 
-    out = UniqueAssigner(topk=7)(scores, pred_boxes, _grid_points(), gt, labels, mask)
+    out = _assign_unique(gt, {_CENTRE_ANCHOR: 0})  # aligns with GT 0, not GT 1
 
     assert int((out.gt_index[0] == 0).sum()) == 1
     assert int((out.gt_index[0] == 1).sum()) == 1
@@ -105,20 +110,13 @@ def test_collision_loser_falls_back_when_candidate_remains() -> None:
 def test_collision_loser_gets_zero_without_remaining_candidate() -> None:
     """Two identical single-candidate GTs: the lower-index GT wins, the other gets zero.
 
-    Both GTs are the same 8x8 box whose only stride-8 candidate is anchor
-    (12, 12), so their alignment ties. Conflict resolution breaks the tie by the
-    lowest GT index (GT 0), and GT 1 — left with no other candidate — keeps no
-    positive. This is the irreducible one-to-one collision: an anchor cannot
-    serve two GTs.
+    Both GTs are the same 8x8 box whose only stride-8 candidate is anchor (12, 12), so their alignment ties. Conflict
+    resolution breaks the tie by the lowest GT index (GT 0), and GT 1 — left with no other candidate — keeps no
+    positive. This is the irreducible one-to-one collision: an anchor cannot serve two GTs.
     """
     gt = torch.tensor([[[8.0, 8.0, 16.0, 16.0], [8.0, 8.0, 16.0, 16.0]]])
-    pred_boxes = torch.zeros(1, 16, 4)
-    pred_boxes[0, _CENTRE_ANCHOR] = gt[0, 0]
-    scores = torch.full((1, 16, 1), 0.9)
-    labels = torch.tensor([[0, 0]])
-    mask = torch.tensor([[True, True]])
 
-    out = UniqueAssigner(topk=7)(scores, pred_boxes, _grid_points(), gt, labels, mask)
+    out = _assign_unique(gt, {_CENTRE_ANCHOR: 0})
 
     assert int(out.fg_mask.sum()) == 1
     assert int((out.gt_index[0] == 0).sum()) == 1
@@ -139,35 +137,26 @@ def test_zero_gt_batch_all_background() -> None:
     assert bool(out.fg_mask.any()) is False
 
 
-def test_disabling_hyperparameters_rejected_through_subclass() -> None:
-    """``UniqueAssigner`` inherits the base assigner's parameter validation.
-
-    The o2o branch constructs its assigner through this subclass, never through
-    :class:`~lucid_yolo.assign.tal.TaskAlignedAssigner` directly, so validation that
-    only fired on the base class would leave the branch that actually trains
-    unguarded. ``eps = 0`` is the case that matters most here: it turns a degenerate
-    IoU union into ``NaN``, and a ``NaN`` alignment metric selects nothing.
-    """
-    with pytest.raises(ValueError, match=r"^eps must be finite"):
-        UniqueAssigner(topk=7, eps=0.0)
-
-
 @pytest.mark.parametrize(
     ("parameter", "value"),
     [
+        pytest.param("eps", 0.0, id="eps-zero"),
         pytest.param("s_min", 0.0, id="s-min-zero"),
         pytest.param("s_ref", 0.0, id="s-ref-zero"),
     ],
 )
-def test_disabling_surrogate_sizes_rejected_through_subclass(parameter: str, value: float) -> None:
-    """``UniqueAssigner`` inherits the STAL surrogate-size validation, under the right name.
+def test_disabling_parameters_rejected_through_subclass(parameter: str, value: float) -> None:
+    """``UniqueAssigner`` inherits the base and STAL parameter validation, under the right name.
 
-    The same reason as the base assigner's hyper-parameters — the o2o branch only ever
-    constructs its assigner through this subclass — plus one this class adds: it forwards
-    ``s_min`` and ``s_ref`` to :class:`~lucid_yolo.assign.stal.SmallTargetAssigner`
-    *positionally*, so a later signature change could transpose the pair with nothing to
-    say so. Asserting on the parameter's own name in the message catches that transposition
-    as well as a missing check: a swapped forward would refuse the other one.
+    The o2o branch constructs its assigner through this subclass, never through
+    :class:`~lucid_yolo.assign.tal.TaskAlignedAssigner` directly, so validation that only fired on the base class would
+    leave the branch that actually trains unguarded. ``eps = 0`` is the base case that matters most here: it turns a
+    degenerate IoU union into ``NaN``, and a ``NaN`` alignment metric selects nothing.
+
+    The surrogate sizes add one more reason: this class forwards ``s_min`` and ``s_ref`` to
+    :class:`~lucid_yolo.assign.stal.SmallTargetAssigner` *positionally*, so a later signature change could transpose the
+    pair with nothing to say so. Asserting on the parameter's own name in the message catches that transposition as
+    well as a missing check: a swapped forward would refuse the other one.
     """
     with pytest.raises(ValueError, match=rf"^{parameter} must be finite"):
         UniqueAssigner(topk=7, **{parameter: value})

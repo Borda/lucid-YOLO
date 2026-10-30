@@ -2,18 +2,15 @@
 """Tests for :class:`~lucid_yolo.ptl.callbacks.CloseMosaicCallback` (WP-036).
 
 Covers the DoD ``test_flip_epoch``: a 5-epoch dry run over the real
-:class:`~lucid_yolo.ptl.datamodule.DetectionDataModule` (wired to the synthetic
-detseg fixture, one batch per epoch) with ``close_mosaic=2`` disables mosaic from
-epoch ``E - close_mosaic`` on and leaves it untouched before. A probe callback
-records the pipeline's mosaic probability at the end of every epoch (after the
-schedule has run and the epoch's batches have been drawn), so the per-epoch trace
-is asserted directly. The parametrization also pins the two boundary contracts:
-``close_mosaic=0`` never flips, and ``close_mosaic > max_epochs`` flips from epoch 0.
+:class:`~lucid_yolo.ptl.datamodule.DetectionDataModule` (wired to the synthetic detseg fixture, one batch per epoch)
+with ``close_mosaic=2`` disables mosaic from epoch ``E - close_mosaic`` on and leaves it untouched before. A probe
+callback records the pipeline's mosaic probability at the end of every epoch (after the schedule has run and the
+epoch's batches have been drawn), so the per-epoch trace is asserted directly. The parametrization also pins the two
+boundary contracts: ``close_mosaic=0`` never flips, and ``close_mosaic > max_epochs`` flips from epoch 0.
 
-The Lightning module under test is a one-parameter stub — the callback drives the
-*datamodule* seam, not the model, so the real detection stack is deliberately not
-imported here. Two fast unit tests (no ``Trainer``) pin idempotency via the
-duck-typed datamodule fallback and the negative-argument guard.
+The Lightning module under test is a one-parameter stub — the callback drives the *datamodule* seam, not the model, so
+the real detection stack is deliberately not imported here. Two fast unit tests (no ``Trainer``) pin idempotency via
+the duck-typed datamodule fallback and the negative-argument guard.
 """
 
 from __future__ import annotations
@@ -46,8 +43,8 @@ _BATCH_SIZE = 2
 class _OneParamModule(LightningModule):
     """Minimal Lightning module: consumes the image batch, returns a scalar loss.
 
-    The mosaic schedule is a datamodule concern, so the module only has to run a
-    real ``training_step`` with a gradient-carrying loss; it never inspects targets.
+    The mosaic schedule is a datamodule concern, so the module only has to run a real ``training_step`` with a
+    gradient-carrying loss; it never inspects targets.
     """
 
     def __init__(self) -> None:
@@ -67,8 +64,8 @@ class _OneParamModule(LightningModule):
 class _MosaicProbe(Callback):
     """Record the datamodule's mosaic probability at the end of every train epoch.
 
-    Reading at ``on_train_epoch_end`` captures the value that epoch's batches were
-    drawn with, independent of the order callbacks fire at ``on_train_epoch_start``.
+    Reading at ``on_train_epoch_end`` captures the value that epoch's batches were drawn with, independent of the
+    order callbacks fire at ``on_train_epoch_start``.
     """
 
     def __init__(self, datamodule: DetectionDataModule) -> None:

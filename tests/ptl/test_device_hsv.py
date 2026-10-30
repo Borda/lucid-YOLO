@@ -122,8 +122,8 @@ _GAIN_CORNERS = [HSVParams(h, s, v) for h in (-0.015, 0.015) for s in (-0.7, 0.7
     HSVParams(0.0, 0.0, 0.0)
 ]
 
-# RGB pixels the HSV round trip treats specially: no chroma, saturated primaries, a hue
-# sitting just below the wrap, and channels the gain pushes past the [0, 1] clamp.
+# RGB pixels the HSV round trip treats specially: no chroma, saturated primaries, a hue sitting just below the wrap,
+# and channels the gain pushes past the [0, 1] clamp.
 _DEGENERATE_PIXELS = [
     [0.5, 0.5, 0.5],
     [0.0, 0.0, 0.0],
@@ -178,8 +178,8 @@ def test_transport_matches_host_colour_and_flip(dtype: torch.dtype, mask_targets
 def test_degenerate_pixels_match_host_transform_at_gain_bounds(batch: int, shift: int) -> None:
     """Greys, primaries, a wrapping hue and clamped channels stay bit-equal to the per-image transform.
 
-    Each row of the batch rolls the pixel table and takes a different bound of the default
-    gain ranges, so a gain paired with the wrong image changes the codes.
+    Each row of the batch rolls the pixel table and takes a different bound of the default gain ranges, so a gain
+    paired with the wrong image changes the codes.
     """
     pixels = torch.tensor(_DEGENERATE_PIXELS).T.reshape(3, 1, -1)
     images = [pixels.roll(row, dims=-1) for row in range(batch)]
@@ -197,8 +197,8 @@ def test_degenerate_pixels_match_host_transform_at_gain_bounds(batch: int, shift
 def test_partial_batches_over_two_epochs_match_host_pipeline(tmp_path: Path, cache_images: bool) -> None:
     """Three images at batch size two give a short final batch, and the second epoch keeps matching.
 
-    The draw sequence continues across the epoch boundary, so a deferred loader that consumed
-    a different number of draws in the first epoch would diverge in the second.
+    The draw sequence continues across the epoch boundary, so a deferred loader that consumed a different number of
+    draws in the first epoch would diverge in the second.
     """
     root = _root(tmp_path, count=3)
     baseline = _module(root, cache_train_images=cache_images)
@@ -218,9 +218,9 @@ def test_partial_batches_over_two_epochs_match_host_pipeline(tmp_path: Path, cac
 def test_pipeline_preserves_rng_and_validation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: int) -> None:
     """The public loader transports stated gains without running HSV in a worker.
 
-    The ``refuse_colour`` sentinel patches this process only, so it is live for workers=0 and for
-    forked workers; a spawned worker imports the unpatched class. Worker-side HSV is then caught
-    by the byte-equality and ``hsv_gains is not None`` assertions, which hold under every start method.
+    The ``refuse_colour`` sentinel patches this process only, so it is live for workers=0 and for forked workers; a
+    spawned worker imports the unpatched class. Worker-side HSV is then caught by the byte-equality and
+    ``hsv_gains is not None`` assertions, which hold under every start method.
     """
     root = _root(tmp_path)
     baseline, deferred = _module(root, workers=workers), _module(root, device_hsv=True, workers=workers)
@@ -330,8 +330,8 @@ def test_host_diagnostics_resolve_colour_without_quantization() -> None:
 def test_consumer_keeps_hue_divisor_on_image_device() -> None:
     """Offline CI detects a scalar-divisor reversion before a CUDA runner is needed.
 
-    This is the only CPU-run guard of that reversion: the CPU divides by a host scalar
-    exactly as it divides by a device tensor, so no numeric test on CPU can tell the two apart.
+    This is the only CPU-run guard of that reversion: the CPU divides by a host scalar exactly as it divides by a
+    device tensor, so no numeric test on CPU can tell the two apart.
     """
     image = torch.rand(3, 5, 7)
     sample = _DeferredHSVSample(image, Targets.empty(), HSVParams(0.012, 0.31, -0.27))
@@ -385,9 +385,9 @@ def test_near_tie_pixels_keep_division_codes(
 ) -> None:
     """Pixels whose codes move under reciprocal hue division keep the per-image transform's codes.
 
-    Runs on CPU, so it catches formula drift in the batched colour transform at a rounding
-    tie; the CUDA-only host-scalar reversion is guarded by the divisor test above instead.
-    The first row is the real-data pixel the CUDA test below also pins.
+    Runs on CPU, so it catches formula drift in the batched colour transform at a rounding tie; the CUDA-only
+    host-scalar reversion is guarded by the divisor test above instead. The first row is the real-data pixel the
+    CUDA test below also pins.
     """
     image = torch.tensor(bits, dtype=torch.int32).view(torch.float32).reshape(3, 1, 1)
     expected, _ = HSVJitter().apply(image, Targets.empty(), HSVParams(*gains))

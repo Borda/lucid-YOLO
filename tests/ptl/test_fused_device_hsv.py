@@ -53,8 +53,8 @@ def test_cpu_restore_keeps_native_path() -> None:
 class _CudaLooking(torch.Tensor):
     """Report CUDA residency on CPU storage, so the dispatch branch runs on a host without a GPU.
 
-    Torch-function dispatch is disabled, so every tensor computed from it is a plain
-    CPU tensor: only the batch handed to the restore claims to be on CUDA.
+    Torch-function dispatch is disabled, so every tensor computed from it is a plain CPU tensor: only the batch handed
+    to the restore claims to be on CUDA.
     """
 
     __torch_function__ = torch._C._disabled_torch_function_impl
@@ -72,9 +72,9 @@ def test_fused_switch_decides_whether_hook_reaches_kernel(
 ) -> None:
     """``fused_hsv=False`` keeps a CUDA batch on the native restore without consulting the fused backend.
 
-    The switch is the escape from a broken toolchain and the bisecting control between
-    the two restores, so it must bypass the backend entirely rather than rely on its
-    own fallbacks. The stand-in declines, so both rows restore native pixels.
+    The switch is the escape from a broken toolchain and the bisecting control between the two restores, so it must
+    bypass the backend entirely rather than rely on its own fallbacks. The stand-in declines, so both rows restore
+    native pixels.
     """
     seen: list[torch.Tensor] = []
 
@@ -120,10 +120,9 @@ def test_failed_first_launch_warns_once_then_latches_native(
 ) -> None:
     """A toolchain failing its first launch costs speed only: one warning, then no further attempts.
 
-    Pixels are identical on either path, so the restore hands back ``None`` for the
-    native expressions instead of ending the fit on its first batch. The launch sits
-    below the eligibility guards, which is what lets a CPU host reach it with a
-    stand-in kernel.
+    Pixels are identical on either path, so the restore hands back ``None`` for the native expressions instead of
+    ending the fit on its first batch. The launch sits below the eligibility guards, which is what lets a CPU host
+    reach it with a stand-in kernel.
     """
     kernel = _RecordingKernel(RuntimeError("launcher build failed"))
     monkeypatch.setattr(_hsv_cuda, "_restore_kernel", kernel, raising=False)
@@ -143,8 +142,8 @@ def test_failure_after_verified_launch_propagates(
 ) -> None:
     """Once a launch has worked, a later exception is a runtime fault the native path shares, so it surfaces.
 
-    Only the first launch answers the toolchain question. Falling back after it would
-    hide an asynchronous CUDA fault behind a warning about the compiler.
+    Only the first launch answers the toolchain question. Falling back after it would hide an asynchronous CUDA fault
+    behind a warning about the compiler.
     """
     kernel = _RecordingKernel()
     monkeypatch.setattr(_hsv_cuda, "_restore_kernel", kernel, raising=False)
@@ -164,9 +163,9 @@ def test_launch_passes_transport_scale_and_covers_tail_pixels(
 ) -> None:
     """The kernel receives the collate's own transport scale and one extra block for a partial tail.
 
-    The kernel rounds onto the code grid the collate quantizes to. Passing the one
-    shared constant, instead of a literal of its own, is what a CPU-only CI can pin
-    while the bitwise comparisons against the native path need a GPU.
+    The kernel rounds onto the code grid the collate quantizes to. Passing the one shared constant, instead of a
+    literal of its own, is what a CPU-only CI can pin while the bitwise comparisons against the native path need
+    a GPU.
     """
     kernel = _RecordingKernel()
     monkeypatch.setattr(_hsv_cuda, "_restore_kernel", kernel, raising=False)
@@ -201,8 +200,8 @@ def test_ineligible_restore_never_consults_fused_backend(
 ) -> None:
     """Every request short of channels-last float32 on CUDA keeps the native restore without the backend.
 
-    The dispatch decides before the backend's own guards run, so a regression here
-    would route other consumers through the optional compiler on a GPU host.
+    The dispatch decides before the backend's own guards run, so a regression here would route other consumers through
+    the optional compiler on a GPU host.
     """
 
     def refuse(*_args: object) -> None:
@@ -254,8 +253,8 @@ def test_host_compiler_probe_honours_cc_before_discovery(
 ) -> None:
     """An explicit ``CC`` decides alone; without one, GCC or Clang on ``PATH`` admits the fused restore.
 
-    A named compiler that is missing must not be rescued by a GCC on ``PATH``: the
-    launcher build uses ``CC`` when it is set. An empty ``CC`` counts as unset.
+    A named compiler that is missing must not be rescued by a GCC on ``PATH``: the launcher build uses ``CC`` when it
+    is set. An empty ``CC`` counts as unset.
     """
     monkeypatch.setenv("CC", cc)
     monkeypatch.setattr(_hsv_cuda.shutil, "which", lambda name: f"/usr/bin/{name}" if name in on_path else None)
@@ -320,9 +319,8 @@ def test_all_transport_codes_keep_cuda_scalar_division_bits() -> None:
 def test_gain_addition_precedes_float32_cast() -> None:
     """A gain beyond the float32 tie must move an even half-code to the next code.
 
-    ``1 + (2**-24 + 2**-50)`` rounds upward when formed in double; casting
-    the gain first loses the final term and rounds the sum back to one. A grey
-    at code 126.5 therefore rounds to 127, not the even 126 of the wrong order.
+    ``1 + (2**-24 + 2**-50)`` rounds upward when formed in double; casting the gain first loses the final term and
+    rounds the sum back to one. A grey at code 126.5 therefore rounds to 127, not the even 126 of the wrong order.
     """
     images = torch.full((1, 3, 1, 1), 126.5 / 255, device="cuda")
     gains = torch.tensor([[0, 0, 2**-24 + 2**-50]], device="cuda", dtype=torch.float64)
@@ -347,24 +345,24 @@ def test_stated_gains_and_tail_blocks_match_native_bits(shape: tuple[int, ...]) 
 
 @pytest.mark.gpu
 @_CUDA
-def test_missing_backend_falls_back_without_changing_pixels(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An optional compiler's absence retains the original CUDA expressions."""
+@pytest.mark.parametrize(
+    ("attribute", "unavailable"),
+    [
+        pytest.param("_AVAILABLE", False, id="backend-missing"),
+        pytest.param("_host_compiler_available", lambda: False, id="compiler-missing"),
+    ],
+)
+def test_missing_backend_or_compiler_keeps_native_restore(
+    monkeypatch: pytest.MonkeyPatch, attribute: str, unavailable: object
+) -> None:
+    """An optional compiler's or backend's absence retains the original CUDA expressions.
+
+    The compiler row is a runtime-only CUDA installation that must keep working without a host C compiler.
+    """
     images = torch.full((1, 3, 3, 5), 0.5, device="cuda")
     gains = torch.zeros(1, 3, device="cuda", dtype=torch.float64)
     expected = datamodule._restore_images(images, _packed(gains), torch.float32)
-    monkeypatch.setattr(_hsv_cuda, "_AVAILABLE", False)
-    actual = datamodule._restore_images(images, _packed(gains), torch.float32, channels_last=True)
-    assert torch.equal(actual.view(torch.int32), expected.view(torch.int32))
-
-
-@pytest.mark.gpu
-@_CUDA
-def test_missing_compiler_keeps_native_restore(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A runtime-only CUDA installation keeps working without a host C compiler."""
-    images = torch.full((1, 3, 3, 5), 0.5, device="cuda")
-    gains = torch.zeros(1, 3, device="cuda", dtype=torch.float64)
-    expected = datamodule._restore_images(images, _packed(gains), torch.float32)
-    monkeypatch.setattr(_hsv_cuda, "_host_compiler_available", lambda: False)
+    monkeypatch.setattr(_hsv_cuda, attribute, unavailable)
     actual = datamodule._restore_images(images, _packed(gains), torch.float32, channels_last=True)
     assert torch.equal(actual.view(torch.int32), expected.view(torch.int32))
 

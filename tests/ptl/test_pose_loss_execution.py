@@ -45,6 +45,19 @@ def _pose(
     )
 
 
+def _active_pose() -> DetectionLitModule:
+    """Build a capture-enabled pose module whose loss replay is switched on as a CUDA training run would.
+
+    Examples:
+        >>> _active_pose()._capture_loss_active
+        True
+    """
+    model = _pose(True)
+    model._capture_loss_active = True
+    model._trainer = MagicMock(spec=Trainer, training=True)
+    return model
+
+
 @pytest.fixture
 def true_fp32(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run cuDNN convolutions in IEEE float32 rather than TF32, the arithmetic a ``32-true`` bound assumes.
@@ -128,9 +141,7 @@ def test_pose_host_execution_keeps_loss_and_gradient_values(
 @pytest.mark.parametrize("custom", ["_score_branch", "_rle_on", "_oks_on", "_gather_keypoint_positives"])
 def test_pose_custom_scoring_keeps_native_dispatch(custom: str) -> None:
     """An overridden scoring boundary cannot be bypassed by the faster composition."""
-    model = _pose(True)
-    model._capture_loss_active = True
-    model._trainer = MagicMock(spec=Trainer, training=True)
+    model = _active_pose()
     original = getattr(model, custom)
     with (
         patch.object(model, "log"),
@@ -148,9 +159,7 @@ def test_pose_pairing_continues_after_recorder_retires() -> None:
     the fit. The pose density batch has a gate of its own, so it still scores both branches in one
     call — the documented behaviour, pinned so a later change to it is a decision, not a drift.
     """
-    model = _pose(True)
-    model._capture_loss_active = True
-    model._trainer = MagicMock(spec=Trainer, training=True)
+    model = _active_pose()
     with pytest.warns(UserWarning, match="^capture_loss=True stays eager: a test cause$"):
         model._loss_capture.retire("a test cause")
     with (
@@ -299,10 +308,9 @@ def test_pose_cuda_execution_keeps_objective_and_gradient_direction(
 def test_pose_cuda_execution_composes_with_network_replay() -> None:
     """Pose loss dispatch stays correct alongside the independent backbone/neck network replay.
 
-    `capture_loss` reaches the network through `_training_network`, which runs
-    `_network_capture.run_features` for pose when `capture_network` is also set — a
-    second, independent recorder with its own graph pool. Nothing before this test ran
-    the two together for `task="keypoints"`.
+    `capture_loss` reaches the network through `_training_network`, which runs `_network_capture.run_features` for pose
+    when `capture_network` is also set — a second, independent recorder with its own graph pool. Nothing before this
+    test ran the two together for `task="keypoints"`.
 
     The four steps differ in content: full instances, no instances, instances without a visible point, then
     full instances again. The empty step is answered natively by the loss recorder, and the last step proves
@@ -411,9 +419,7 @@ def test_pose_custom_criterion_keeps_native_keywords() -> None:
     The routing gate sends a criterion the recorder cannot certify to its native call, which never reaches
     the recorder's own source check; the step still names the cause, as detection does for the same setup.
     """
-    model = _pose(True)
-    model._capture_loss_active = True
-    model._trainer = MagicMock(spec=Trainer, training=True)
+    model = _active_pose()
     original = model.loss
     calls = []
 
@@ -447,9 +453,7 @@ def test_pose_custom_criterion_retires_recorder_once_per_fit() -> None:
     Without a once-per-fit latch, every training step would repeat the same fallback warning. The latch is
     the recorder's own retirement, which the fit lifecycle clears at the next fit start.
     """
-    model = _pose(True)
-    model._capture_loss_active = True
-    model._trainer = MagicMock(spec=Trainer, training=True)
+    model = _active_pose()
     model.loss = model.loss.__call__  # the same arithmetic behind a callable the recorder cannot certify
     with patch.object(model, "log"), warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")

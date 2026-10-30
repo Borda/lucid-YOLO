@@ -1,21 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the COCO annotation reader behind the dual-path evaluator (WP-083).
 
-:mod:`lucid_yolo.eval.annotations` is the one place the evaluator's ground truth is
-built, shared by the val2017 checkpoint evaluation and the synthetic-shapes
-regression producer. These tests pin the parts a second copy would have been free to
-get subtly wrong: the ``xywh`` to ``xyxy`` conversion, which annotations are dropped
-as degenerate, that unannotated images still appear as empty targets, and that the
-label map follows the sorted-category-id order
+:mod:`lucid_yolo.eval.annotations` is the one place the evaluator's ground truth is built, shared by the val2017
+checkpoint evaluation and the synthetic-shapes regression producer. These tests pin the parts a second copy would have
+been free to get subtly wrong: the ``xywh`` to ``xyxy`` conversion, which annotations are dropped as degenerate, that
+unannotated images still appear as empty targets, and that the label map follows the sorted-category-id order
 :class:`~lucid_yolo.data.coco.CocoDetectionDataset` uses.
 
-The letterboxed batch stream is covered against real image files written to
-``tmp_path``, so the loader path (read, scale, letterbox, stack) is exercised rather
-than mocked.
+The letterboxed batch stream is covered against real image files written to ``tmp_path``, so the loader path (read,
+scale, letterbox, stack) is exercised rather than mocked.
 """
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -57,6 +55,28 @@ def _payload() -> dict[str, object]:
             {"image_id": 1, "bbox": [1.0, 2.0, 3.0, 4.0], "category_id": 3, "iscrowd": 0, "area": 12.0},
         ],
     }
+
+
+def _write_annotations(tmp_path: Path, payload: dict[str, object] | None = None, name: str = "instances.json") -> Path:
+    """Write ``payload`` as a COCO annotation file under ``tmp_path`` and return its path.
+
+    Args:
+        tmp_path: Directory the file is created in.
+        payload: The COCO document; defaults to :func:`_payload`.
+        name: File name, ``instances.json`` unless a keypoints file is being imitated.
+
+    Returns:
+        The written file.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     _write_annotations(Path(tmp), {"images": []}, name="a.json").read_text()
+        '{"images": []}'
+    """
+    ann_file = tmp_path / name
+    ann_file.write_text(json.dumps(_payload() if payload is None else payload))
+    return ann_file
 
 
 def test_empty_target_has_torchmetrics_dtypes() -> None:
@@ -115,11 +135,10 @@ def test_valid_annotations_survive_alongside_degenerate_ones() -> None:
 def test_keypoint_load_carries_annotations_own_metadata(tmp_path: Path) -> None:
     """A ``with_keypoints`` load hands the OKS scorer the file's fields, not a recount of them.
 
-    Every one of the four is chosen here to disagree with what a reconstruction from
-    the points would produce: the declared ``num_keypoints`` is 1 against two visible
-    joints, ``area`` is 500 against a 2x2 point extent, ``iscrowd`` is set on an
-    instance nothing else marks. If any is recomputed instead of read, this asserts
-    the recomputed value and fails.
+    Every one of the four is chosen here to disagree with what a reconstruction from the points would produce: the
+    declared ``num_keypoints`` is 1 against two visible joints, ``area`` is 500 against a 2x2 point extent, ``iscrowd``
+    is set on an instance nothing else marks. If any is recomputed instead of read, this asserts the recomputed value
+    and fails.
     """
     payload = _payload()
     payload["annotations"] = [
@@ -133,8 +152,7 @@ def test_keypoint_load_carries_annotations_own_metadata(tmp_path: Path) -> None:
             "keypoints": [1.0, 2.0, 2, 3.0, 4.0, 1, 0.0, 0.0, 0],
         }
     ]
-    ann_file = tmp_path / "person_keypoints.json"
-    ann_file.write_text(json.dumps(payload))
+    ann_file = _write_annotations(tmp_path, payload, name="person_keypoints.json")
 
     _, targets, _ = load_eval_annotations(ann_file, with_keypoints=True)
 
@@ -149,11 +167,10 @@ def test_keypoint_load_carries_annotations_own_metadata(tmp_path: Path) -> None:
 def test_keypoint_load_gives_unannotated_image_empty_point_tensors(tmp_path: Path) -> None:
     """An image with no annotation still carries the three keypoint keys, all empty.
 
-    Every image the evaluator scores must produce a target dict of one shape: the
-    OKS document is built by iterating the instance axis, and a missing key on the
-    unannotated images would fail there rather than at the boundary that dropped it.
-    Image 2 of this payload carries no annotation at all, which is the majority case
-    on a person-keypoints split, where most images hold no person.
+    Every image the evaluator scores must produce a target dict of one shape: the OKS document is built by iterating
+    the instance axis, and a missing key on the unannotated images would fail there rather than at the boundary that
+    dropped it. Image 2 of this payload carries no annotation at all, which is the majority case on a person-keypoints
+    split, where most images hold no person.
     """
     payload = _payload()
     payload["annotations"] = [
@@ -164,8 +181,7 @@ def test_keypoint_load_gives_unannotated_image_empty_point_tensors(tmp_path: Pat
             "keypoints": [1.0, 2.0, 2, 3.0, 4.0, 1, 0.0, 0.0, 0],
         }
     ]
-    ann_file = tmp_path / "person_keypoints.json"
-    ann_file.write_text(json.dumps(payload))
+    ann_file = _write_annotations(tmp_path, payload, name="person_keypoints.json")
 
     _, targets, _ = load_eval_annotations(ann_file, with_keypoints=True)
 
@@ -178,13 +194,11 @@ def test_keypoint_load_gives_unannotated_image_empty_point_tensors(tmp_path: Pat
 def test_keypoint_load_refuses_annotation_file_with_no_points(tmp_path: Path) -> None:
     """A plain ``instances`` file loaded for the pose protocol fails, naming the field.
 
-    The two COCO files differ only in which annotations they carry, so pointing the
-    keypoint protocol at the detection one is an easy mistake. It must not resolve
-    into an evaluation of zero poses against a full split, which would report a
-    perfectly formatted OKS of 0.
+    The two COCO files differ only in which annotations they carry, so pointing the keypoint protocol at the detection
+    one is an easy mistake. It must not resolve into an evaluation of zero poses against a full split, which would
+    report a perfectly formatted OKS of 0.
     """
-    ann_file = tmp_path / "instances.json"
-    ann_file.write_text(json.dumps(_payload()))
+    ann_file = _write_annotations(tmp_path)
 
     with pytest.raises(ValueError, match="keypoints length"):
         load_eval_annotations(ann_file, with_keypoints=True)
@@ -193,11 +207,10 @@ def test_keypoint_load_refuses_annotation_file_with_no_points(tmp_path: Path) ->
 def test_masks_and_keypoints_requested_together_reach_same_target(tmp_path: Path) -> None:
     """Both opt-ins compose: one load with both flags carries the mask *and* the points.
 
-    The two options are documented as independent, and asking for both selects the
-    lazy mask path — which is where the keypoint flag used to stop, so the OKS keys
-    vanished from a target that still looked complete to everything reading its boxes.
-    The values are compared against the eager keypoints-only load of the same file, so
-    a target that grew the keys but filled them from somewhere else fails too.
+    The two options are documented as independent, and asking for both selects the lazy mask path — which is where the
+    keypoint flag used to stop, so the OKS keys vanished from a target that still looked complete to everything
+    reading its boxes. The values are compared against the eager keypoints-only load of the same file, so a target that
+    grew the keys but filled them from somewhere else fails too.
     """
     payload = _payload()
     payload["annotations"] = [
@@ -210,8 +223,7 @@ def test_masks_and_keypoints_requested_together_reach_same_target(tmp_path: Path
             "segmentation": [[1, 2, 4, 2, 4, 6, 1, 6]],
         }
     ]
-    ann_file = tmp_path / "person_keypoints.json"
-    ann_file.write_text(json.dumps(payload))
+    ann_file = _write_annotations(tmp_path, payload, name="person_keypoints.json")
 
     _, combined, _ = load_eval_annotations(ann_file, with_masks=True, with_keypoints=True)
 
@@ -253,10 +265,9 @@ def test_masks_and_keypoints_requested_together_reach_same_target(tmp_path: Path
 def test_malformed_numeric_metadata_refused_naming_annotation(annotation: dict[str, object], message: str) -> None:
     """Each out-of-domain numeric field is refused on its own, naming image, annotation and value.
 
-    Carried through instead, every one of these makes both scorers report ``-1`` for
-    every summary — an evaluation run consumed for an undefined metric report with
-    nothing in it pointing back at the annotation that caused it. The three fields are
-    exercised separately because a combined fixture cannot say which one was diagnosed.
+    Carried through instead, every one of these makes both scorers report ``-1`` for every summary — an evaluation run
+    consumed for an undefined metric report with nothing in it pointing back at the annotation that caused it. The
+    three fields are exercised separately because a combined fixture cannot say which one was diagnosed.
     """
     with pytest.raises(ValueError, match=message):
         annotations_to_target([annotation])
@@ -265,10 +276,9 @@ def test_malformed_numeric_metadata_refused_naming_annotation(annotation: dict[s
 def test_legal_but_unusual_metadata_loads() -> None:
     """Off-image coordinates, a zero area and the crowd flag are input, not malformed input.
 
-    The refusal above must land on values with no reading at all, not on the three
-    things a real COCO export legitimately contains: a box whose origin sits outside
-    the image, an ``area`` of zero a protocol may assign a hairline instance, and
-    ``iscrowd = 1``, which is the crowd-ignore rule this reader exists to preserve.
+    The refusal above must land on values with no reading at all, not on the three things a real COCO export
+    legitimately contains: a box whose origin sits outside the image, an ``area`` of zero a protocol may assign a
+    hairline instance, and ``iscrowd = 1``, which is the crowd-ignore rule this reader exists to preserve.
     """
     target = annotations_to_target(
         [{"id": 1, "image_id": 1, "bbox": [-5.0, -5.0, 2.0, 2.0], "category_id": 3, "area": 0.0, "iscrowd": 1}]
@@ -282,15 +292,13 @@ def test_legal_but_unusual_metadata_loads() -> None:
 def test_lazy_path_refuses_malformed_metadata_at_load_not_mid_run(tmp_path: Path) -> None:
     """A masked load validates the whole file up front rather than at first lookup.
 
-    :class:`~lucid_yolo.eval.annotations.LazyTargets` builds nothing until the
-    evaluator asks for an image, so without this pass the same refusal would arrive
-    part-way through a scoring run that has already spent its minutes — which is the
-    cost the malformed file was meant to avoid in the first place.
+    :class:`~lucid_yolo.eval.annotations.LazyTargets` builds nothing until the evaluator asks for an image, so without
+    this pass the same refusal would arrive part-way through a scoring run that has already spent its minutes — which
+    is the cost the malformed file was meant to avoid in the first place.
     """
     payload = _payload()
     payload["annotations"] = [{"id": 9, "image_id": 1, "bbox": [1.0, 1.0, 2.0, 2.0], "category_id": 3, "iscrowd": 2}]
-    ann_file = tmp_path / "instances.json"
-    ann_file.write_text(json.dumps(payload))
+    ann_file = _write_annotations(tmp_path, payload)
 
     with pytest.raises(ValueError, match="annotation 9 of image 1: iscrowd must be 0 or 1"):
         load_eval_annotations(ann_file, with_masks=True)
@@ -298,8 +306,7 @@ def test_lazy_path_refuses_malformed_metadata_at_load_not_mid_run(tmp_path: Path
 
 def test_load_sorts_images_by_id(tmp_path: Path) -> None:
     """Images are returned in ascending id order regardless of their order in the file."""
-    ann_file = tmp_path / "instances.json"
-    ann_file.write_text(json.dumps(_payload()))
+    ann_file = _write_annotations(tmp_path)
     images, _, _ = load_eval_annotations(ann_file)
     assert [image.image_id for image in images] == [1, 2]
     assert images[0] == EvalImage(image_id=1, file_name="a.png", height=6, width=10)
@@ -307,8 +314,7 @@ def test_load_sorts_images_by_id(tmp_path: Path) -> None:
 
 def test_load_gives_unannotated_images_empty_target(tmp_path: Path) -> None:
     """Every image gets a target entry, so the evaluator sees the whole split."""
-    ann_file = tmp_path / "instances.json"
-    ann_file.write_text(json.dumps(_payload()))
+    ann_file = _write_annotations(tmp_path)
     _, targets, _ = load_eval_annotations(ann_file)
     assert set(targets) == {1, 2}
     assert targets[1]["boxes"].tolist() == [[1.0, 2.0, 4.0, 6.0]]
@@ -318,17 +324,15 @@ def test_load_gives_unannotated_images_empty_target(tmp_path: Path) -> None:
 def test_masked_load_matches_eager_decode(tmp_path: Path) -> None:
     """The lazy mapping returns exactly what decoding every annotation up front would.
 
-    Laziness is a memory strategy, not a different ground truth: every key, every
-    tensor and every mask must match :func:`annotations_to_target` called directly
-    with the image's own size. An off-by-one in the size lookup, or a target built
-    against the wrong image's ``(height, width)``, is invisible in the shapes of a
-    single-image fixture and shows up here because the two images differ in size.
+    Laziness is a memory strategy, not a different ground truth: every key, every tensor and every mask must match
+    :func:`annotations_to_target` called directly with the image's own size. An off-by-one in the size lookup, or a
+    target built against the wrong image's ``(height, width)``, is invisible in the shapes of a single-image fixture
+    and shows up here because the two images differ in size.
     """
     payload = _payload()
     polygon = [[1.0, 2.0, 4.0, 2.0, 4.0, 6.0, 1.0, 6.0]]
     payload["annotations"] = [{**_payload()["annotations"][0], "segmentation": polygon}]  # type: ignore[index]
-    ann_file = tmp_path / "instances.json"
-    ann_file.write_text(json.dumps(payload))
+    ann_file = _write_annotations(tmp_path, payload)
 
     _, targets, _ = load_eval_annotations(ann_file, with_masks=True)
     expected = annotations_to_target(payload["annotations"], image_size=(6, 10))  # type: ignore[arg-type]
@@ -340,37 +344,25 @@ def test_masked_load_matches_eager_decode(tmp_path: Path) -> None:
     assert targets[2]["masks"].shape == (0, 8, 12)  # the unannotated image, at its own size
 
 
-def test_masked_load_decodes_on_lookup_not_up_front(tmp_path: Path) -> None:
+@patch.object(annotations, "annotation_mask", wraps=annotations.annotation_mask)
+def test_masked_load_decodes_on_lookup_not_up_front(decode_mask: MagicMock, tmp_path: Path) -> None:
     """No mask is decoded until its image is asked for.
 
-    The property that makes val2017 segmentation evaluation runnable at all --
-    eager decoding is ~11 GB resident before the first image is read. A mapping
-    that decoded everything in the constructor and merely *stored* it would
-    satisfy every other test in this file.
+    The property that makes val2017 segmentation evaluation runnable at all -- eager decoding is ~11 GB resident before
+    the first image is read. A mapping that decoded everything in the constructor and merely *stored* it would satisfy
+    every other test in this file.
     """
-    payload = _payload()
-    ann_file = tmp_path / "instances.json"
-    ann_file.write_text(json.dumps(payload))
+    ann_file = _write_annotations(tmp_path)
 
-    decoded: list[object] = []
-    real_mask = annotations.annotation_mask
-
-    def _counting_mask(segmentation: object, image_size: tuple[int, int]) -> torch.Tensor:
-        decoded.append(segmentation)
-        return real_mask(segmentation, image_size)
-
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(annotations, "annotation_mask", _counting_mask)
-        _, targets, _ = load_eval_annotations(ann_file, with_masks=True)
-        assert decoded == []  # loading the file decodes nothing
-        _ = targets[1]["masks"]
-        assert len(decoded) == 1
+    _, targets, _ = load_eval_annotations(ann_file, with_masks=True)
+    assert decode_mask.call_count == 0  # loading the file decodes nothing
+    _ = targets[1]["masks"]
+    assert decode_mask.call_count == 1
 
 
 def test_load_builds_sorted_label_map(tmp_path: Path) -> None:
     """The label map is contiguous-label to category id in sorted-category-id order."""
-    ann_file = tmp_path / "instances.json"
-    ann_file.write_text(json.dumps(_payload()))
+    ann_file = _write_annotations(tmp_path)
     _, _, label_to_category = load_eval_annotations(ann_file)
     assert label_to_category == {0: 3, 1: 7}
 
@@ -395,9 +387,9 @@ def test_letterboxed_batches_stack_and_carry_original_sizes(tmp_path: Path) -> N
 def test_16_bit_png_letterboxes_by_its_own_depth(tmp_path: Path) -> None:
     """A 16-bit PNG reaches the model scaled by its own maximum, 65535, rather than by 255.
 
-    ``read_image`` decodes such a file to ``uint16``; divided by the 8-bit 255, a code of
-    60000 read as 235.3, far outside the unit range the model was trained on. The canvas
-    matches the image side, so no padding enters the extremes being compared.
+    ``read_image`` decodes such a file to ``uint16``; divided by the 8-bit 255, a code of 60000 read as 235.3, far
+    outside the unit range the model was trained on. The canvas matches the image side, so no padding enters the
+    extremes being compared.
     """
     side = 8
     deep = Image.new("I;16", (side, side))
@@ -414,9 +406,8 @@ def test_16_bit_png_letterboxes_by_its_own_depth(tmp_path: Path) -> None:
 def test_8_bit_png_letterboxes_as_code_over_255_bit_for_bit(tmp_path: Path) -> None:
     """Every 8-bit code letterboxes exactly as the fixed ``/ 255.0`` scale always produced.
 
-    The oracle restates the pre-fix computation on the same file and the same letterbox,
-    so the comparison is exact equality over all 256 codes through an upscale and a pad,
-    independent of whether the resample itself is exact.
+    The oracle restates the pre-fix computation on the same file and the same letterbox, so the comparison is exact
+    equality over all 256 codes through an upscale and a pad, independent of whether the resample itself is exact.
     """
     codes = torch.arange(256, dtype=torch.uint8).reshape(1, 16, 16).expand(3, 16, 16).contiguous()
     path = tmp_path / "flat.png"

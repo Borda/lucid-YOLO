@@ -1,13 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 r"""Doctest-fence audit: every ``src/`` docstring example sits in a ```` ```pycon ```` block.
 
-``--doctest-modules`` collects a ``>>>`` prompt whether it is fenced or bare, so the
-fence changes no gate result; what it buys is one form across the tree, which a reader
-and the next edit can copy without first checking which convention the module chose.
-The rule covers the package only; ``scripts/`` and the test trees are development
-tooling with no reader beyond the next editor, and keep whichever form each module uses.
-Two rules, read from docstrings only -- a ``>>>`` inside an ordinary string literal or a
-comment is not a doctest and is never flagged:
+``--doctest-modules`` collects a ``>>>`` prompt whether it is fenced or bare, so the fence changes no gate result;
+what it buys is one form across the tree, which a reader and the next edit can copy without first checking which
+convention the module chose. The rule covers the package only; ``scripts/`` and the test trees are development
+tooling with no reader beyond the next editor, and keep whichever form each module uses. Two rules, read from
+docstrings only -- a ``>>>`` inside an ordinary string literal or a comment is not a doctest and is never flagged:
 
 * every ``>>>`` prompt line sits inside an open ```` ```pycon ```` fence;
 * every ``pycon`` block ends with exactly one blank line before its closing
@@ -67,8 +65,7 @@ def docstring_violations(text: str, first_line: int) -> list[tuple[int, str]]:
 
     Args:
         text: The docstring's value.
-        first_line: Source line its opening quotes sit on; line ``n`` of ``text`` is
-            reported as ``first_line + n``.
+        first_line: Source line its opening quotes sit on; line ``n`` of ``text`` is reported as ``first_line + n``.
 
     Returns:
         One pair per bare prompt run and per badly closed ``pycon`` block.

@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-015 data goldens and the debug-grid visualizer.
 
-Covers three contracts: the frozen ``goldens/data_checksums.json`` passes the
-WP-005 harness against a live pipeline draw; the producer is deterministic on this
-platform (two calls return identical metrics); and the ``dump_debug_grid`` CLI
-renders a decodable annotated PNG from the WP-007 synthetic fixture directory
-(offline, no dataset download). Modules under ``scripts/`` are loaded by file path
-because ``scripts`` is not an importable package.
+Covers three contracts: the frozen ``goldens/data_checksums.json`` passes the WP-005 harness against a live pipeline
+draw; the producer is deterministic on this platform (two calls return identical metrics); and the ``dump_debug_grid``
+CLI renders a decodable annotated PNG from the WP-007 synthetic fixture directory (offline, no dataset download).
+Modules under ``scripts/`` are loaded by file path because ``scripts`` is not an importable package.
 """
 
 from __future__ import annotations

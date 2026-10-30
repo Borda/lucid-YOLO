@@ -1,14 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for the Task-Aligned Assigner (WP-025).
 
-The centrepiece ``test_alignment_and_topk`` builds a 4x4 stride-4 grid (16
-anchors) with two disjoint ground-truth boxes and hand-crafted predicted scores
-and boxes, so every candidate anchor, its alignment metric ``t = s * u**6``, the
-top-k winners, and the per-ground-truth-normalized weights can be enumerated by
-hand. Supporting tests isolate the centre-inside filter, zero-ground-truth
-images, padded ground truths, graceful top-k degradation, and conflict
-resolution. All expected values are derived from the R4 formulation, never
-lifted from a reference implementation.
+The centrepiece ``test_alignment_and_topk`` builds a 4x4 stride-4 grid (16 anchors) with two disjoint ground-truth boxes
+and hand-crafted predicted scores and boxes, so every candidate anchor, its alignment metric ``t = s * u**6``, the top-k
+winners, and the per-ground-truth-normalized weights can be enumerated by hand. Supporting tests isolate the
+centre-inside filter, zero-ground-truth images, padded ground truths, graceful top-k degradation, and conflict
+resolution. All expected values are derived from the R4 formulation, never lifted from a reference implementation.
 """
 
 import math
@@ -59,11 +56,10 @@ def _build_dual_gt_scene() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, to
 def test_alignment_and_topk() -> None:
     """Top-3 selection, targets, and normalized weights match the hand case.
 
-    Per GT the metric is ``t = score * IoU**6``. GT0 candidate t values are
-    idx0=0.9, idx4=0.6/64, idx1=0.8/4096, idx5=0.5/4096; top-3 keep {0, 4, 1}
-    and drop idx5. GT1 keeps {10, 14, 11} and drops idx15. Normalization scales
-    each GT's positives by ``u_max / t_max`` (u_max == 1.0 here), so the
-    best-aligned anchor of each GT reaches weight 1.0.
+    Per GT the metric is ``t = score * IoU**6``. GT0 candidate t values are idx0=0.9, idx4=0.6/64, idx1=0.8/4096,
+    idx5=0.5/4096; top-3 keep {0, 4, 1} and drop idx5. GT1 keeps {10, 14, 11} and drops idx15. Normalization scales
+    each GT's positives by ``u_max / t_max`` (u_max == 1.0 here), so the best-aligned anchor of each GT reaches weight
+    1.0.
     """
     points, scores, boxes, gt_boxes, gt_labels, gt_mask = _build_dual_gt_scene()
     assigner = TaskAlignedAssigner(topk=3)
@@ -213,15 +209,12 @@ def test_conflict_resolution_assigns_highest_t() -> None:
 def test_all_zero_metric_keeps_min_k_c_of_gts_own_candidates(topk: int) -> None:
     """A ground truth with an all-zero alignment metric keeps ``min(k, c)`` of its candidates.
 
-    This is the state the head is in at initialization: ``decode_ltrb`` applies no
-    non-negativity, so raw distances decode to inverted boxes whose IoU with every
-    ground truth is exactly zero and whose metric ``t = s * u**6`` is therefore
-    uniformly zero. The scene puts the only real ground truth in the bottom-right
-    quadrant of a 4x4 stride-4 grid, so its four candidates are anchors
-    ``{10, 11, 14, 15}`` — deliberately not the low indices a tie-broken ``topk``
-    reaches for first. Ranking the ties globally instead of within the ground
-    truth's own candidate set makes the intersection with that set return zero
-    positives for a ground truth that had four.
+    This is the state the head is in at initialization: ``decode_ltrb`` applies no non-negativity, so raw distances
+    decode to inverted boxes whose IoU with every ground truth is exactly zero and whose metric ``t = s * u**6`` is
+    therefore uniformly zero. The scene puts the only real ground truth in the bottom-right quadrant of a 4x4 stride-4
+    grid, so its four candidates are anchors ``{10, 11, 14, 15}`` — deliberately not the low indices a tie-broken
+    ``topk`` reaches for first. Ranking the ties globally instead of within the ground truth's own candidate set makes
+    the intersection with that set return zero positives for a ground truth that had four.
     """
     points, _ = make_anchor_points([(4, 4)], [4])  # centres x, y in {2, 6, 10, 14}
     scores = torch.full((1, 16, 1), 0.9)
@@ -250,15 +243,12 @@ def test_all_zero_metric_keeps_min_k_c_of_gts_own_candidates(topk: int) -> None:
 def test_target_normalization_reaches_u_max_at_every_overlap_scale(u_max: float) -> None:
     """The best positive's weight is ``u_max`` and the runner-up's falls off by its ``t`` ratio.
 
-    Two anchors sit inside a 10x10 ground truth; each predicts a box nested in it,
-    the first with IoU ``u_max`` and the second with IoU ``u_max / 2``, so
-    ``t_max = s * u_max**6`` and the second anchor's ``t`` is ``t_max / 64``. R4's
-    target normalization scales a ground truth's positives by ``u_max / t_max``,
-    which puts the best anchor at exactly ``u_max`` at every overlap scale. An
-    *absolute* floor added to that denominator breaks the invariant from below:
-    ``t_max`` falls as the sixth power of the IoU, so at IoU 0.01 it is three orders
-    of magnitude under a 1e-9 floor and the positive trains as background while
-    ``fg_mask`` still reports it foreground.
+    Two anchors sit inside a 10x10 ground truth; each predicts a box nested in it, the first with IoU ``u_max`` and the
+    second with IoU ``u_max / 2``, so ``t_max = s * u_max**6`` and the second anchor's ``t`` is ``t_max / 64``. R4's
+    target normalization scales a ground truth's positives by ``u_max / t_max``, which puts the best anchor at exactly
+    ``u_max`` at every overlap scale. An *absolute* floor added to that denominator breaks the invariant from below:
+    ``t_max`` falls as the sixth power of the IoU, so at IoU 0.01 it is three orders of magnitude under a 1e-9 floor and
+    the positive trains as background while ``fg_mask`` still reports it foreground.
     """
     side_best = 10.0 * math.sqrt(u_max)
     side_worse = 10.0 * math.sqrt(u_max / 2.0)
@@ -280,9 +270,8 @@ def test_target_normalization_reaches_u_max_at_every_overlap_scale(u_max: float)
 def item_calls() -> Iterator[list[str]]:
     """Record every ``Tensor.item()`` call made while the fixture is active.
 
-    ``item`` is inherited rather than defined on :class:`torch.Tensor`, so teardown
-    deletes the override instead of reassigning it — that restores the inherited
-    method exactly, leaving no shadow entry behind for later tests.
+    ``item`` is inherited rather than defined on :class:`torch.Tensor`, so teardown deletes the override instead of
+    reassigning it — that restores the inherited method exactly, leaving no shadow entry behind for later tests.
     """
     calls: list[str] = []
     original = torch.Tensor.item
@@ -314,13 +303,11 @@ def item_calls() -> Iterator[list[str]]:
 def test_hyperparameter_values_disable_safeguard_rejected(parameter: str, value: float) -> None:
     """``alpha``, ``beta`` and ``eps`` are validated at construction, naming the parameter.
 
-    Each of the three exists to keep the alignment metric well-behaved, and each
-    accepts values that switch it off rather than tune it: ``eps = 0`` turns a
-    degenerate union into ``NaN`` instead of a zero overlap, a negative exponent
-    inverts the ranking so top-k reads the worst-aligned anchor as the best, and a
-    non-finite one makes the metric carry no information at all. Only ``topk`` was
-    checked before, so all of these constructed an assigner that failed — or worse,
-    silently mis-assigned — much later.
+    Each of the three exists to keep the alignment metric well-behaved, and each accepts values that switch it off
+    rather than tune it: ``eps = 0`` turns a degenerate union into ``NaN`` instead of a zero overlap, a negative
+    exponent inverts the ranking so top-k reads the worst-aligned anchor as the best, and a non-finite one makes the
+    metric carry no information at all. Only ``topk`` was checked before, so all of these constructed an assigner that
+    failed — or worse, silently mis-assigned — much later.
     """
     with pytest.raises(ValueError, match=rf"^{parameter} must be finite"):
         TaskAlignedAssigner(topk=3, **{parameter: value})
@@ -329,10 +316,9 @@ def test_hyperparameter_values_disable_safeguard_rejected(parameter: str, value:
 def test_zero_exponents_accepted() -> None:
     """``alpha = 0`` and ``beta = 0`` construct, since dropping a factor is a coherent request.
 
-    The validation rejects values that disable a safeguard, not every unusual one.
-    ``beta = 0`` reduces the metric to pure classification alignment and ``alpha = 0``
-    to pure IoU alignment; both are well-defined, so a check that refused them would
-    be over-tight rather than safe.
+    The validation rejects values that disable a safeguard, not every unusual one. ``beta = 0`` reduces the metric to
+    pure classification alignment and ``alpha = 0`` to pure IoU alignment; both are well-defined, so a check that
+    refused them would be over-tight rather than safe.
     """
     assigner = TaskAlignedAssigner(topk=3, alpha=0.0, beta=0.0)
 
@@ -350,14 +336,12 @@ def test_zero_exponents_accepted() -> None:
 def test_out_of_range_labels_rejected_at_entry(labels: list[list[int]], mask: list[list[bool]], expected: str) -> None:
     """A label the score gather cannot honour raises at entry, naming the class bound.
 
-    The gather in ``_alignment_metric`` indexes the predicted scores by the ground
-    truth's own label, behind a ``clamp(min=0)`` placed there for padding. That clamp
-    silently absorbs a negative label: the ground truth is scored against class 0,
-    assigned on that score, and trained towards a different one, with nothing
-    reporting it. A label at or above ``C`` is not absorbed but fails inside
-    ``torch.gather`` — and it fails for a *padded* slot too, because the index tensor
-    is built from every slot, which is why the upper bound is checked on the whole
-    tensor and the lower bound only where ``gt_mask`` says the ground truth is real.
+    The gather in ``_alignment_metric`` indexes the predicted scores by the ground truth's own label, behind a
+    ``clamp(min=0)`` placed there for padding. That clamp silently absorbs a negative label: the ground truth is scored
+    against class 0, assigned on that score, and trained towards a different one, with nothing reporting it. A label at
+    or above ``C`` is not absorbed but fails inside ``torch.gather`` — and it fails for a *padded* slot too, because the
+    index tensor is built from every slot, which is why the upper bound is checked on the whole tensor and the lower
+    bound only where ``gt_mask`` says the ground truth is real.
     """
     points, _ = make_anchor_points([(2, 2)], [4])
     scores = torch.zeros(1, 4, 2)  # two classes, so 5 is out of range and -3 is below it
@@ -371,11 +355,10 @@ def test_out_of_range_labels_rejected_at_entry(labels: list[list[int]], mask: li
 def test_negative_label_at_padding_slot_accepted() -> None:
     """A padding slot may carry a negative label, which the documented clamp neutralizes.
 
-    The collate is free to fill unused ground-truth slots with a background sentinel,
-    and the assigner's contract says those entries are ignored. They genuinely are for
-    a negative value: the clamp maps it to class 0 and ``candidate_mask`` discards the
-    whole row, so no target is ever gathered from it. The range check must therefore
-    not be a blanket one, or it would reject a batch the assigner handles correctly.
+    The collate is free to fill unused ground-truth slots with a background sentinel, and the assigner's contract says
+    those entries are ignored. They genuinely are for a negative value: the clamp maps it to class 0 and
+    ``candidate_mask`` discards the whole row, so no target is ever gathered from it. The range check must therefore not
+    be a blanket one, or it would reject a batch the assigner handles correctly.
     """
     points, _ = make_anchor_points([(2, 2)], [4])
     gt_boxes = torch.tensor([[[0.0, 0.0, 8.0, 8.0], [0.0, 0.0, 8.0, 8.0]]])
@@ -395,12 +378,10 @@ def test_negative_label_at_padding_slot_accepted() -> None:
 def test_assignment_makes_no_data_dependent_host_transfer(item_calls: list[str]) -> None:
     """A full assignment over a contested scene copies no tensor value back to the host.
 
-    ``_resolve_conflicts`` used to decide whether to run at all by reading
-    ``selected_per_anchor.max()`` with ``.item()``, which is a device sync on every
-    assignment call — paid to skip work the ``torch.where`` discards anyway, and
-    measured as a net loss on MPS. The scene puts one anchor inside two ground truths
-    so the resolution has real work to do; the assertion is that it does that work
-    without ever asking the host what the data was.
+    ``_resolve_conflicts`` used to decide whether to run at all by reading ``selected_per_anchor.max()`` with
+    ``.item()``, which is a device sync on every assignment call — paid to skip work the ``torch.where`` discards
+    anyway, and measured as a net loss on MPS. The scene puts one anchor inside two ground truths so the resolution has
+    real work to do; the assertion is that it does that work without ever asking the host what the data was.
     """
     points = torch.tensor([[5.0, 5.0]])  # a single anchor inside both ground truths
     gt_boxes = torch.tensor([[[0.0, 0.0, 10.0, 10.0], [0.0, 0.0, 10.0, 10.0]]])

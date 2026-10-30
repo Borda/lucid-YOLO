@@ -13,13 +13,13 @@ import torch
 def deterministic_algorithms(*, warn_only: bool = False, restore_cudnn_benchmark: bool = False) -> Iterator[None]:
     """Run under deterministic algorithms and give back the caller's numeric policy afterwards.
 
-    Both flags are saved and restored, so a test that fails inside the block still
-    leaves the next one with the policy it started with.
+    Both flags are saved and restored, so a test that fails inside the block still leaves the next one with the policy
+    it started with.
 
     Args:
         warn_only: Warn instead of raising when an operation has no deterministic form.
-        restore_cudnn_benchmark: Also restore ``torch.backends.cudnn.benchmark``, which
-            Lightning's trainer setup writes unconditionally and a fit test would leak.
+        restore_cudnn_benchmark: Also restore ``torch.backends.cudnn.benchmark``, which Lightning's trainer setup writes
+            unconditionally and a fit test would leak.
 
     Examples:
         >>> with deterministic_algorithms(warn_only=True):

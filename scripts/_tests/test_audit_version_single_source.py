@@ -1,18 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Functional-core tests: the package version has exactly one source of truth (WP-001, split off WP-117).
 
-Covers ``scripts/lint/audit_version_single_source.py``'s public contract in
-isolation, on synthetic files under ``tmp_path`` rather than against the live
-``pyproject.toml`` / ``src/lucid_yolo/__init__.py`` pair -- the live pair is
-exercised instead by the pre-commit hook itself each time either file changes.
-This file is the functional-core check pytest owns; the hook is the lint gate
-that runs it.
+Covers ``scripts/lint/audit_version_single_source.py``'s public contract in isolation, on synthetic files under
+``tmp_path`` rather than against the live ``pyproject.toml`` / ``src/lucid_yolo/__init__.py`` pair -- the live pair
+is exercised instead by the pre-commit hook itself each time either file changes. This file is the functional-core
+check pytest owns; the hook is the lint gate that runs it.
 
-Deliberately *not* tested here: ``importlib.metadata.version("lucid-yolo")``
-against ``__version__``. An editable install freezes its metadata at install
-time, so that assertion would fail on every version bump until someone
-reinstalled -- a test that fails for a reason unrelated to the property it
-claims to guard.
+Deliberately *not* tested here: ``importlib.metadata.version("lucid-yolo")`` against ``__version__``. An editable
+install freezes its metadata at install time, so that assertion would fail on every version bump until someone
+reinstalled -- a test that fails for a reason unrelated to the property it claims to guard.
 """
 
 from __future__ import annotations
@@ -66,9 +62,8 @@ def test_pyproject_reads_module_attribute_passes_when_wired_to_module(tmp_path: 
 def test_version_plain_literal_flags_computed_expression(tmp_path: Path) -> None:
     """A computed ``__version__`` (not a bare string literal) is rejected.
 
-    A computed value (``importlib.metadata``, an f-string, a read from a file)
-    would still be a valid attribute, but setuptools would have to *import* the
-    package to evaluate it -- pulling torch into every build and every
+    A computed value (``importlib.metadata``, an f-string, a read from a file) would still be a valid attribute, but
+    setuptools would have to *import* the package to evaluate it -- pulling torch into every build and every
     ``pip install`` of a source distribution.
     """
     init = tmp_path / "__init__.py"
@@ -88,9 +83,9 @@ def test_version_plain_literal_passes_for_bare_string(tmp_path: Path) -> None:
 class TestReadmeNamesTheCurrentVersion:
     """``check_readme_names_the_current_version`` over a synthetic README / ``__init__.py`` pair.
 
-    The drift this check was opened for is silent by construction: a release bumps
-    ``__version__`` and the README's prose keeps naming the release before it, which
-    every consumer of the repository reads first. WP-175 found three releases of it.
+    The drift this check was opened for is silent by construction: a release bumps ``__version__`` and the README's
+    prose keeps naming the release before it, which every consumer of the repository reads first. WP-175 found three
+    releases of it.
     """
 
     @staticmethod
@@ -105,8 +100,8 @@ class TestReadmeNamesTheCurrentVersion:
     def test_accepts_readme_in_step(self, tmp_path: Path) -> None:
         """A README naming the same version the module attribute carries reports no violation.
 
-        The passing shape: the Versioning section's ``Current release`` line and
-        ``lucid_yolo.__version__`` agreeing on one string.
+        The passing shape: the Versioning section's ``Current release`` line and ``lucid_yolo.__version__`` agreeing on
+        one string.
         """
         readme, init = self._pair(tmp_path, "0.7.0", "Current release: **0.7.0** -- in step\n")
 
@@ -115,8 +110,8 @@ class TestReadmeNamesTheCurrentVersion:
     def test_names_stale_version_and_live_one(self, tmp_path: Path) -> None:
         """A README naming an older release is reported with both versions in the message.
 
-        The exact state WP-175 audited -- README at 0.4.0 against ``__version__`` 0.7.0 --
-        and the message carries both so the fix needs no second lookup.
+        The exact state WP-175 audited -- README at 0.4.0 against ``__version__`` 0.7.0 -- and the message carries both
+        so the fix needs no second lookup.
         """
         readme, init = self._pair(tmp_path, "0.7.0", "Current release: **0.4.0** -- stale\n")
 
@@ -127,8 +122,8 @@ class TestReadmeNamesTheCurrentVersion:
     def test_refuses_readme_states_no_current_release(self, tmp_path: Path) -> None:
         """A README with no ``Current release`` line at all is a violation, not a pass.
 
-        Deleting the sentence would otherwise be the one edit that silences the check:
-        an absent claim has to fail like a wrong one, or the guard is opt-out.
+        Deleting the sentence would otherwise be the one edit that silences the check: an absent claim has to fail like
+        a wrong one, or the guard is opt-out.
         """
         readme, init = self._pair(tmp_path, "0.7.0", "No versioning section here.\n")
 
@@ -139,8 +134,8 @@ class TestReadmeNamesTheCurrentVersion:
     def test_stays_silent_when_version_literal_unreadable(self, tmp_path: Path) -> None:
         """A computed ``__version__`` yields no violation here -- the literal check owns that failure.
 
-        Both checks run in one pass, so reporting an unreadable attribute twice would
-        turn one defect into two messages naming different things.
+        Both checks run in one pass, so reporting an unreadable attribute twice would turn one defect into two messages
+        naming different things.
         """
         readme = tmp_path / "README.md"
         readme.write_text("Current release: **0.7.0**\n", encoding="utf-8")

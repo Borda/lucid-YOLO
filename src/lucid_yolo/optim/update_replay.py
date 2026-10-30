@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Optional CUDA scheduling for the update preparation that precedes learning-rate application.
 
-The optimizer's own iterator supplies every expression. Private gradient inputs
-keep the recording independent of autograd's gradient allocations; parameters
-and momentum remain the optimizer's live state. Warmup and recording are rolled
-back before the first real replay. Parameter writes and the changing learning
-rate stay outside the graph (R42).
+The optimizer's own iterator supplies every expression. Private gradient inputs keep the recording independent of
+autograd's gradient allocations; parameters and momentum remain the optimizer's live state. Warmup and recording are
+rolled back before the first real replay. Parameter writes and the changing learning rate stay outside the graph
+(R42).
 """
 
 from __future__ import annotations
@@ -24,13 +23,13 @@ if TYPE_CHECKING:
 
     from lucid_yolo.optim.musgd import MuSGD
 
-#: Consecutive steps whose signature must differ from a group's recording before that
-#: recording is replaced. A shorter change, such as momentum set for a single step, runs
-#: natively and then returns to the existing recording without paying another capture.
+#: Consecutive steps whose signature must differ from a group's recording before that recording is replaced. A shorter
+#: change, such as momentum set for a single step, runs natively and then returns to the existing recording without
+#: paying another capture.
 _MISMATCH_TOLERANCE = 3
-#: Replacement recordings a group may make after its first one. A signature that keeps
-#: changing, such as a per-step momentum schedule, would otherwise pay warmup, capture
-#: and a fresh private pool every few steps; past this budget the group stays native.
+#: Replacement recordings a group may make after its first one. A signature that keeps changing, such as a per-step
+#: momentum schedule, would otherwise pay warmup, capture and a fresh private pool every few steps; past this budget
+#: the group stays native.
 _RERECORD_BUDGET = 2
 
 
@@ -59,10 +58,9 @@ def _extent(value: Tensor) -> int:
 def _parameter_layout(param: Tensor, update: Tensor) -> Tensor:
     """Give an update its parameter's exact strides, so one foreach write keeps its fast route.
 
-    A channels-last ``1x1`` or depthwise kernel already counts as channels-last
-    contiguous under strides that differ from the parameter's on size-one dimensions.
-    PyTorch versions that compare whole stride vectors would then send the entire
-    foreach list down the per-tensor route, so any stride difference is copied away.
+    A channels-last ``1x1`` or depthwise kernel already counts as channels-last contiguous under strides that differ
+    from the parameter's on size-one dimensions. PyTorch versions that compare whole stride vectors would then send
+    the entire foreach list down the per-tensor route, so any stride difference is copied away.
     """
     return update if update.stride() == param.stride() else torch.empty_like(param).copy_(update)
 
@@ -70,11 +68,10 @@ def _parameter_layout(param: Tensor, update: Tensor) -> Tensor:
 class _RecordedSpans:
     """Answer whether new gradients reach a recording's parameter or momentum bytes.
 
-    A matching key fixes each recorded tensor's address, shape, strides and dtype, and
-    therefore its address range, which recording certified as pairwise disjoint. Only
-    gradient addresses move between steps; each gradient's extent is fixed by its keyed
-    shape, strides and dtype. Ranges are compared as ``_memory_overlaps`` compares them,
-    so distinct storage objects wrapping one buffer are still caught.
+    A matching key fixes each recorded tensor's address, shape, strides and dtype, and therefore its address range,
+    which recording certified as pairwise disjoint. Only gradient addresses move between steps; each gradient's extent
+    is fixed by its keyed shape, strides and dtype. Ranges are compared as ``_memory_overlaps`` compares them, so
+    distinct storage objects wrapping one buffer are still caught.
     """
 
     def __init__(self, recorded: list[Tensor], gradients: list[Tensor]) -> None:
@@ -152,9 +149,8 @@ class _PreparedGroup:
     def run(self, gradients: list[Tensor]) -> None:
         """Apply the current rate to layout-compatible updates in one native batch.
 
-        A foreach call with one incompatible pair falls back for the entire list.
-        Layout copies are recorded with preparation so channel-last parameters do
-        not turn this write back into one launch per parameter.
+        A foreach call with one incompatible pair falls back for the entire list. Layout copies are recorded with
+        preparation so channel-last parameters do not turn this write back into one launch per parameter.
         """
         torch._foreach_copy_(self.gradients, gradients)
         self.graph.replay()
@@ -164,25 +160,20 @@ class _PreparedGroup:
 class _UpdateReplay:
     """Retain at most one recording per optimizer group, with native fallbacks.
 
-    Gradient values and learning rates may change on every step. Missing gradients,
-    shared storage, other precisions and other devices use the native iterator; they
-    never reuse an incompatible recording. A step whose signature differs from the
-    group's recording also runs natively and keeps that recording, so a change lasting
-    fewer than ``_MISMATCH_TOLERANCE`` consecutive steps returns to it without a new
-    capture. Steps that skip the comparison (a missing gradient, say) neither extend nor
-    reset that run. On the ``_MISMATCH_TOLERANCE``-th consecutive differing step the
-    stream that replayed the recording is synchronized, the recording is released and
-    the new signature is recorded in its place. A group may be re-recorded
-    ``_RERECORD_BUDGET`` times after its first recording; once that budget is spent,
-    the next replacement only releases the recording and the group stays native until
-    :meth:`clear`. Strong references keep each recorded group, its parameters and
-    momentum alive with their identities.
+    Gradient values and learning rates may change on every step. Missing gradients, shared storage, other precisions
+    and other devices use the native iterator; they never reuse an incompatible recording. A step whose signature
+    differs from the group's recording also runs natively and keeps that recording, so a change lasting fewer than
+    ``_MISMATCH_TOLERANCE`` consecutive steps returns to it without a new capture. Steps that skip the comparison (a
+    missing gradient, say) neither extend nor reset that run. On the ``_MISMATCH_TOLERANCE``-th consecutive differing
+    step the stream that replayed the recording is synchronized, the recording is released and the new signature is
+    recorded in its place. A group may be re-recorded ``_RERECORD_BUDGET`` times after its first recording; once that
+    budget is spent, the next replacement only releases the recording and the group stays native until :meth:`clear`.
+    Strong references keep each recorded group, its parameters and momentum alive with their identities.
 
     Attributes:
         entries: Live recordings keyed by group identity.
-        recordings: Recordings published per group identity since the last clear,
-            released ones included. Only ``MuSGD.load_state_dict`` replaces groups,
-            and it clears this owner first.
+        recordings: Recordings published per group identity since the last clear, released ones included. Only
+            ``MuSGD.load_state_dict`` replaces groups, and it clears this owner first.
     """
 
     def __init__(self, overlaps: Callable[[list[Tensor]], bool]) -> None:
@@ -198,14 +189,12 @@ class _UpdateReplay:
     def step(self, optimizer: MuSGD, group: dict[str, Any]) -> bool:
         """Run a certified recording, or leave the caller to its native step.
 
-        The full input check runs only when recording. A matching key already fixes
-        every parameter and momentum address, layout and scalar type that check
-        certified, so a replayed step re-checks only what the key leaves out: the
-        learning-rate type and layouts (in :meth:`_eligible`) and gradient addresses.
-        Two recording-time checks are deliberately not repeated. Gradients overlapping
-        one another are harmless, since both routes only read gradients. Parameters or
-        buffers sharing a storage base without sharing bytes are too, since graph
-        replay depends on the addresses the key fixes, not on storage objects.
+        The full input check runs only when recording. A matching key already fixes every parameter and momentum
+        address, layout and scalar type that check certified, so a replayed step re-checks only what the key leaves
+        out: the learning-rate type and layouts (in :meth:`_eligible`) and gradient addresses. Two recording-time
+        checks are deliberately not repeated. Gradients overlapping one another are harmless, since both routes only
+        read gradients. Parameters or buffers sharing a storage base without sharing bytes are too, since graph replay
+        depends on the addresses the key fixes, not on storage objects.
         """
         inputs = self._eligible(optimizer, group)
         if inputs is None:

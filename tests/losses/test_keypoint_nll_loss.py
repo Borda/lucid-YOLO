@@ -1,23 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gates for the WP-135 Laplace-NLL ablation loss (R14 Table 7, A65, A66).
 
-This loss exists to be *compared against* :class:`~lucid_yolo.losses.rle_loss.RLELoss`,
-so what these tests pin is exactly what a comparison depends on:
+This loss exists to be *compared against* :class:`~lucid_yolo.losses.rle_loss.RLELoss`, so what these tests pin is
+exactly what a comparison depends on:
 
-* it carries **no trainable parameters** -- the single structural difference from
-  RLE, and the one an optimizer, a checkpoint and a same-seed weight draw all
-  observe;
-* its value is the closed-form Laplace negative log-likelihood, checked against a
-  hand-computation that never calls the implementation's own internals, so a
-  dropped or doubled term cannot pass by agreeing with itself;
-* it is RLE's value **minus the flow term** and nothing else, checked against
-  ``RLELoss`` directly on shared inputs -- the property that makes a paired run
-  attributable to the flow rather than to some other difference;
-* A66's visibility rule and the zero-visible-points contract behave exactly as
-  RLE's do, since a control that masked differently would compare two things at
-  once;
-* gradient reaches both ``mu_hat`` and ``sigma_raw``, the "learnable variance"
-  half of Table 7's row name.
+* it carries **no trainable parameters** -- the single structural difference from RLE, and the one an optimizer, a
+  checkpoint and a same-seed weight draw all observe;
+* its value is the closed-form Laplace negative log-likelihood, checked against a hand-computation that never calls the
+  implementation's own internals, so a dropped or doubled term cannot pass by agreeing with itself;
+* it is RLE's value **minus the flow term** and nothing else, checked against ``RLELoss`` directly on shared inputs --
+  the property that makes a paired run attributable to the flow rather than to some other difference;
+* A66's visibility rule and the zero-visible-points contract behave exactly as RLE's do, since a control that masked
+  differently would compare two things at once;
+* gradient reaches both ``mu_hat`` and ``sigma_raw``, the "learnable variance" half of Table 7's row name.
 """
 
 from __future__ import annotations
@@ -38,10 +33,9 @@ _LAPLACE_ATOL = 1e-5
 def _reference_loss(mu_hat: torch.Tensor, sigma_raw: torch.Tensor, mu_gt: torch.Tensor) -> torch.Tensor:
     """Recompute the per-point loss from R14 Eq. 8 without the flow term, independently.
 
-    Written out of ``torch.distributions`` and ``torch.log`` directly rather than
-    by calling anything in the module under test, so agreement is evidence about
-    the formula rather than about the implementation agreeing with itself. Assumes
-    every point visible; masking is a separate concern with its own tests.
+    Written out of ``torch.distributions`` and ``torch.log`` directly rather than by calling anything in the module
+    under test, so agreement is evidence about the formula rather than about the implementation agreeing with itself.
+    Assumes every point visible; masking is a separate concern with its own tests.
 
     Examples:
         >>> import torch
@@ -60,11 +54,10 @@ class TestParameterFreedom:
     def test_exposes_no_trainable_parameters(self) -> None:
         """``LaplaceNLLLoss()`` reports an empty parameter list, where ``RLELoss`` reports a flow.
 
-        The difference the ablation is *for*. A version that accidentally kept a
-        learnable term -- a scale, a bias, a residual flow layer -- would still
-        produce plausible loss values and would still train, while no longer being
-        the control R14 Table 7 published, and a paired run against it would
-        attribute the flow's effect to something that was present in both arms.
+        The difference the ablation is *for*. A version that accidentally kept a learnable term -- a scale, a bias, a
+        residual flow layer -- would still produce plausible loss values and would still train, while no longer being
+        the control R14 Table 7 published, and a paired run against it would attribute the flow's effect to something
+        that was present in both arms.
         """
         ablation = LaplaceNLLLoss()
 
@@ -74,27 +67,22 @@ class TestParameterFreedom:
     def test_contributes_no_state_dict_entries(self) -> None:
         """Its ``state_dict`` is empty, so a checkpoint of an ablation run carries no loss keys.
 
-        Follows from having no parameters but is asserted separately because it is
-        the property a *checkpoint* observes: an ablation checkpoint and a
-        detection checkpoint of the same model differ only by the point stems, and
-        anything held here would silently widen that difference.
+        Follows from having no parameters but is asserted separately because it is the property a *checkpoint*
+        observes: an ablation checkpoint and a detection checkpoint of the same model differ only by the point stems,
+        and anything held here would silently widen that difference.
         """
         assert dict(LaplaceNLLLoss().state_dict()) == {}
 
 
 class TestClosedFormValue:
-    """The number matches R14 Eq.
-
-    8 with the flow term removed, and only that.
-    """
+    """The number matches R14 Equation 8 with the flow term removed, and only that."""
 
     def test_matches_hand_computed_laplace_negative_log_likelihood(self) -> None:
         """The loss equals ``-log Laplace(0, 1)(x_bar) + log sigma_hat``, summed over both axes.
 
-        A fixed, hand-chosen batch scored against an independent recomputation
-        from ``torch.distributions``: this is the check that a sign, a missing
-        ``log sigma_hat`` Jacobian, or a mean over the wrong axis cannot survive,
-        none of which any other test in this file would notice.
+        A fixed, hand-chosen batch scored against an independent recomputation from ``torch.distributions``: this is
+        the check that a sign, a missing ``log sigma_hat`` Jacobian, or a mean over the wrong axis cannot survive, none
+        of which any other test in this file would notice.
         """
         loss_fn = LaplaceNLLLoss()
         mu_hat = torch.tensor([[[0.3, -0.2], [1.0, 0.5]]])
@@ -110,12 +98,10 @@ class TestClosedFormValue:
     def test_rle_loss_with_exactly_flow_term_removed(self) -> None:
         """On shared inputs, ``RLELoss`` minus this loss is precisely the flow's log-density.
 
-        The claim the whole ablation rests on, stated as an equation rather than
-        as prose in a docstring: the two losses differ by ``-log G_phi(x_bar)`` and
-        by nothing else, so a difference measured between two training runs is
-        attributable to the flow. A drifted residual, a different ``sigma_hat``
-        activation or a different reduction in either module breaks this and
-        nothing else in either suite would report it.
+        The claim the whole ablation rests on, stated as an equation rather than as prose in a docstring: the two
+        losses differ by ``-log G_phi(x_bar)`` and by nothing else, so a difference measured between two training runs
+        is attributable to the flow. A drifted residual, a different ``sigma_hat`` activation or a different reduction
+        in either module breaks this and nothing else in either suite would report it.
         """
         rle = RLELoss()
         ablation = LaplaceNLLLoss()
@@ -133,12 +119,10 @@ class TestClosedFormValue:
     def test_far_out_residual_stays_finite_rather_than_overflowing(self) -> None:
         """A residual two orders outside the ``O(1)`` range gives a large finite loss and gradient.
 
-        The module docstring claims this ablation degrades more gently than RLE
-        under A70's off-canvas points -- the unit Laplace's log-density is linear
-        in ``|x_bar|`` where the flow's latent is exponential in a compounding
-        log-scale (A72). Asserting finiteness here keeps that claim a measured
-        property rather than an argument, and pins the behaviour a pixel-frame
-        caller would actually meet.
+        The module docstring claims this ablation degrades more gently than RLE under A70's off-canvas points -- the
+        unit Laplace's log-density is linear in ``|x_bar|`` where the flow's latent is exponential in a compounding
+        log-scale (A72). Asserting finiteness here keeps that claim a measured property rather than an argument, and
+        pins the behaviour a pixel-frame caller would actually meet.
         """
         mu_hat = torch.zeros(3, 5, 2, requires_grad=True)
         sigma_raw = torch.zeros(3, 5, 2, requires_grad=True)
@@ -159,11 +143,10 @@ class TestVisibilityMasking:
     def test_unlabeled_points_excluded(self) -> None:
         """An instance whose only point is ``v == 0`` contributes nothing to the loss.
 
-        Compares a batch carrying one visible and one unlabeled point against the
-        same batch with the unlabeled point's target corrupted -- an unchanged loss
-        proves that point was never read. Mirrors ``test_rle_loss.py``'s own
-        assertion of the same contract, because a control that trained on a
-        different point set than RLE would compare two differences at once.
+        Compares a batch carrying one visible and one unlabeled point against the same batch with the unlabeled point's
+        target corrupted -- an unchanged loss proves that point was never read. Mirrors ``test_rle_loss.py``'s own
+        assertion of the same contract, because a control that trained on a different point set than RLE would compare
+        two differences at once.
         """
         loss_fn = LaplaceNLLLoss()
         mu_hat = torch.zeros(2, 1, 2)
@@ -182,9 +165,8 @@ class TestVisibilityMasking:
     def test_occluded_but_labeled_points_included(self) -> None:
         """A ``v == 1`` (occluded) point changes the loss exactly like ``v == 2`` does.
 
-        A66 reads COCO's ``v in {1, 2}`` as equally valid supervision; this asserts
-        the mask does not silently narrow to ``v == 2`` only, the same way
-        ``test_rle_loss.py`` asserts it for the loss this one controls for.
+        A66 reads COCO's ``v in {1, 2}`` as equally valid supervision; this asserts the mask does not silently narrow to
+        ``v == 2`` only, the same way ``test_rle_loss.py`` asserts it for the loss this one controls for.
         """
         loss_fn = LaplaceNLLLoss()
         mu_hat = torch.zeros(1, 1, 2)
@@ -199,11 +181,10 @@ class TestVisibilityMasking:
     def test_no_visible_points_gives_finite_zero_attached_to_graph(self) -> None:
         """All-``v=0`` input returns a finite zero, not ``NaN``, still connected to gradients.
 
-        Mirrors :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s
-        no-positives contract: a ``0 / 0`` mean over an empty mask would be
-        ``NaN``, and any loss returning ``NaN`` here would poison the whole
-        multi-task sum it gets added into. An ablation arm that went ``NaN`` on an
-        instance-free batch would end the very run it exists to produce.
+        Mirrors :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s no-positives contract: a ``0 / 0`` mean over
+        an empty mask would be ``NaN``, and any loss returning ``NaN`` here would poison the whole multi-task sum it
+        gets added into. An ablation arm that went ``NaN`` on an instance-free batch would end the very run it exists
+        to produce.
         """
         loss_fn = LaplaceNLLLoss()
         mu_hat = torch.zeros(3, 2, 2, requires_grad=True)
@@ -222,11 +203,10 @@ class TestVisibilityMasking:
 def test_gradient_reaches_both_location_and_learned_scale() -> None:
     """Both ``mu_hat`` and ``sigma_raw`` receive non-zero gradient from one backward pass.
 
-    "Learnable variance" is half of what R14 Table 7 names this row, and the
-    ``log sigma_hat`` Jacobian term is the only thing giving the likelihood a
-    reason to prefer a small scale. A loss that reached ``mu_hat`` alone would be
-    an L1 regression wearing an NLL's name, and would still train, still fall, and
-    still look entirely ordinary in a loss curve.
+    "Learnable variance" is half of what R14 Table 7 names this row, and the ``log sigma_hat`` Jacobian term is the only
+    thing giving the likelihood a reason to prefer a small scale. A loss that reached ``mu_hat`` alone would be an L1
+    regression wearing an NLL's name, and would still train, still fall, and still look entirely ordinary in a loss
+    curve.
     """
     loss_fn = LaplaceNLLLoss()
     mu_hat = torch.tensor([[[0.3, -0.2]]], requires_grad=True)
@@ -245,12 +225,11 @@ def test_gradient_reaches_both_location_and_learned_scale() -> None:
 def test_toy_convergence_mu_moves_toward_ground_truth() -> None:
     """Optimizing ``mu_hat`` and ``sigma_raw`` against a fixed target reduces the loss over steps.
 
-    Mirrors the RLE suite's own toy-convergence case, and this repo's MuSGD
-    precedent (``tests/optim/test_toy_convergence.py``): a minimal, fully-seeded
-    scenario driving the loss end to end through an optimizer, rather than a
-    single forward-pass assertion. Run for the ablation because "it optimizes at
-    all" is the one thing a comparison arm cannot be assumed to do -- an arm that
-    silently failed to converge would read as evidence for the flow.
+    Mirrors the RLE suite's own toy-convergence case, and this repo's MuSGD precedent
+    (``tests/optim/test_toy_convergence.py``): a minimal, fully-seeded scenario driving the loss end to end through an
+    optimizer, rather than a single forward-pass assertion. Run for the ablation because "it optimizes at all" is the
+    one thing a comparison arm cannot be assumed to do -- an arm that silently failed to converge would read as
+    evidence for the flow.
     """
     loss_fn = LaplaceNLLLoss()
     mu_hat = torch.zeros(1, 1, 2, requires_grad=True)
@@ -269,24 +248,21 @@ def test_toy_convergence_mu_moves_toward_ground_truth() -> None:
         last_loss = float(loss_fn(mu_hat, sigma_raw, mu_gt, visibility))
 
     assert last_loss < first_loss
-    # atol measured, not guessed: 50 Adam steps land ``mu_hat`` 0.0413 from the target,
-    # and identically so for seeds 0-4 -- this control holds no parameters, so unlike the
-    # RLE case the endpoint does not move with the seed at all. 0.06 leaves ~45% headroom
-    # for cross-platform float drift while still rejecting a residual that converges to
-    # the wrong point; the previous 0.5 was 12x the measured error.
+    # atol measured, not guessed: 50 Adam steps land ``mu_hat`` 0.0413 from the target, and identically so for seeds 0-4
+    # -- this control holds no parameters, so unlike the RLE case the endpoint does not move with the seed at all. 0.06
+    # leaves ~45% headroom for cross-platform float drift while still rejecting a residual that converges to the wrong
+    # point; the previous 0.5 was 12x the measured error.
     assert torch.allclose(mu_hat.detach(), mu_gt, atol=0.06)
 
 
 class TestUnlabeledPointsReachNoGradient:
     """A ``v == 0`` point cannot influence the backward pass either (WP-170, A66).
 
-    The control's copy of ``test_rle_loss.py``'s assertion of the same contract,
-    kept here for the reason the module docstring gives for every other
-    duplication: a control that masked a different point set than the loss it
-    controls for would compare two differences at once. The failure was milder
-    here than in RLE -- there is no flow to poison, so only ``mu_hat`` and
-    ``sigma_raw`` took ``NaN`` -- but it was the same failure, and the
-    ``ValueError`` out of the Laplace's argument validation was identical.
+    The control's copy of ``test_rle_loss.py``'s assertion of the same contract, kept here for the reason the module
+    docstring gives for every other duplication: a control that masked a different point set than the loss it controls
+    for would compare two differences at once. The failure was milder here than in RLE -- there is no flow to poison, so
+    only ``mu_hat`` and ``sigma_raw`` took ``NaN`` -- but it was the same failure, and the ``ValueError`` out of the
+    Laplace's argument validation was identical.
     """
 
     #: Placeholders a real unlabeled COCO point plausibly carries.
@@ -296,12 +272,10 @@ class TestUnlabeledPointsReachNoGradient:
         """Return the loss value and both input gradients from one backward pass.
 
         Args:
-            corrupt: Value written into the unlabeled point's target, or ``None``
-                to leave the clean target in place.
+            corrupt: Value written into the unlabeled point's target, or ``None`` to leave the clean target in place.
 
         Returns:
-            ``(loss_value, gradients)`` -- the scalar loss and the gradients of
-            ``mu_hat`` and ``sigma_raw``.
+            ``(loss_value, gradients)`` -- the scalar loss and the gradients of ``mu_hat`` and ``sigma_raw``.
 
         Examples:
             >>> case = TestUnlabeledPointsReachNoGradient()

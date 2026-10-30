@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-020 detection backbone (test_backbone.py).
 
-Covers :class:`lucid_yolo.models.DetectionBackbone`: that the three taps land at
-strides 8/16/32 with width-scaled channel counts for the ``n``/``s`` multipliers,
-that the ``m`` multiplier's ``max_channels`` cap clamps the P5 tap, that inner-unit
-repeat counts track the depth multiplier, and that a forward pass on a small input
-runs clean in eval mode.
+Covers :class:`lucid_yolo.models.DetectionBackbone`: that the three taps land at strides 8/16/32 with width-scaled
+channel counts for the ``n``/``s`` multipliers, that the ``m`` multiplier's ``max_channels`` cap clamps the P5 tap, that
+inner-unit repeat counts track the depth multiplier, and that a forward pass on a small input runs clean in eval mode.
 """
 
 from __future__ import annotations
@@ -82,13 +80,11 @@ def test_repeats_scale_with_depth(depth: float, expected_repeats: int) -> None:
 def test_half_integer_repeat_count_ties_to_even(depth: float, expected_repeats: int) -> None:
     """Depth scaling rounds half-integers to the nearer even count, not upward.
 
-    ``_scale_repeats`` uses Python's built-in ``round``, which is banker's rounding, and
-    the tie rule was previously unstated anywhere: a reader assuming half-up would expect
-    ``depth=1.25`` to give three inner units and get two. No published variant reaches a
-    tie -- all five pair ``base_repeats=2`` with ``depth`` in ``{0.5, 1.0}`` -- so this
-    pins the behaviour a caller passing its own multiplier meets, and pins it as
-    documented rather than as discovered. It characterizes the existing rule; it does not
-    fail on the code before the docstring that describes it.
+    ``_scale_repeats`` uses Python's built-in ``round``, which is banker's rounding, and the tie rule was previously
+    unstated anywhere: a reader assuming half-up would expect ``depth=1.25`` to give three inner units and get two. No
+    published variant reaches a tie -- all five pair ``base_repeats=2`` with ``depth`` in ``{0.5, 1.0}`` -- so this pins
+    the behaviour a caller passing its own multiplier meets, and pins it as documented rather than as discovered. It
+    characterizes the existing rule; it does not fail on the code before the docstring that describes it.
     """
     backbone = DetectionBackbone(depth=depth, width=0.25, max_channels=1024)
 

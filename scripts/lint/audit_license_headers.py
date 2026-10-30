@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """License and attribution hygiene audit (WP-002, split off WP-117).
 
-Guards the legal shielding surface: Apache ``LICENSE``, ``NOTICE`` attribution
-to the Redmon-originated YOLO family, the ``README`` non-affiliation
-disclaimer, and a per-file SPDX license header across the source tree. Each
-check was previously a ``tests/meta/test_license_headers.py`` assertion; this
-walks the same four checks as a standalone script so the pre-commit hook can
-run them without paying pytest's collection cost, while the slimmed test file
+Guards the legal shielding surface: Apache ``LICENSE``, ``NOTICE`` attribution to the Redmon-originated YOLO family,
+the ``README`` non-affiliation disclaimer, and a per-file SPDX license header across the source tree. Each check
+was previously a ``tests/meta/test_license_headers.py`` assertion; this walks the same four checks as a standalone
+script so the pre-commit hook can run them without paying pytest's collection cost, while the slimmed test file
 keeps the functional-core coverage on synthetic fixtures.
 
 Examples:
@@ -26,28 +24,25 @@ from scripts.lint._common import add_repo_root_argument, print_failure, sorted_r
 
 SPDX_LINE = "# SPDX-License-Identifier: Apache-2.0"
 
-#: The Apache appendix's own placeholder for the copyright line, left in the file by
-#: anyone who copies the template and stops at the terms. It sits ~5 kB in, past the
-#: window a "is this Apache 2.0" head-read looks at, so the check that reads the head
-#: structurally cannot see it -- which is the whole reason it survived here.
+#: The Apache appendix's own placeholder for the copyright line, left in the file by anyone who copies the template
+#: and stops at the terms. It sits ~5 kB in, past the window a "is this Apache 2.0" head-read looks at, so the
+#: check that reads the head structurally cannot see it -- which is the whole reason it survived here.
 COPYRIGHT_PLACEHOLDER = "Copyright [yyyy] [name of copyright owner]"
 
-#: Trees whose ``*.py`` files must open with the SPDX line. ``src/`` alone was never a
-#: stated scope, only the one the glob happened to name; ``scripts/`` and ``tests/``
-#: already carry the header on every file, so widening the glob pins what is already
-#: true rather than asking for new work. ``notebooks/`` joined at WP-188: a jupytext
-#: source is a ``.py`` file that travels further than most -- it is the one the Colab
-#: badge hands to a reader -- so it carries the marker like the rest. The walk is
-#: ``rglob`` over a tree that may not exist yet, which yields nothing rather than failing.
+#: Trees whose ``*.py`` files must open with the SPDX line. ``src/`` alone was never a stated scope, only the
+#: one the glob happened to name; ``scripts/`` and ``tests/`` already carry the header on every file, so widening
+#: the glob pins what is already true rather than asking for new work. ``notebooks/`` joined at WP-188: a
+#: jupytext source is a ``.py`` file that travels further than most -- it is the one the Colab badge hands to a reader
+#: -- so it carries the marker like the rest. The walk is ``rglob`` over a tree that may not exist yet, which
+#: yields nothing rather than failing.
 HEADER_DIRS = ("src", "scripts", "tests", "notebooks")
 
-#: The only form ``docs/PROVENANCE.md`` sec. 3.5 admits for naming the method's source: a
-#: nominative reference to the paper. WP-161 corrected the README's ``the Ultralytics YOLO26
-#: paper`` to this and left the identical drift in ``NOTICE`` for the next row; pinning the
-#: fragment in both required sets is what stops either from drifting back. The leading article
-#: is load-bearing -- ``the YOLO26 paper`` is not a substring of ``the Ultralytics YOLO26
-#: paper``, so requiring it rejects the vendor-bound form without a second, negative check
-#: that would also have to exempt R1's own literal title in ``PROVENANCE.md``.
+#: The only form ``docs/PROVENANCE.md`` sec. 3.5 admits for naming the method's source: a nominative reference
+#: to the paper. WP-161 corrected the README's ``the Ultralytics YOLO26 paper`` to this and left the identical
+#: drift in ``NOTICE`` for the next row; pinning the fragment in both required sets is what stops either from
+#: drifting back. The leading article is load-bearing -- ``the YOLO26 paper`` is not a substring of ``the Ultralytics
+#: YOLO26 paper``, so requiring it rejects the vendor-bound form without a second, negative check that would
+#: also have to exempt R1's own literal title in ``PROVENANCE.md``.
 PAPER_PHRASE = "the YOLO26 paper"
 
 DISCLAIMER_FRAGMENTS = (
@@ -61,12 +56,11 @@ DISCLAIMER_FRAGMENTS = (
 def check_license_is_apache2(repo_root: Path) -> list[str]:
     """Violations if ``LICENSE`` is not Apache 2.0, or still carries the template placeholder.
 
-    Two checks over one file because they read the same document for opposite
-    reasons: the first asks whether this is the licence claimed everywhere else, and
-    reads the head, where the title is. The second asks whether the licence was
-    *applied* or merely copied, and has to read the whole file -- the appendix's
-    ``Copyright [yyyy] [name of copyright owner]`` sits far outside any head window,
-    which is how it survived every run of the first check.
+    Two checks over one file because they read the same document for opposite reasons: the first asks whether this
+    is the licence claimed everywhere else, and reads the head, where the title is. The second asks whether the
+    licence was *applied* or merely copied, and has to read the whole file -- the appendix's ``Copyright [yyyy]
+    [name of copyright owner]`` sits far outside any head window, which is how it survived every run of the first
+    check.
 
     Examples:
         >>> import tempfile
@@ -142,10 +136,9 @@ def check_readme_disclaimer(repo_root: Path) -> list[str]:
 def _carries_spdx_header(text: str) -> bool:
     """True if ``text`` opens with the SPDX line, a shebang permitted ahead of it.
 
-    A shebang has to be the first line to work at all, so a runnable script cannot
-    put the SPDX line first and remain runnable. Reading only line one calls the
-    repository's two executable scripts unlicensed while they carry the header on
-    line two, which is what the header-scope finding read as two missing headers.
+    A shebang has to be the first line to work at all, so a runnable script cannot put the SPDX line first and remain
+    runnable. Reading only line one calls the repository's two executable scripts unlicensed while they carry
+    the header on line two, which is what the header-scope finding read as two missing headers.
 
     Examples:
         >>> _carries_spdx_header(SPDX_LINE + "\\nimport os\\n")
@@ -164,10 +157,9 @@ def _carries_spdx_header(text: str) -> bool:
 def check_source_files_carry_spdx_header(repo_root: Path) -> list[str]:
     """Violations for every ``*.py`` file under :data:`HEADER_DIRS` missing the SPDX line.
 
-    Scope is every tree this repository actually writes Python into, not ``src/``
-    alone: the header is a per-file legal marker and a file that travels -- a script
-    pasted into a notebook, a test vendored into a bug report, a notebook source opened
-    in Colab -- carries it or does not, whether or not it ships in the wheel.
+    Scope is every tree this repository actually writes Python into, not ``src/`` alone: the header is a per-file
+    legal marker and a file that travels -- a script pasted into a notebook, a test vendored into a bug report,
+    a notebook source opened in Colab -- carries it or does not, whether or not it ships in the wheel.
 
     Examples:
         >>> import tempfile

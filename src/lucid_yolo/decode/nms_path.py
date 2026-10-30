@@ -1,49 +1,38 @@
 # SPDX-License-Identifier: Apache-2.0
 """Confidence-threshold + class-wise NMS decoding for the dense branch (WP-042).
 
-The non-E2E inference decode: it turns the **one-to-many** branch's dense outputs
-into detections the classic way — a confidence threshold followed by class-wise
-non-maximum suppression — to produce the "mAP (non-E2E)" comparison column
+The non-E2E inference decode: it turns the **one-to-many** branch's dense outputs into detections the classic way — a
+confidence threshold followed by class-wise non-maximum suppression — to produce the "mAP (non-E2E)" comparison column
 against the suppression-free one-to-one path (blueprint sec. 5.5). Where
-:class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` keeps two heavily overlapping
-same-class high-score boxes, this path suppresses the lower-scoring one; that
-contrast is the whole point of reporting both columns.
+:class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` keeps two heavily overlapping same-class high-score boxes, this path
+suppresses the lower-scoring one; that contrast is the whole point of reporting both columns.
 
 The pipeline over the dense outputs is:
 
-1. sigmoid the class logits and take, per anchor, its single best class and that
-   class's score (**single-label** convention — one detection per surviving
-   anchor; a multi-label variant that emits one detection per class above the
+1. sigmoid the class logits and take, per anchor, its single best class and that class's score (**single-label**
+   convention — one detection per surviving anchor; a multi-label variant that emits one detection per class above the
    threshold is out of scope here);
-2. drop anchors whose best-class score is below ``conf_threshold`` (default
-   ``0.001``, the usual permissive evaluation-time threshold that lets the mAP
-   integration see the low-confidence tail);
-3. class-wise NMS via :func:`torchvision.ops.batched_nms` at ``iou_threshold``
-   (default ``0.7``) — boxes of *different* classes never suppress each other, so
-   overlapping detections of distinct classes all survive;
-4. keep at most ``max_det`` detections per image (default ``300``; R1
-   sec. 3.2.1);
+2. drop anchors whose best-class score is below ``conf_threshold`` (default ``0.001``, the usual permissive
+   evaluation-time threshold that lets the mAP integration see the low-confidence tail);
+3. class-wise NMS via :func:`torchvision.ops.batched_nms` at ``iou_threshold`` (default ``0.7``) — boxes of *different*
+   classes never suppress each other, so overlapping detections of distinct classes all survive;
+4. keep at most ``max_det`` detections per image (default ``300``; R1 sec. 3.2.1);
 5. pad to a **fixed** ``(B, max_det, 6)`` shape with score-zero rows.
 
-The fixed-size A9 output tuple ``[x1, y1, x2, y2, score, class]`` is identical to
-the one-to-one path's, so both decoders feed one evaluator interchangeably. Rows
-beyond the survivors carry ``score == 0`` and are ignored by a score-filtering
-evaluation loop. :func:`torchvision.ops.batched_nms` returns the kept indices in
-descending score order, so the score column comes out non-increasing.
+The fixed-size A9 output tuple ``[x1, y1, x2, y2, score, class]`` is identical to the one-to-one path's, so both
+decoders feed one evaluator interchangeably. Rows beyond the survivors carry ``score == 0`` and are ignored by a
+score-filtering evaluation loop. :func:`torchvision.ops.batched_nms` returns the kept indices in descending score
+order, so the score column comes out non-increasing.
 
-Descending order is the whole of that guarantee: **ties are unordered here**.
-``batched_nms`` sorts internally with no documented stability, and step 1's
-``confidence.max(dim=-1)`` picks between two exactly equal class scores by the same
-unspecified rule, so which of two equal-scoring rows lands first — and which class an
-exactly-tied anchor is labelled — is an implementation detail that may differ by
-device, by torch version, and between this path and a rerun of it. The rotated twin
-does state a tie order (:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder`
-sorts with ``stable=True``, so equal scores keep anchor order): the two decoders
-therefore differ in tie-breaking as well as in the overlap measure, and only the
-latter difference is deliberate. Row order alone does not move mAP, which reads each
-detection's score rather than its position; a tied run straddling the ``max_det``
-truncation, or a tied class argmax, can move it, since those decide *which* rows
-survive rather than merely where they sit.
+Descending order is the whole of that guarantee: **ties are unordered here**. ``batched_nms`` sorts internally with no
+documented stability, and step 1's ``confidence.max(dim=-1)`` picks between two exactly equal class scores by the same
+unspecified rule, so which of two equal-scoring rows lands first — and which class an exactly-tied anchor is labelled
+— is an implementation detail that may differ by device, by torch version, and between this path and a rerun of it.
+The rotated twin does state a tie order (:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` sorts with
+``stable=True``, so equal scores keep anchor order): the two decoders therefore differ in tie-breaking as well as in
+the overlap measure, and only the latter difference is deliberate. Row order alone does not move mAP, which reads each
+detection's score rather than its position; a tied run straddling the ``max_det`` truncation, or a tied class argmax,
+can move it, since those decide *which* rows survive rather than merely where they sit.
 
 Provenance: R1 sec. 3.2.1, R3 sec. 4. Assumptions: A9.
 """
@@ -71,21 +60,16 @@ __all__ = ["NMSDecoder"]
 class NMSDecoder(nn.Module):
     """Confidence-threshold + class-wise NMS decoder for the dense branch (A9).
 
-    Turns the one-to-many branch's raw dense outputs into a fixed-size batch of
-    score-ranked detections via a confidence threshold and class-wise
-    non-maximum suppression (the non-E2E path, blueprint sec. 5.5). Emits the
-    same ``(B, max_det, 6)`` A9 tuple as
-    :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` so both paths feed one
-    evaluator. The module owns no parameters — it is a pure functional transform
-    wrapped as an :class:`~torch.nn.Module`.
+    Turns the one-to-many branch's raw dense outputs into a fixed-size batch of score-ranked detections via a
+    confidence threshold and class-wise non-maximum suppression (the non-E2E path, blueprint sec. 5.5). Emits the same
+    ``(B, max_det, 6)`` A9 tuple as :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` so both paths feed one evaluator.
+    The module owns no parameters — it is a pure functional transform wrapped as an :class:`~torch.nn.Module`.
 
     Args:
-        conf_threshold: Anchors whose best-class score is strictly below this
-            value are dropped before NMS. Defaults to ``0.001`` (the permissive
-            evaluation convention).
-        iou_threshold: Class-wise NMS IoU threshold; a lower-scoring box is
-            suppressed when its IoU with a kept higher-scoring box of the *same*
-            class exceeds this. Defaults to ``0.7``.
+        conf_threshold: Anchors whose best-class score is strictly below this value are dropped before NMS. Defaults
+            to ``0.001`` (the permissive evaluation convention).
+        iou_threshold: Class-wise NMS IoU threshold; a lower-scoring box is suppressed when its IoU with a kept
+            higher-scoring box of the *same* class exceeds this. Defaults to ``0.7``.
         max_det: Maximum detections kept per image; also the fixed output length.
             Defaults to ``300`` (R1 sec. 3.2.1).
 
@@ -123,17 +107,15 @@ class NMSDecoder(nn.Module):
 
         Args:
             cls_logits: Raw dense class logits of shape ``(B, A, C)``.
-            raw_ltrb: Raw dense ltrb distances of shape ``(B, A, 4)`` (order l, t,
-                r, b), aligned with ``cls_logits`` on the anchor axis.
-            anchor_points: Anchor-centre ``(x, y)`` coordinates of shape
-                ``(A, 2)`` in input pixels, as returned by
+            raw_ltrb: Raw dense ltrb distances of shape ``(B, A, 4)`` (order l, t, r, b), aligned with ``cls_logits`` on
+                the anchor axis.
+            anchor_points: Anchor-centre ``(x, y)`` coordinates of shape ``(A, 2)`` in input pixels, as returned by
                 :func:`~lucid_yolo.assign.grid.make_anchor_points`.
             strides: Per-anchor level stride of shape ``(A,)``.
 
         Returns:
-            Detections of shape ``(B, max_det, 6)`` whose last axis is the A9
-            tuple ``[x1, y1, x2, y2, score, class]``, sorted by descending score
-            with score-zero padding rows filling any shortfall below ``max_det``.
+            Detections of shape ``(B, max_det, 6)`` whose last axis is the A9 tuple ``[x1, y1, x2, y2, score, class]``,
+            sorted by descending score with score-zero padding rows filling any shortfall below ``max_det``.
 
         Examples:
             ```pycon
@@ -159,30 +141,23 @@ class NMSDecoder(nn.Module):
     ) -> tuple[Tensor, Tensor]:
         """Decode as :meth:`forward` does, and report the source anchor of each row.
 
-        The whole decode lives here and :meth:`forward` is its box-only view, so
-        the two cannot report different survivor sets. The extra return exists for
-        the same reason as its one-to-one twin
-        (:meth:`~lucid_yolo.decode.topk_e2e.TopKDecoder.decode_with_indices`): the
-        segmentation decode (WP-053b) gathers each detection's mask coefficients
-        from the dense ``(B, A, K)`` map by these indices. On this path the kept
-        set is chosen by the threshold and the suppression, not by a ranking any
-        caller could reproduce, so the indices have to be carried out through the
-        **same** ``keep``/``order`` selection that built the boxes — recomputing a
-        second selection outside is exactly how a mask ends up describing another
-        anchor's object.
+        The whole decode lives here and :meth:`forward` is its box-only view, so the two cannot report different
+        survivor sets. The extra return exists for the same reason as its one-to-one twin
+        (:meth:`~lucid_yolo.decode.topk_e2e.TopKDecoder.decode_with_indices`): the segmentation decode (WP-053b) gathers
+        each detection's mask coefficients from the dense ``(B, A, K)`` map by these indices. On this path the kept set
+        is chosen by the threshold and the suppression, not by a ranking any caller could reproduce, so the indices
+        have to be carried out through the **same** ``keep``/``order`` selection that built the boxes — recomputing a
+        second selection outside is exactly how a mask ends up describing another anchor's object.
 
         Args:
             cls_logits: Raw dense class logits of shape ``(B, A, C)``.
-            raw_ltrb: Raw dense ltrb distances of shape ``(B, A, 4)``, aligned
-                with ``cls_logits`` on the anchor axis.
-            anchor_points: Anchor-centre ``(x, y)`` coordinates of shape
-                ``(A, 2)`` in input pixels.
+            raw_ltrb: Raw dense ltrb distances of shape ``(B, A, 4)``, aligned with ``cls_logits`` on the anchor axis.
+            anchor_points: Anchor-centre ``(x, y)`` coordinates of shape ``(A, 2)`` in input pixels.
             strides: Per-anchor level stride of shape ``(A,)``.
 
         Returns:
-            A pair ``(detections, anchor_indices)``: the ``(B, max_det, 6)`` A9
-            batch :meth:`forward` returns, and the ``(B, max_det)`` long tensor
-            naming the anchor each row came from, with
+            A pair ``(detections, anchor_indices)``: the ``(B, max_det, 6)`` A9 batch :meth:`forward` returns, and the
+            ``(B, max_det)`` long tensor naming the anchor each row came from, with
             :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX` on the padding rows.
 
         Examples:
@@ -201,9 +176,8 @@ class NMSDecoder(nn.Module):
 
             ```
 
-            A box has to enclose an area to be a detection: zero ``ltrb`` distances put
-            ``x2`` exactly on ``x1``, and such a row is dropped with the sub-threshold
-            ones rather than spending one of the ``max_det`` slots.
+            A box has to enclose an area to be a detection: zero ``ltrb`` distances put ``x2`` exactly on ``x1``, and
+            such a row is dropped with the sub-threshold ones rather than spending one of the ``max_det`` slots.
 
             ```pycon
             >>> flat = torch.zeros(1, 2, 4)
@@ -213,8 +187,8 @@ class NMSDecoder(nn.Module):
 
             ```
 
-            An empty batch decodes to empty outputs of the documented width rather
-            than raising, matching :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder`:
+            An empty batch decodes to empty outputs of the documented width rather than raising, matching
+            :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder`:
 
             ```pycon
             >>> empty, empty_anchors = decoder.decode_with_indices(
@@ -229,12 +203,10 @@ class NMSDecoder(nn.Module):
         confidence = cls_logits.sigmoid()
         scores, classes = confidence.max(dim=-1)  # both (B, A), single-label per anchor
         if boxes.shape[0] == 0:
-            # The per-image decode below is a list comprehension fed to `torch.stack`,
-            # which has no empty case — it raises rather than producing the zero-length
-            # batch every other shape in this decode already handles. Nothing in the
-            # return contract excludes `B = 0`, and the one-to-one decoder returns
-            # empties here, so the two paths would disagree on a batch an evaluation
-            # loop can legitimately hand either of them.
+            # The per-image decode below is a list comprehension fed to `torch.stack`, which has no empty case — it
+            # raises rather than producing the zero-length batch every other shape in this decode already handles.
+            # Nothing in the return contract excludes `B = 0`, and the one-to-one decoder returns empties here, so the
+            # two paths would disagree on a batch an evaluation loop can legitimately hand either of them.
             return self._empty_batch(boxes)
         decoded = [self._decode_image(boxes[i], scores[i], classes[i]) for i in range(boxes.shape[0])]
         return torch.stack([image for image, _ in decoded]), torch.stack([index for _, index in decoded])
@@ -242,9 +214,8 @@ class NMSDecoder(nn.Module):
     def _empty_batch(self, boxes: Tensor) -> tuple[Tensor, Tensor]:
         """The ``B = 0`` return: zero-row tensors of the documented widths.
 
-        Built from ``boxes`` so the empties carry the dtype and device the
-        non-empty path would have produced, which is what lets a caller
-        concatenate this batch with a decoded one without a conversion.
+        Built from ``boxes`` so the empties carry the dtype and device the non-empty path would have produced, which is
+        what lets a caller concatenate this batch with a decoded one without a conversion.
 
         Args:
             boxes: The ``(0, A, 4)`` decoded boxes, read for dtype and device only.
@@ -266,28 +237,23 @@ class NMSDecoder(nn.Module):
             classes: Per-anchor best-class index of shape ``(A,)`` (integral).
 
         Returns:
-            A pair of the ``(max_det, 6)`` A9 detections ``[x1, y1, x2, y2,
-            score, class]`` sorted by descending score and padded with score-zero
-            rows, and the ``(max_det,)`` source anchor index of each row (padding
-            rows carry :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX`). The
-            index is threaded through the same two selections the boxes pass —
-            the threshold's ``keep`` mask and the suppression's ``order`` — rather
-            than recovered afterwards.
+            A pair of the ``(max_det, 6)`` A9 detections ``[x1, y1, x2, y2, score, class]`` sorted by descending score
+            and padded with score-zero rows, and the ``(max_det,)`` source anchor index of each row (padding rows carry
+            :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX`). The index is threaded through the same two selections
+            the boxes pass — the threshold's ``keep`` mask and the suppression's ``order`` — rather than recovered
+            afterwards.
         """
-        # Degenerate rows are dropped at the threshold, not at the decode: `decode_ltrb`
-        # is a pure `(l, t, r, b) -> xyxy` transcription whose values are pinned by the
-        # frozen goldens, so clamping there would move numbers this boundary can leave
-        # untouched. `batched_nms` has no opinion on a box whose `x2 <= x1` — such a box
-        # has non-positive area, so its IoU against everything is zero and it suppresses
-        # nothing, which lets an untrained-region anchor cluster consume `max_det` slots
-        # and push real detections out of the budget. Strict `>` therefore drops the
-        # zero-area case as well as the inverted one; neither describes a region.
-        # The mask stays folded into `keep` so the anchor indices below are threaded
-        # through exactly one selection, which is this method's stated invariant.
-        # Finiteness is asserted rather than inferred from the two comparisons. `NaN`
-        # corners would indeed fail them, but an infinite pair does not: `l = r = inf`
-        # decodes to `[-inf, -inf, inf, inf]`, which is correctly *ordered* and would
-        # have passed as a box covering the plane.
+        # Degenerate rows are dropped at the threshold, not at the decode: `decode_ltrb` is a pure
+        # `(l, t, r, b) -> xyxy` transcription whose values are pinned by the frozen goldens, so clamping there would
+        # move numbers this boundary can leave untouched. `batched_nms` has no opinion on a box whose `x2 <= x1` — such
+        # a box has non-positive area, so its IoU against everything is zero and it suppresses nothing, which lets an
+        # untrained-region anchor cluster consume `max_det` slots and push real detections out of the budget. Strict
+        # `>` therefore drops the zero-area case as well as the inverted one; neither describes a region.
+        # The mask stays folded into `keep` so the anchor indices below are threaded through exactly one selection,
+        # which is this method's stated invariant.
+        # Finiteness is asserted rather than inferred from the two comparisons. `NaN` corners would indeed fail them,
+        # but an infinite pair does not: `l = r = inf` decodes to `[-inf, -inf, inf, inf]`, which is correctly
+        # *ordered* and would have passed as a box covering the plane.
         keep = (
             (scores >= self.conf_threshold)
             & boxes.isfinite().all(dim=-1)

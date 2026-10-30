@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Network-capture guards name their cause and keep eager execution exact.
 
-Every guard that sends a training forward back to eager execution is exercised here
-on CPU wherever the guard is decided before any CUDA work: the retire warning, the
-per-cause reasons and the recorded-contract drift checks. Behaviour that only exists
-with a real CUDA recording is ``gpu``-marked and skipped without a device.
+Every guard that sends a training forward back to eager execution is exercised here on CPU wherever the guard is
+decided before any CUDA work: the retire warning, the per-cause reasons and the recorded-contract drift checks.
+Behaviour that only exists with a real CUDA recording is ``gpu``-marked and skipped without a device.
 """
 
 from __future__ import annotations
@@ -47,14 +46,26 @@ def _module() -> DetectionLitModule:
     return DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=4)
 
 
+def _recorded_holder() -> _NetworkCapture:
+    """Build a holder whose recorded contract is owners ``(1, 2, 3)``, storage ``("state",)`` and one precision.
+
+    Examples:
+        >>> _recorded_holder()._owners
+        (1, 2, 3)
+    """
+    holder = _NetworkCapture()
+    holder._input, holder._state, holder._owners = ("shape", ("precision",)), ("state",), (1, 2, 3)
+    return holder
+
+
 class TestRetireWarning:
     """The single retire warning keeps its stable prefix and names the broken contract."""
 
     def test_names_cause_after_prefix(self) -> None:
         """The warning reads as the shared prefix followed by the caller's reason.
 
-        Existing callers match ``stays eager``; a user reading the warning needs the cause
-        that follows it, so both halves are pinned exactly.
+        Existing callers match ``stays eager``; a user reading the warning needs the cause that follows it, so both
+        halves are pinned exactly.
         """
         holder = _NetworkCapture()
         with pytest.warns(UserWarning, match=r"^capture_network=True stays eager: the input images require gradients$"):
@@ -64,8 +75,8 @@ class TestRetireWarning:
     def test_later_cause_stays_silent(self) -> None:
         """Only the first cause of a fit is reported; the holder is already eager afterwards.
 
-        A second retire in the same fit would repeat a warning about a state nothing can
-        change any more, so it must not warn at all.
+        A second retire in the same fit would repeat a warning about a state nothing can change any more, so it must
+        not warn at all.
         """
         holder = _NetworkCapture()
         with pytest.warns(UserWarning, match="first cause"):
@@ -92,9 +103,9 @@ class TestRetireWarning:
     ) -> None:
         """A retirement decided inside the shared recording path names the code that called the recorder.
 
-        Both compositions retire inside one shared helper, a frame deeper than a direct
-        retire. Pointing into the recorder instead would break a user's warning filter
-        keyed on the calling module; CPU stages retire there on their storage.
+        Both compositions retire inside one shared helper, a frame deeper than a direct retire. Pointing into the
+        recorder instead would break a user's warning filter keyed on the calling module; CPU stages retire there on
+        their storage.
         """
         model = _module()
         with pytest.warns(UserWarning, match="not a strided CUDA tensor") as record:
@@ -116,8 +127,8 @@ class TestRunRetireReason:
     def test_warns_cause_and_runs_eager(self, requires_grad: bool, anomaly: bool, cause: str) -> None:
         """Each input-side or network-side cause appears after the prefix, and eager output returns.
 
-        These guards are decided before any CUDA work, so a CPU network reaches them: the
-        first two fire on the call itself, the last on the CPU-resident stages.
+        These guards are decided before any CUDA work, so a CPU network reaches them: the first two fire on the call
+        itself, the last on the CPU-resident stages.
         """
         model = _module()
         holder = _NetworkCapture()
@@ -132,13 +143,13 @@ class TestRunRetireReason:
         eager.assert_called_once_with(images)
         assert holder._disabled
 
-    def test_bf16_cause_names_runtime_and_requirement(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch("lucid_yolo.ptl.network_capture._BF16_REPLAY_SUPPORTED", False)
+    def test_bf16_cause_names_runtime_and_requirement(self) -> None:
         """A BF16 batch below the verified runtime names the installed torch and the 2.9 floor.
 
-        The gate compares release versions strictly, so 2.9 pre-release builds also land
-        here; the warning has to say which version was seen for that to be diagnosable.
+        The gate compares release versions strictly, so 2.9 pre-release builds also land here; the warning has to say
+        which version was seen for that to be diagnosable.
         """
-        monkeypatch.setattr("lucid_yolo.ptl.network_capture._BF16_REPLAY_SUPPORTED", False)
         model = _module()
         holder = _NetworkCapture()
         images = torch.zeros(1, 3, 64, 64, dtype=torch.bfloat16)
@@ -162,9 +173,9 @@ class TestBatchNormEligibility:
     def test_momentum_none_retires_only_while_training(self, training: bool, cause: str) -> None:
         """Only a training BatchNorm that tracks running stats with ``momentum=None`` is refused.
 
-        That combination reads ``num_batches_tracked`` on the host every forward, which
-        CUDA stream capture rejects; a frozen BatchNorm reads nothing there, so it must
-        reach the next check (here the CPU-storage one) rather than this reason.
+        That combination reads ``num_batches_tracked`` on the host every forward, which CUDA stream capture rejects; a
+        frozen BatchNorm reads nothing there, so it must reach the next check (here the CPU-storage one) rather than
+        this reason.
         """
         model = _module()
         norm = next(module for module in model.modules() if isinstance(module, torch.nn.BatchNorm2d))
@@ -203,9 +214,9 @@ class TestStageModuleBreach:
     def test_names_cause(self, alter: Callable[[_DetectionNetwork], object], cause: str) -> None:
         """Each breach is named before the CPU-storage check, except an instance forward on the root.
 
-        These guards are decided before any CUDA work, so CPU stages reach them. The graphed
-        callable installs ``forward`` on the recorder's own root, so that override must fall
-        through to the next check (here the CPU-resident storage) instead of retiring.
+        These guards are decided before any CUDA work, so CPU stages reach them. The graphed callable installs
+        ``forward`` on the recorder's own root, so that override must fall through to the next check (here the
+        CPU-resident storage) instead of retiring.
         """
         model = _module()
         network = _DetectionNetwork(model.backbone, model.neck, model.head)
@@ -215,9 +226,8 @@ class TestStageModuleBreach:
     def test_feature_reason_omits_head(self) -> None:
         """A pose feature recording holds no head, so its stage reason cannot send a user to one.
 
-        The pose feature recording holds only backbone and neck; each head stem records
-        separately and the head is judged by its certificate, so a reason naming the head
-        would point at the wrong module.
+        The pose feature recording holds only backbone and neck; each head stem records separately and the head is
+        judged by its certificate, so a reason naming the head would point at the wrong module.
         """
         model = _module()
         model.neck.register_forward_hook(lambda *_: None)
@@ -228,13 +238,13 @@ class TestStageModuleBreach:
 class TestPrecisionPolicy:
     """The precision key reads the API torch accepts and reports a refused query verbatim."""
 
-    def test_refused_query_text_reaches_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch("lucid_yolo.ptl.network_capture._precision_signature", refuse_precision_query)
+    def test_refused_query_text_reaches_warning(self) -> None:
         """A policy query torch refuses retires with torch's own error text after the cause.
 
-        Losing the text leaves a user unable to tell a mixed legacy/new precision API
-        from any other reason the step went eager.
+        Losing the text leaves a user unable to tell a mixed legacy/new precision API from any other reason the step
+        went eager.
         """
-        monkeypatch.setattr("lucid_yolo.ptl.network_capture._precision_signature", refuse_precision_query)
         model = _module()
         images = torch.zeros(1, 3, 64, 64)
         eager = MagicMock(return_value="eager output")
@@ -248,8 +258,8 @@ class TestPrecisionPolicy:
     def test_new_api_policy_reads_and_distinguishes_values(self) -> None:
         """After the new ``fp32_precision`` API is used, the key still reads and tells TF32 from IEEE.
 
-        Setting that API makes torch's legacy getters raise for the rest of the process,
-        so the probe runs in a subprocess instead of poisoning this one.
+        Setting that API makes torch's legacy getters raise for the rest of the process, so the probe runs in a
+        subprocess instead of poisoning this one.
         """
         probe = (
             "import torch\n"
@@ -270,8 +280,8 @@ class TestFailedRecording:
     def test_synchronizes_before_buffer_restore(self) -> None:
         """A warmup failure synchronizes the device before the BatchNorm snapshot is copied back.
 
-        The recorder warms up on its own side stream; without the drain, the restore on the
-        current stream can race BatchNorm writes the failed warmup left queued.
+        The recorder warms up on its own side stream; without the drain, the restore on the current stream can race
+        BatchNorm writes the failed warmup left queued.
         """
         model = _module().cuda()
         images = torch.randn(2, 3, 64, 64, device="cuda")
@@ -306,8 +316,8 @@ class TestReplayBackwardHold:
     def test_backward_releases_hold(self) -> None:
         """Waiting on an output with a backward node holds, and that node's backward releases it.
 
-        The post-hook on the shared backward node is the observed boundary: once it fires,
-        the static activations have been consumed and a new replay may overwrite them.
+        The post-hook on the shared backward node is the observed boundary: once it fires, the static activations have
+        been consumed and a new replay may overwrite them.
         """
         holder = _NetworkCapture()
         weight = torch.ones(3, requires_grad=True)
@@ -320,10 +330,10 @@ class TestReplayBackwardHold:
     def test_live_gradient_leaves_storage_before_replay(self) -> None:
         """A ``.grad`` alive when a replay starts is copied out before that replay's backward.
 
-        The gradient tensor stands in for one adopted from the static gradient buffers:
-        accumulating into it in place would be the silent doubling, so after the backward it
-        must be untouched and the parameter must hold a separate accumulated copy. The copy
-        is made at forward time, the order :meth:`_NetworkCapture._run` uses before replaying.
+        The gradient tensor stands in for one adopted from the static gradient buffers: accumulating into it in place
+        would be the silent doubling, so after the backward it must be untouched and the parameter must hold a
+        separate accumulated copy. The copy is made at forward time, the order :meth:`_NetworkCapture._run` uses
+        before replaying.
         """
         network = _DetectionNetwork(torch.nn.Linear(3, 3), torch.nn.Identity(), torch.nn.Identity())
         weight = network.backbone.weight
@@ -349,8 +359,8 @@ class TestReplayBackwardHold:
     def test_train_batch_start_drops_unconsumed_hold(self) -> None:
         """A new training batch releases a hold whose backward never ran.
 
-        ``training_step`` may return ``None`` and skip the backward, which would otherwise
-        keep every later forward of the fit eager.
+        ``training_step`` may return ``None`` and skip the backward, which would otherwise keep every later forward of
+        the fit eager.
         """
         model = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=4, capture_network=True)
         network_capture(model)._pending_backward = True
@@ -362,11 +372,10 @@ class TestReplayBackwardHold:
     def test_two_forwards_before_backward_match_eager(self) -> None:
         """Two training forwards before one backward give the eager gradients exactly.
 
-        Without the hold, the second call replays into the same static buffers and the
-        single backward computes the first call's gradient from the second call's
-        activations. The loss reads all four outputs, as the training loss does: the
-        replayed backward writes a gradient for every recorded parameter, zeros for a
-        branch the loss left unread, where eager leaves that branch at ``grad=None``.
+        Without the hold, the second call replays into the same static buffers and the single backward computes the
+        first call's gradient from the second call's activations. The loss reads all four outputs, as the training loss
+        does: the replayed backward writes a gradient for every recorded parameter, zeros for a branch the loss left
+        unread, where eager leaves that branch at ``grad=None``.
         """
         eager = _module().cuda()
         replay = copy.deepcopy(eager)
@@ -397,8 +406,8 @@ class TestStageComposition:
     def test_replay_view_matches_module_forward(self) -> None:
         """The tuple view rebuilt by field equals the module forward on every output field.
 
-        This is the CPU half of the eager oracle: it catches a drifted composition or a
-        reordered rebuild without needing a CUDA recording.
+        This is the CPU half of the eager oracle: it catches a drifted composition or a reordered rebuild without
+        needing a CUDA recording.
         """
         model = _module().eval()
         images = torch.rand(2, 3, 64, 64)
@@ -439,14 +448,12 @@ class TestRecordedContractDrift:
         self, owners: tuple[int, ...], state: tuple[object, ...], precision: tuple[object, ...], cause: str
     ) -> None:
         """Owners, storage and precision each produce their own reason against one recording."""
-        holder = _NetworkCapture()
-        holder._input, holder._state, holder._owners = ("shape", ("precision",)), ("state",), (1, 2, 3)
+        holder = _recorded_holder()
         assert cause in (holder._drift(state, owners, precision) or "")
 
     def test_unchanged_contract_has_no_reason(self) -> None:
         """The recorded owners, storage and precision produce no drift reason."""
-        holder = _NetworkCapture()
-        holder._input, holder._state, holder._owners = ("shape", ("precision",)), ("state",), (1, 2, 3)
+        holder = _recorded_holder()
         assert holder._drift(("state",), (1, 2, 3), ("precision",)) is None
 
 
@@ -467,10 +474,10 @@ class TestDryRecordingCycle:
     def test_accumulated_microbatches_record_once_and_match_eager(self, dry_recording: MagicMock) -> None:
         """Two accumulated micro-batches record once, copy the live gradient at forward time and match eager.
 
-        The first forward records and holds; a second forward before its backward stays eager. The
-        second micro-batch's forward replaces the live ``.grad`` with a copy before any backward runs,
-        so the first micro-batch's gradient object is never written again, and the accumulated result
-        equals the same two micro-batches run eagerly. ``clear`` then drops the recording.
+        The first forward records and holds; a second forward before its backward stays eager. The second
+        micro-batch's forward replaces the live ``.grad`` with a copy before any backward runs, so the first
+        micro-batch's gradient object is never written again, and the accumulated result equals the same two
+        micro-batches run eagerly. ``clear`` then drops the recording.
         """
         stage = torch.nn.Linear(3, 2)
         reference = copy.deepcopy(stage)

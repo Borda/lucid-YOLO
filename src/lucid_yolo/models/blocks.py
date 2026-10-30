@@ -1,16 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Backbone/neck primitive blocks (WP-016).
 
-The three convolutional primitives shared by every composite backbone and neck
-block in the YOLO26 family: a fused convolution-normalization-activation unit, a
-depthwise variant expressed on top of it, and a residual bottleneck. Later work
-packages (C3k2, PSABlock/C2PSA, SPPF) compose these — see blueprint sec. 5.2.
+The three convolutional primitives shared by every composite backbone and neck block in the YOLO26 family: a fused
+convolution-normalization-activation unit, a depthwise variant expressed on top of it, and a residual bottleneck. Later
+work packages (C3k2, PSABlock/C2PSA, SPPF) compose these — see blueprint sec. 5.2.
 
-Internals follow the YOLO11 lineage described in the method paper and its
-supplementary block diagram (assumption A3): a bias-free convolution folded into
-BatchNorm, SiLU activation, and CSP-style bottlenecks with an optional identity
-shortcut. Padding is auto-computed so odd kernels preserve spatial size at
-stride 1 ("same" convolution).
+Internals follow the YOLO11 lineage described in the method paper and its supplementary block diagram (assumption
+A3): a bias-free convolution folded into BatchNorm, SiLU activation, and CSP-style bottlenecks with an optional
+identity shortcut. Padding is auto-computed so odd kernels preserve spatial size at stride 1 ("same" convolution).
 
 Provenance: R11 (arXiv:2501.13400), R1 Fig. S2. Assumptions: A3.
 """
@@ -23,20 +20,18 @@ from typing import Any, cast
 import torch
 from torch import Tensor, nn
 
-#: Inner-bottleneck count of the nested :class:`C3k` used by ``C3k2`` when
-#: ``c3k=True`` (assumption A3). Reduced from 2 to 1 by the WP-023 parameter/FLOP
-#: fidelity gate: the depth-2 (``l``/``x``) variants carry two of these nested
-#: units per stage, and ``n=2`` overshot the R1 Table 7 FLOP budget at those
-#: scales — ``n=1`` lands all five within tolerance. See docs/ASSUMPTIONS.md A3.
+#: Inner-bottleneck count of the nested :class:`C3k` used by ``C3k2`` when ``c3k=True`` (assumption A3). Reduced from
+#: 2 to 1 by the WP-023 parameter/FLOP fidelity gate: the depth-2 (``l``/``x``) variants carry two of these nested
+#: units per stage, and ``n=2`` overshot the R1 Table 7 FLOP budget at those scales — ``n=1`` lands all five within
+#: tolerance. See docs/ASSUMPTIONS.md A3.
 _C3K_INNER_UNITS = 1
 
 
 def _same_padding(kernel_size: int, dilation: int = 1) -> int:
     """Return the symmetric padding that keeps spatial size fixed at stride 1.
 
-    Valid for odd kernels, where the effective (dilated) kernel is also odd and
-    the "same" padding is integral. Even kernels have no symmetric same-padding
-    and are not used by this family.
+    Valid for odd kernels, where the effective (dilated) kernel is also odd and the "same" padding is integral. Even
+    kernels have no symmetric same-padding and are not used by this family.
 
     Args:
         kernel_size: Convolution kernel size (expected odd).
@@ -62,22 +57,18 @@ def _same_padding(kernel_size: int, dilation: int = 1) -> int:
 def _conv_bn(in_channels: int, out_channels: int, kernel_size: int, groups: int = 1) -> nn.Sequential:
     """Return a bias-free convolution folded into BatchNorm, with no activation.
 
-    The convolutional unit used inside the attention block: unlike
-    :class:`ConvBNAct` it omits the SiLU. The attention projections (qkv, the
-    depthwise positional term, and the output projection) are left unactivated so
-    the non-linearity does not distort the attention logits or the residual
-    stream — a choice recorded under assumption A3.
+    The convolutional unit used inside the attention block: unlike :class:`ConvBNAct` it omits the SiLU. The attention
+    projections (qkv, the depthwise positional term, and the output projection) are left unactivated so the
+    non-linearity does not distort the attention logits or the residual stream — a choice recorded under assumption A3.
 
     Args:
         in_channels: Number of input channels.
         out_channels: Number of output channels.
         kernel_size: Convolution kernel size (odd for "same" padding).
-        groups: Number of blocked connections; ``in_channels`` yields a depthwise
-            convolution. Defaults to 1.
+        groups: Number of blocked connections; ``in_channels`` yields a depthwise convolution. Defaults to 1.
 
     Returns:
-        An ``nn.Sequential`` of a bias-free :class:`~torch.nn.Conv2d` followed by
-        :class:`~torch.nn.BatchNorm2d`.
+        An ``nn.Sequential`` of a bias-free :class:`~torch.nn.Conv2d` followed by :class:`~torch.nn.BatchNorm2d`.
 
     Examples:
         ```pycon
@@ -106,18 +97,16 @@ def _conv_bn(in_channels: int, out_channels: int, kernel_size: int, groups: int 
 class ConvBNAct(nn.Module):
     """Fused convolution + BatchNorm + SiLU activation.
 
-    The canonical convolutional unit of the backbone and neck. The convolution
-    is bias-free because the following BatchNorm supplies its own affine shift;
-    padding is auto-computed so that odd kernels preserve spatial resolution at
-    stride 1.
+    The canonical convolutional unit of the backbone and neck. The convolution is bias-free because the following
+    BatchNorm supplies its own affine shift; padding is auto-computed so that odd kernels preserve spatial resolution
+    at stride 1.
 
     Args:
         in_channels: Number of input channels.
         out_channels: Number of output channels.
         kernel_size: Convolution kernel size (odd for "same" padding).
         stride: Convolution stride. Defaults to 1.
-        groups: Number of blocked connections; ``in_channels`` yields a
-            depthwise convolution. Defaults to 1.
+        groups: Number of blocked connections; ``in_channels`` yields a depthwise convolution. Defaults to 1.
         dilation: Convolution dilation factor. Defaults to 1.
 
     Examples:
@@ -168,15 +157,13 @@ class ConvBNAct(nn.Module):
 class DepthwiseConv(nn.Module):
     """Depthwise ConvBNAct — one convolution group per input channel.
 
-    A thin specialization of :class:`ConvBNAct` with ``groups == in_channels``,
-    the spatial-mixing half of a depthwise-separable convolution. ``out_channels``
-    must be divisible by ``in_channels`` (the PyTorch grouped-convolution
-    constraint).
+    A thin specialization of :class:`ConvBNAct` with ``groups == in_channels``, the spatial-mixing half of a
+    depthwise-separable convolution. ``out_channels`` must be divisible by ``in_channels`` (the PyTorch
+    grouped-convolution constraint).
 
     Args:
         in_channels: Number of input channels (also the group count).
-        out_channels: Number of output channels; must be a multiple of
-            ``in_channels``.
+        out_channels: Number of output channels; must be a multiple of ``in_channels``.
         kernel_size: Convolution kernel size (odd for "same" padding).
         stride: Convolution stride. Defaults to 1.
         dilation: Convolution dilation factor. Defaults to 1.
@@ -226,19 +213,16 @@ class DepthwiseConv(nn.Module):
 class Bottleneck(nn.Module):
     """Residual bottleneck of two stacked ConvBNAct layers.
 
-    The inner block of the CSP-style backbone stages. Channels are squeezed to
-    ``int(out_channels * expansion)`` by the first convolution and restored by
-    the second. An identity shortcut is added when requested and the input and
+    The inner block of the CSP-style backbone stages. Channels are squeezed to ``int(out_channels * expansion)`` by
+    the first convolution and restored by the second. An identity shortcut is added when requested and the input and
     output channel counts match; otherwise the block is purely feed-forward.
 
     Args:
         in_channels: Number of input channels.
         out_channels: Number of output channels.
-        shortcut: Add the residual identity when ``in_channels == out_channels``.
-            Defaults to ``True``.
+        shortcut: Add the residual identity when ``in_channels == out_channels``. Defaults to ``True``.
         kernel_sizes: Kernel sizes of the two convolutions. Defaults to ``(3, 3)``.
-        expansion: Hidden-channel ratio ``int(out_channels * expansion)``.
-            Defaults to ``0.5``.
+        expansion: Hidden-channel ratio ``int(out_channels * expansion)``. Defaults to ``0.5``.
 
     Examples:
         ```pycon
@@ -273,8 +257,7 @@ class Bottleneck(nn.Module):
             x: Input tensor of shape ``(N, in_channels, H, W)``.
 
         Returns:
-            Tensor of shape ``(N, out_channels, H, W)``; the input is added when
-            the shortcut is active.
+            Tensor of shape ``(N, out_channels, H, W)``; the input is added when the shortcut is active.
         """
         y = cast(Tensor, self.cv2(self.cv1(x)))
         return x + y if self.add_shortcut else y
@@ -283,21 +266,18 @@ class Bottleneck(nn.Module):
 class C3k(nn.Module):
     """CSP block with three 1x1 fusion convolutions and ``n`` inner bottlenecks.
 
-    The heavier CSP variant used for the deeper backbone/neck stages. Two 1x1
-    convolutions (``cv1``, ``cv2``) split the input into two ``hidden``-channel
-    streams; ``cv1``'s stream is refined by ``n`` sequential :class:`Bottleneck`
-    blocks (kernel sizes ``(3, 3)``, internal expansion ``1.0`` so the bottleneck
-    keeps full width), then the two streams are concatenated and fused back to
-    ``out_channels`` by a third 1x1 convolution (``cv3``).
+    The heavier CSP variant used for the deeper backbone/neck stages. Two 1x1 convolutions (``cv1``, ``cv2``) split
+    the input into two ``hidden``-channel streams; ``cv1``'s stream is refined by ``n`` sequential :class:`Bottleneck`
+    blocks (kernel sizes ``(3, 3)``, internal expansion ``1.0`` so the bottleneck keeps full width), then the two
+    streams are concatenated and fused back to ``out_channels`` by a third 1x1 convolution (``cv3``).
 
     Args:
         in_channels: Number of input channels.
         out_channels: Number of output channels.
         n: Number of inner bottlenecks on the refined stream. Defaults to 1.
-        shortcut: Enable the residual identity inside each inner bottleneck.
-            Defaults to ``True``.
-        expansion: Hidden-channel ratio ``int(out_channels * expansion)`` for the
-            two split streams. Defaults to ``0.5``.
+        shortcut: Enable the residual identity inside each inner bottleneck. Defaults to ``True``.
+        expansion: Hidden-channel ratio ``int(out_channels * expansion)`` for the two split streams. Defaults to
+            ``0.5``.
 
     Examples:
         ```pycon
@@ -347,35 +327,26 @@ class C3k(nn.Module):
 class C3k2(nn.Module):
     """Fast CSP block with densely chained inner units (YOLO11 lineage).
 
-    The workhorse composite of the backbone and neck. A single 1x1 convolution
-    (``cv1``) lifts the input to ``2 * hidden`` channels, split into two
-    ``hidden``-channel halves. The second half is fed through ``n`` inner units
-    with dense CSP chaining: each unit consumes the most recent tensor and its
-    output is appended, so the pre-fusion concatenation accumulates
-    ``(2 + n) * hidden`` channels (both original halves plus every unit output).
-    A final 1x1 convolution (``cv2``) fuses that stack to ``out_channels``.
+    The workhorse composite of the backbone and neck. A single 1x1 convolution (``cv1``) lifts the input to
+    ``2 * hidden`` channels, split into two ``hidden``-channel halves. The second half is fed through ``n`` inner units
+    with dense CSP chaining: each unit consumes the most recent tensor and its output is appended, so the pre-fusion
+    concatenation accumulates ``(2 + n) * hidden`` channels (both original halves plus every unit output). A final 1x1
+    convolution (``cv2``) fuses that stack to ``out_channels``.
 
-    The inner-unit type is selected by ``c3k``: a plain :class:`Bottleneck`
-    (internal expansion ``1.0``) when ``False``, or a nested :class:`C3k`
-    (``n=`` :data:`_C3K_INNER_UNITS`, ``expansion=0.5``) when ``True``.
-    ``inner_block_factory`` overrides
-    this selection entirely — the seam by which the attention-augmented neck
-    variant (a bottleneck followed by a ``PSABlock``) is introduced without
-    touching this class.
+    The inner-unit type is selected by ``c3k``: a plain :class:`Bottleneck` (internal expansion ``1.0``) when
+    ``False``, or a nested :class:`C3k` (``n=`` :data:`_C3K_INNER_UNITS`, ``expansion=0.5``) when ``True``.
+    ``inner_block_factory`` overrides this selection entirely — the seam by which the attention-augmented neck variant
+    (a bottleneck followed by a ``PSABlock``) is introduced without touching this class.
 
     Args:
         in_channels: Number of input channels.
         out_channels: Number of output channels.
         n: Number of densely chained inner units. Defaults to 1.
-        e: Hidden-channel ratio ``int(out_channels * e)``; early backbone stages
-            use ``0.25``. Defaults to ``0.5``.
-        c3k: Use nested :class:`C3k` inner units instead of :class:`Bottleneck`.
-            Defaults to ``False``.
-        shortcut: Enable the residual identity inside each inner unit. Defaults
-            to ``True``.
-        inner_block_factory: Optional ``(hidden_channels, shortcut) -> Module``
-            builder that replaces the default ``c3k`` selection for every inner
-            unit. Defaults to ``None`` (use the built-in selection).
+        e: Hidden-channel ratio ``int(out_channels * e)``; early backbone stages use ``0.25``. Defaults to ``0.5``.
+        c3k: Use nested :class:`C3k` inner units instead of :class:`Bottleneck`. Defaults to ``False``.
+        shortcut: Enable the residual identity inside each inner unit. Defaults to ``True``.
+        inner_block_factory: Optional ``(hidden_channels, shortcut) -> Module`` builder that replaces the default
+            ``c3k`` selection for every inner unit. Defaults to ``None`` (use the built-in selection).
 
     Examples:
         ```pycon
@@ -412,8 +383,7 @@ class C3k2(nn.Module):
         """Return the built-in inner-unit builder selected by ``c3k``.
 
         Args:
-            c3k: Select nested :class:`C3k` units when ``True``, otherwise plain
-                :class:`Bottleneck` units.
+            c3k: Select nested :class:`C3k` units when ``True``, otherwise plain :class:`Bottleneck` units.
 
         Returns:
             A ``(hidden_channels, shortcut) -> Module`` factory.
@@ -452,21 +422,18 @@ class C3k2(nn.Module):
 class SPPF(nn.Module):
     """Spatial Pyramid Pooling - Fast, with a YOLO26 input-to-output shortcut.
 
-    The multi-scale pooling tail of the backbone. A 1x1 :class:`ConvBNAct`
-    (``cv1``) squeezes the input to ``in_channels // 2`` hidden channels; a single
-    ``pool_kernel`` max-pool is applied three times in sequence, so the chained
-    receptive fields grow to the same coverage as one pool of size
-    ``3 * (pool_kernel - 1) + 1`` (a 13x13 field for the default 5x5 kernel) while
-    reusing one small kernel. The hidden stream and its three pooled copies are
-    concatenated (``4 * hidden`` channels) and fused back to ``out_channels`` by a
-    second 1x1 :class:`ConvBNAct` (``cv2``).
+    The multi-scale pooling tail of the backbone. A 1x1 :class:`ConvBNAct` (``cv1``) squeezes the input to
+    ``in_channels // 2`` hidden channels; a single ``pool_kernel`` max-pool is applied three times in sequence, so the
+    chained receptive fields grow to the same coverage as one pool of size ``3 * (pool_kernel - 1) + 1`` (a 13x13
+    field for the default 5x5 kernel) while reusing one small kernel. The hidden stream and its three pooled copies
+    are concatenated (``4 * hidden`` channels) and fused back to ``out_channels`` by a second 1x1
+    :class:`ConvBNAct` (``cv2``).
 
-    The YOLO26 refinement (assumption A4) adds the block input to the ``cv2``
-    output — an input-to-output shortcut around the whole pooling stack. As in
-    :class:`Bottleneck`, the identity is added only when ``in_channels ==
-    out_channels`` (the backbone always uses SPPF this way); a widening SPPF with
-    mismatched channels is purely feed-forward. Max-pool uses stride 1 and
-    symmetric ``pool_kernel // 2`` padding so spatial resolution is preserved.
+    The YOLO26 refinement (assumption A4) adds the block input to the ``cv2`` output — an input-to-output shortcut
+    around the whole pooling stack. As in :class:`Bottleneck`, the identity is added only when ``in_channels ==
+    out_channels`` (the backbone always uses SPPF this way); a widening SPPF with mismatched channels is purely
+    feed-forward. Max-pool uses stride 1 and symmetric ``pool_kernel // 2`` padding so spatial resolution is
+    preserved.
 
     Args:
         in_channels: Number of input channels.
@@ -502,8 +469,7 @@ class SPPF(nn.Module):
             x: Input tensor of shape ``(N, in_channels, H, W)``.
 
         Returns:
-            Tensor of shape ``(N, out_channels, H, W)``; the input is added when
-            the shortcut is active.
+            Tensor of shape ``(N, out_channels, H, W)``; the input is added when the shortcut is active.
         """
         x1 = cast(Tensor, self.cv1(x))
         y1 = self.pool(x1)
@@ -516,8 +482,8 @@ class SPPF(nn.Module):
 class _FullPrecisionAttentionWeights(torch.autograd.Function):
     """Keep attention logits and softmax finite and independent of backward autocast.
 
-    CUDA-graph capture records backward under the caller's autocast state, unlike
-    eager training, so both passes must explicitly disable autocast.
+    CUDA-graph capture records backward under the caller's autocast state, unlike eager training, so both passes must
+    explicitly disable autocast.
     """
 
     @staticmethod
@@ -549,23 +515,20 @@ class _FullPrecisionAttentionWeights(torch.autograd.Function):
 class SpatialAttention(nn.Module):
     """Multi-head self-attention over the spatial positions of a feature map.
 
-    The attention half of a :class:`PSABlock`. Each of the ``H * W`` positions of
-    a ``(N, C, H, W)`` map attends to every other position. A single 1x1
-    convolution produces the packed query/key/value projection; per head the
-    channels split into ``key_dim`` for the query, ``key_dim`` for the key, and
-    ``head_dim`` for the value. Scaled dot-product attention over the flattened
-    spatial axis mixes the values, a depthwise 3x3 convolution on the values adds
-    a local positional term, and a final 1x1 projection restores ``C`` channels.
+    The attention half of a :class:`PSABlock`. Each of the ``H * W`` positions of a ``(N, C, H, W)`` map attends to
+    every other position. A single 1x1 convolution produces the packed query/key/value projection; per head the
+    channels split into ``key_dim`` for the query, ``key_dim`` for the key, and ``head_dim`` for the value. Scaled
+    dot-product attention over the flattened spatial axis mixes the values, a depthwise 3x3 convolution on the values
+    adds a local positional term, and a final 1x1 projection restores ``C`` channels.
 
     Head geometry follows the YOLO11 lineage (assumption A3): ``num_heads =
     max(1, C // 64)``, ``head_dim = C // num_heads``, and ``key_dim = head_dim //
-    2``, so the attention logits are scaled by ``key_dim ** -0.5``. The qkv,
-    positional, and output convolutions are :func:`_conv_bn` units (convolution +
-    BatchNorm, **no** activation) so the non-linearity never distorts the
+    2``, so the attention logits are scaled by ``key_dim ** -0.5``. The qkv, positional, and output convolutions are
+    :func:`_conv_bn` units (convolution + BatchNorm, **no** activation) so the non-linearity never distorts the
     attention logits or the residual stream.
 
-    ``C`` must be divisible by ``num_heads`` (always true for the channel counts
-    used by the family, which are multiples of 64).
+    ``C`` must be divisible by ``num_heads`` (always true for the channel counts used by the family, which are
+    multiples of 64).
 
     Args:
         channels: Number of input and output channels ``C``.
@@ -599,10 +562,9 @@ class SpatialAttention(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         """Mix spatial positions by scaled dot-product attention.
 
-        Under autocast, logits and softmax run in float32 with autocast off in
-        forward and backward to prevent float16 overflow. A recorded backward,
-        such as CUDA-graph capture, runs under the caller's autocast state;
-        eager training's backward does not.
+        Under autocast, logits and softmax run in float32 with autocast off in forward and backward to prevent float16
+        overflow. A recorded backward, such as CUDA-graph capture, runs under the caller's autocast state; eager
+        training's backward does not.
 
         Args:
             x: Input tensor of shape ``(N, C, H, W)``.
@@ -630,18 +592,16 @@ class SpatialAttention(nn.Module):
 class PSABlock(nn.Module):
     """Position-sensitive attention block: attention followed by a feed-forward.
 
-    The inner unit of :class:`C2PSA`. It applies a residual :class:`SpatialAttention`
-    then a residual feed-forward network, mirroring a transformer encoder layer
-    adapted to convolutional feature maps (assumption A3):
+    The inner unit of :class:`C2PSA`. It applies a residual :class:`SpatialAttention` then a residual feed-forward
+    network, mirroring a transformer encoder layer adapted to convolutional feature maps (assumption A3):
 
     - ``x = x + attention(x)``
     - ``x = x + ffn(x)``
 
-    The feed-forward network expands to ``2 * C`` channels through a
-    :class:`ConvBNAct` (convolution + BatchNorm + SiLU) and projects back to ``C``
-    through a :func:`_conv_bn` unit (convolution + BatchNorm, no activation) so the
-    residual branch stays linear at its output. Both residual adds require
-    matching channel counts, which the block preserves throughout.
+    The feed-forward network expands to ``2 * C`` channels through a :class:`ConvBNAct` (convolution + BatchNorm +
+    SiLU) and projects back to ``C`` through a :func:`_conv_bn` unit (convolution + BatchNorm, no activation) so the
+    residual branch stays linear at its output. Both residual adds require matching channel counts, which the block
+    preserves throughout.
 
     Args:
         channels: Number of input and output channels ``C``.
@@ -682,19 +642,16 @@ class C2PSA(nn.Module):
 
     The attention tail of the detection neck. A single 1x1 :class:`ConvBNAct`
     (``cv1``) lifts the input to ``2 * hidden`` channels (``hidden = int(out_channels
-    * e)``) and splits it into two ``hidden``-channel halves. The first half is
-    carried through unchanged; the second is refined by ``n`` sequential
-    :class:`PSABlock` units. The two halves are concatenated and fused back to
-    ``out_channels`` by a final 1x1 :class:`ConvBNAct` (``cv2``). In the neck it is
-    used with ``in_channels == out_channels`` (assumption A3).
+    * e)``) and splits it into two ``hidden``-channel halves. The first half is carried through unchanged; the second
+    is refined by ``n`` sequential :class:`PSABlock` units. The two halves are concatenated and fused back to
+    ``out_channels`` by a final 1x1 :class:`ConvBNAct` (``cv2``). In the neck it is used with
+    ``in_channels == out_channels`` (assumption A3).
 
     Args:
         in_channels: Number of input channels.
         out_channels: Number of output channels.
-        n: Number of stacked :class:`PSABlock` units on the refined half. Defaults
-            to 1.
-        e: Hidden-channel ratio ``int(out_channels * e)`` for each split half.
-            Defaults to ``0.5``.
+        n: Number of stacked :class:`PSABlock` units on the refined half. Defaults to 1.
+        e: Hidden-channel ratio ``int(out_channels * e)`` for each split half. Defaults to ``0.5``.
 
     Examples:
         ```pycon

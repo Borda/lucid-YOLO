@@ -1,36 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
 """Detection neck with a PSABlock attention tail (WP-021).
 
-The bidirectional feature-pyramid neck of the YOLO26 detector, assembled from the
-WP-016…WP-019 primitives (:class:`~lucid_yolo.models.blocks.C3k2`,
-:class:`~lucid_yolo.models.blocks.C3k`, :class:`~lucid_yolo.models.blocks.PSABlock`,
-:class:`~lucid_yolo.models.blocks.ConvBNAct`) into the stack of blueprint sec. 5.3.
-It consumes the backbone's P3/P4/P5 taps (strides 8/16/32) and returns three
-refined feature maps at the same strides for the detection head.
+The bidirectional feature-pyramid neck of the YOLO26 detector, assembled from the WP-016…WP-019 primitives
+(:class:`~lucid_yolo.models.blocks.C3k2`, :class:`~lucid_yolo.models.blocks.C3k`,
+:class:`~lucid_yolo.models.blocks.PSABlock`, :class:`~lucid_yolo.models.blocks.ConvBNAct`) into the stack of blueprint
+sec. 5.3. It consumes the backbone's P3/P4/P5 taps (strides 8/16/32) and returns three refined feature maps at the
+same strides for the detection head.
 
 The topology is the PAN-style top-down then bottom-up path:
 
-- **Top-down** — upsample P5, concatenate with P4, refine with a ``c3k=True``
-  ``C3k2`` (call it ``T4``); upsample ``T4``, concatenate with P3, refine with a
-  ``C3k2`` to the stride-8 output ``N3``.
-- **Bottom-up** — downsample ``N3``, concatenate with ``T4``, refine with a
-  ``C3k2`` to the stride-16 output ``N4``; downsample ``N4``, concatenate with
-  P5, refine with the attention-augmented ``C3k2`` to the stride-32 output ``N5``.
+- **Top-down** — upsample P5, concatenate with P4, refine with a ``c3k=True`` ``C3k2`` (call it ``T4``); upsample
+  ``T4``, concatenate with P3, refine with a ``C3k2`` to the stride-8 output ``N3``.
+- **Bottom-up** — downsample ``N3``, concatenate with ``T4``, refine with a ``C3k2`` to the stride-16 output ``N4``;
+  downsample ``N4``, concatenate with P5, refine with the attention-augmented ``C3k2`` to the stride-32 output ``N5``.
 
-The final ``C3k2`` carries a :class:`~lucid_yolo.models.blocks.PSABlock` attention
-layer with a fixed ``n=1`` inner unit — the "one additional attention layer in the
-detection neck" refinement worth +0.2 AP in the ablation (R1 sec. 4.2 Table 2;
-R3 sec. 4). It is introduced through ``C3k2``'s ``inner_block_factory`` seam so the
-composite block class is left untouched: each inner unit becomes a
-``c3k=True`` :class:`~lucid_yolo.models.blocks.C3k` followed by a
+The final ``C3k2`` carries a :class:`~lucid_yolo.models.blocks.PSABlock` attention layer with a fixed ``n=1`` inner
+unit — the "one additional attention layer in the detection neck" refinement worth +0.2 AP in the ablation (R1 sec.
+4.2 Table 2; R3 sec. 4). It is introduced through ``C3k2``'s ``inner_block_factory`` seam so the composite block
+class is left untouched: each inner unit becomes a ``c3k=True`` :class:`~lucid_yolo.models.blocks.C3k` followed by a
 :class:`~lucid_yolo.models.blocks.PSABlock` on its output.
 
-Compound scaling reuses the WP-020 backbone helpers (``_scale_channels``,
-``_scale_repeats``) so channel widths and repeat counts follow exactly the same
-rules as the trunk (blueprint sec. 5.1): the ``C3k2`` output widths are the base
-values 512/256/512/1024 scaled by ``width``, and every ``x2`` stage repeats
-``max(1, round(2 * depth))`` inner units. The attention tail's ``n=1`` is fixed by
-the spec and is **not** depth-scaled.
+Compound scaling reuses the WP-020 backbone helpers (``_scale_channels``, ``_scale_repeats``) so channel widths and
+repeat counts follow exactly the same rules as the trunk (blueprint sec. 5.1): the ``C3k2`` output widths are the
+base values 512/256/512/1024 scaled by ``width``, and every ``x2`` stage repeats ``max(1, round(2 * depth))`` inner
+units. The attention tail's ``n=1`` is fixed by the spec and is **not** depth-scaled.
 
 Provenance: R1 Fig. S1, R3 Fig. 1, R1 sec. 4.2 Table 2. Assumptions: A3.
 """
@@ -50,15 +43,14 @@ _NECK_REPEATS = 2
 def _attn_inner_factory(hidden_channels: int, shortcut: bool) -> nn.Module:
     """Build one attention-augmented inner unit for the final neck ``C3k2``.
 
-    The composite is the ``c3k=True`` inner unit — a :class:`~lucid_yolo.models.blocks.C3k`
-    with ``n=2`` and ``expansion=0.5`` — followed by a
-    :class:`~lucid_yolo.models.blocks.PSABlock` on its output, matching the attention
-    tail of blueprint sec. 5.3. It is passed to :class:`~lucid_yolo.models.blocks.C3k2`
-    as its ``inner_block_factory`` so the block class needs no attention-aware branch.
+    The composite is the ``c3k=True`` inner unit — a :class:`~lucid_yolo.models.blocks.C3k` with ``n=2`` and
+    ``expansion=0.5`` — followed by a :class:`~lucid_yolo.models.blocks.PSABlock` on its output, matching the attention
+    tail of blueprint sec. 5.3. It is passed to :class:`~lucid_yolo.models.blocks.C3k2` as its ``inner_block_factory``
+    so the block class needs no attention-aware branch.
 
     Args:
-        hidden_channels: Channel width of the ``C3k2`` split half this unit refines;
-            both the ``C3k`` and the ``PSABlock`` preserve it end to end.
+        hidden_channels: Channel width of the ``C3k2`` split half this unit refines; both the ``C3k`` and the
+            ``PSABlock`` preserve it end to end.
         shortcut: Enable the residual identity inside the nested ``C3k``.
 
     Returns:
@@ -84,25 +76,23 @@ def _attn_inner_factory(hidden_channels: int, shortcut: bool) -> nn.Module:
 class DetectionNeck(nn.Module):
     """YOLO26 bidirectional feature-pyramid neck with an attention tail.
 
-    Builds the blueprint sec. 5.3 top-down/bottom-up stack from the shared
-    primitives, consuming the backbone's P3/P4/P5 taps and emitting three refined
-    maps ``(N3, N4, N5)`` at the same strides 8/16/32 for the detection head. The
+    Builds the blueprint sec. 5.3 top-down/bottom-up stack from the shared primitives, consuming the backbone's P3/P4/P5
+    taps and emitting three refined maps ``(N3, N4, N5)`` at the same strides 8/16/32 for the detection head. The
     constructor takes the raw compound-scaling multipliers directly (the named
-    -variant registry is WP-023) and reuses the backbone's scaling helpers so the
-    channel and repeat rules match the trunk exactly.
+    -variant registry is WP-023) and reuses the backbone's scaling helpers so the channel and repeat rules match the
+    trunk exactly.
 
-    The ``C3k2`` output widths are the base values 512 (``T4``), 256 (``N3``), 512
-    (``N4``), and 1024 (``N5``) scaled by ``width`` and clamped by ``max_channels``;
-    the three ``x2`` stages repeat ``max(1, round(2 * depth))`` inner units while the
-    final attention-augmented stage is fixed at ``n=1``.
+    The ``C3k2`` output widths are the base values 512 (``T4``), 256 (``N3``), 512 (``N4``), and 1024 (``N5``) scaled
+    by ``width`` and clamped by ``max_channels``; the three ``x2`` stages repeat ``max(1, round(2 * depth))`` inner
+    units while the final attention-augmented stage is fixed at ``n=1``.
 
     Args:
-        in_channels: The backbone tap channel counts ``(P3, P4, P5)`` in stride
-            order (8, 16, 32) — typically :attr:`DetectionBackbone.channels`.
+        in_channels: The backbone tap channel counts ``(P3, P4, P5)`` in stride order (8, 16, 32) — typically
+            :attr:`DetectionBackbone.channels`.
         depth: Depth multiplier ``d`` scaling the ``x2`` stages' repeat counts.
         width: Width multiplier ``w`` scaling the ``C3k2`` output channel widths.
-        max_channels: Channel cap ``mc`` applied before the width multiply; bites at
-            the ``N5`` stage (base 1024) for the ``m``/``l``/``x`` variants (``mc=512``).
+        max_channels: Channel cap ``mc`` applied before the width multiply; bites at the ``N5`` stage (base 1024) for
+            the ``m``/``l``/``x`` variants (``mc=512``).
 
     Examples:
         ```pycon

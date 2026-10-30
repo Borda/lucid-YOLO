@@ -1,26 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """Lightning and PyTorch identities that certify the native automatic-optimization closure (WP-193h).
 
-:class:`~lucid_yolo.ptl.module.DetectionLitModule` omits the forward-time gradient
-snapshots that Lightning's automatic-optimization closure clears before backward. The
-omission is safe only while the closure, its zeroing function and every hook that can
-observe the old gradients are the ones Lightning and PyTorch ship. This module holds those
-third-party identities, captured when it is imported, and the checks that compare them at
-run time. Most name a private Lightning or PyTorch detail, so re-inspect every one of them
-on each Lightning or PyTorch minor before widening :data:`_ZEROING_RUNTIME_SUPPORTED`.
+:class:`~lucid_yolo.ptl.module.DetectionLitModule` omits the forward-time gradient snapshots that Lightning's
+automatic-optimization closure clears before backward. The omission is safe only while the closure, its zeroing
+function and every hook that can observe the old gradients are the ones Lightning and PyTorch ship. This module holds
+those third-party identities, captured when it is imported, and the checks that compare them at run time. Most name
+a private Lightning or PyTorch detail, so re-inspect every one of them on each Lightning or PyTorch minor before
+widening :data:`_ZEROING_RUNTIME_SUPPORTED`.
 
-The checks are four named predicates, each owning one hazard: the trainer contract, the
-forward-time observers, the zeroing closure and the optimizer. :func:`_first_refusal`
-evaluates them in that order and names the first that fails with a constant
-:class:`_Refusal` token, so a caller can report why the omission is off without formatting
-anything per step.
+The checks are four named predicates, each owning one hazard: the trainer contract, the forward-time observers, the
+zeroing closure and the optimizer. :func:`_first_refusal` evaluates them in that order and names the first that fails
+with a constant :class:`_Refusal` token, so a caller can report why the omission is off without formatting anything
+per step.
 
-The module never imports :mod:`lucid_yolo.ptl.module` at runtime. Identities bound to
-``DetectionLitModule`` itself (its methods and its objective) stay beside the class, and
-the module runs its own checks before it delegates here. The Lightning clipping identities
-the module's gradient-norm capture compares live here as well, as the same kind of record.
-The PyTorch step-wrapper code objects are read on first use rather than at import, so an
-importer that never trains pays nothing for them.
+The module never imports :mod:`lucid_yolo.ptl.module` at runtime. Identities bound to ``DetectionLitModule`` itself
+(its methods and its objective) stay beside the class, and the module runs its own checks before it delegates here.
+The Lightning clipping identities the module's gradient-norm capture compares live here as well, as the same kind of
+record. The PyTorch step-wrapper code objects are read on first use rather than at import, so an importer that never
+trains pays nothing for them.
 """
 
 from __future__ import annotations

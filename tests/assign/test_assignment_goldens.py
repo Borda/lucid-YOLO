@@ -1,14 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the WP-029 synthetic assignment goldens.
 
-The producer :func:`scripts.golden_producers.assignment_cases` freezes the
-Phase-3 label-assignment exit-gate behavior on hand-placed synthetic scenes.
-These tests assert the semantic claims directly on the produced metrics (a tiny
-ground truth gets zero vanilla-TAL candidates and at least one STAL positive; the
-surrogate clamp acts per dimension; the one-to-one branch keeps exactly one
-positive per ground truth while one-to-many keeps more), confirm the frozen
-``goldens/assignment_cases.json`` passes the golden harness, and confirm the
-producer is deterministic across repeated calls.
+The producer :func:`scripts.golden_producers.assignment_cases` freezes the Phase-3 label-assignment exit-gate behavior
+on hand-placed synthetic scenes. These tests assert the semantic claims directly on the produced metrics (a tiny ground
+truth gets zero vanilla-TAL candidates and at least one STAL positive; the surrogate clamp acts per dimension; the
+one-to-one branch keeps exactly one positive per ground truth while one-to-many keeps more), confirm the frozen
+``goldens/assignment_cases.json`` passes the golden harness, and confirm the producer is deterministic across repeated
+calls.
 """
 
 import importlib.util

@@ -2,31 +2,25 @@
 """Tests for :class:`~lucid_yolo.ptl.callbacks.EMACallback` (WP-037).
 
 Covers the DoD ``test_shadow_updates`` — after a run of manual
-:meth:`~lucid_yolo.ptl.callbacks.EMACallback.on_train_batch_end` calls against a
-hand-mutated tiny module the shadow equals the EMA recursion recomputed in the
-test with the same warmup-ramp formula — plus the supporting contracts: the
-warmup ramp starts far below the nominal decay; the validation swap loads the
-shadow for the duration of validation and restores the live weights after;
-floating-point buffers (batch-norm running stats) are tracked while integer
-buffers are skipped; ``state_dict``/``load_state_dict`` survive a save/mutate/
-load round trip; ``update_every`` gates updates; and a two-epoch Lightning run
-with the callback attached completes with the shadow diverged from the live
+:meth:`~lucid_yolo.ptl.callbacks.EMACallback.on_train_batch_end` calls against a hand-mutated tiny module the shadow
+equals the EMA recursion recomputed in the test with the same warmup-ramp formula — plus the supporting contracts: the
+warmup ramp starts far below the nominal decay; the validation swap loads the shadow for the duration of validation
+and restores the live weights after; floating-point buffers (batch-norm running stats) are tracked while integer
+buffers are skipped; ``state_dict``/``load_state_dict`` survive a save/mutate/load round trip; ``update_every`` gates
+updates; and a two-epoch Lightning run with the callback attached completes with the shadow diverged from the live
 weights.
 
-:class:`TestOptimizerStepCadence` pins the WP-158 fix for the audit's A05/M-14:
-the blend follows *optimizer steps*, so ``accumulate_grad_batches`` changes how
-many batches a run takes but not how many times the shadow moves. Its expected
-values are folded over the post-step weights a real
-:class:`~pytorch_lightning.Trainer` produced, recorded through the module's own
-``optimizer_step`` hook so the expectation does not reuse the callback's notion
-of when a step happened. :class:`TestRestoreOnFailure` pins A06 (an exception
-inside validation must not leave the shadow installed) and :class:`TestSavedWeights`
-pins L-48 (a checkpoint written mid-validation holds raw weights, not the shadow).
+:class:`TestOptimizerStepCadence` pins the WP-158 fix for the audit's A05/M-14: the blend follows *optimizer steps*,
+so ``accumulate_grad_batches`` changes how many batches a run takes but not how many times the shadow moves. Its
+expected values are folded over the post-step weights a real :class:`~pytorch_lightning.Trainer` produced, recorded
+through the module's own ``optimizer_step`` hook so the expectation does not reuse the callback's notion of when a
+step happened. :class:`TestRestoreOnFailure` pins A06 (an exception inside validation must not leave the shadow
+installed) and :class:`TestSavedWeights` pins L-48 (a checkpoint written mid-validation holds raw weights, not the
+shadow).
 
-The module under test is a tiny ``Linear``-free stub carrying one flat parameter
-and a :class:`~torch.nn.BatchNorm1d` so both the parameter and buffer paths are
-exercised; the unit tests drive the callback hooks directly with a stub trainer
-whose ``global_step`` the test advances, and the integration tests wire a real
+The module under test is a tiny ``Linear``-free stub carrying one flat parameter and a :class:`~torch.nn.BatchNorm1d`
+so both the parameter and buffer paths are exercised; the unit tests drive the callback hooks directly with a stub
+trainer whose ``global_step`` the test advances, and the integration tests wire a real
 :class:`~pytorch_lightning.Trainer` over a synthetic in-memory dataset.
 """
 
@@ -34,7 +28,7 @@ from __future__ import annotations
 
 import math
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -55,19 +49,18 @@ _FEATURES = 4
 _DUMMY_TRAINER = MagicMock(spec=Trainer)
 #: Message of the deliberate validation failure the A06 restoration tests drive.
 _VALIDATION_FAILURE = "deliberate validation failure"
-#: Training batches the cadence tests run: four, matching the audit's own reproduction, so
-#: accumulation 2 halves them to two optimizer steps and update_every 2 halves those again.
+#: Training batches the cadence tests run: four, matching the audit's own reproduction, so accumulation 2 halves them to
+#: two optimizer steps and update_every 2 halves those again.
 _TRAIN_BATCHES = 4
 
 
 class _StepTrainer:
     """A trainer stub exposing the one attribute the update hook reads: ``global_step``.
 
-    :meth:`~lucid_yolo.ptl.callbacks.EMACallback.on_train_batch_end` blends only when
-    ``global_step`` has moved since the previous batch, so a unit test that wants to drive
-    N updates has to advance a counter rather than call the hook N times. A ``MagicMock``
-    would not do: its ``global_step`` compares unequal to everything, which would make
-    every batch look like an optimizer step and hide exactly the regression under test.
+    :meth:`~lucid_yolo.ptl.callbacks.EMACallback.on_train_batch_end` blends only when ``global_step`` has moved since
+    the previous batch, so a unit test that wants to drive N updates has to advance a counter rather than call the hook
+    N times. A ``MagicMock`` would not do: its ``global_step`` compares unequal to everything, which would make every
+    batch look like an optimizer step and hide exactly the regression under test.
     """
 
     def __init__(self) -> None:
@@ -81,9 +74,9 @@ class _StepTrainer:
 class _TinyEMAModule(LightningModule):
     """One flat parameter plus a ``BatchNorm1d`` — exercises the param and buffer paths.
 
-    The batch-norm layer contributes the floating-point ``running_mean``/``running_var``
-    buffers the EMA must track and the integer ``num_batches_tracked`` buffer it must skip;
-    ``training_step`` couples the parameter to a real gradient so a live run moves it.
+    The batch-norm layer contributes the floating-point ``running_mean``/``running_var`` buffers the EMA must track and
+    the integer ``num_batches_tracked`` buffer it must skip; ``training_step`` couples the parameter to a real gradient
+    so a live run moves it.
     """
 
     def __init__(self, fail_validation: bool = False) -> None:
@@ -91,9 +84,9 @@ class _TinyEMAModule(LightningModule):
         self.weight = nn.Parameter(torch.zeros(_FEATURES))
         self.bn = nn.BatchNorm1d(_FEATURES)
         self.fail_validation = fail_validation
-        #: Every EMA-tracked tensor as it stood immediately after each optimizer step,
-        #: recorded from Lightning's own ``optimizer_step`` hook so the cadence tests can
-        #: fold the EMA recursion over a trajectory the callback had no part in defining.
+        #: Every EMA-tracked tensor as it stood immediately after each optimizer step, recorded from Lightning's own
+        #: ``optimizer_step`` hook so the cadence tests can fold the EMA recursion over a trajectory the callback had no
+        #: part in defining.
         self.post_step_tensors: list[dict[str, Tensor]] = []
 
     def optimizer_step(self, epoch: int, batch_idx: int, optimizer: Any, optimizer_closure: Any = None) -> None:
@@ -108,9 +101,9 @@ class _TinyEMAModule(LightningModule):
     def training_step(self, batch: tuple[Tensor, Tensor], batch_idx: int) -> Tensor:
         """Return a scalar loss driving the parameter toward one while training batch-norm.
 
-        The batch-norm term keeps its parameters (and, through the forward pass, its running
-        buffers) in play; the squared term gives ``weight`` a non-zero gradient from its zero
-        initialisation, so a live run visibly moves it away from the EMA shadow.
+        The batch-norm term keeps its parameters (and, through the forward pass, its running buffers) in play; the
+        squared term gives ``weight`` a non-zero gradient from its zero initialisation, so a live run visibly moves it
+        away from the EMA shadow.
         """
         del batch_idx
         images, _labels = batch
@@ -119,9 +112,9 @@ class _TinyEMAModule(LightningModule):
     def validation_step(self, batch: tuple[Tensor, Tensor], batch_idx: int) -> Tensor:
         """Return a scalar so the val loop runs, or raise when the module was built to fail.
 
-        The failing variant models the A06 scenario: something inside the validation loop
-        throws *after* the callback has installed the shadow, so the run unwinds through a
-        path the ordinary ``on_validation_end`` restore never reaches.
+        The failing variant models the A06 scenario: something inside the validation loop throws *after* the callback
+        has installed the shadow, so the run unwinds through a path the ordinary ``on_validation_end`` restore never
+        reaches.
         """
         del batch_idx
         if self.fail_validation:
@@ -150,6 +143,16 @@ class _SyntheticVectorDataset(Dataset[tuple[Tensor, int]]):
         return torch.randn(_FEATURES), 0
 
 
+def _synthetic_loader() -> DataLoader[tuple[Tensor, int]]:
+    """Build the four-batch loader (eight samples, batch size two) every Trainer-driven test here iterates.
+
+    Examples:
+        >>> len(_synthetic_loader())
+        4
+    """
+    return DataLoader(_SyntheticVectorDataset(8), batch_size=2)
+
+
 def _fitted_callback(module: LightningModule, **kwargs: float) -> EMACallback:
     """Build a callback and run ``on_fit_start`` so its shadow is initialised.
 
@@ -167,10 +170,9 @@ def _fitted_callback(module: LightningModule, **kwargs: float) -> EMACallback:
 def _ema_recursion(callback: EMACallback, start: Tensor, trajectory: list[Tensor]) -> Tensor:
     """Fold the warmup-ramped EMA over ``trajectory``, honoring the callback's ``update_every``.
 
-    The trajectory is the sequence of values the tracked tensor held immediately after each
-    optimizer step. Only every ``update_every``-th entry blends, and the ramp is evaluated at
-    the *update* count rather than the step count — the same two facts the implementation
-    encodes, restated here in the flat form a reader can check by eye.
+    The trajectory is the sequence of values the tracked tensor held immediately after each optimizer step. Only every
+    ``update_every``-th entry blends, and the ramp is evaluated at the *update* count rather than the step count — the
+    same two facts the implementation encodes, restated here in the flat form a reader can check by eye.
 
     Examples:
         >>> callback = EMACallback(decay=0.9, tau=1)
@@ -198,8 +200,8 @@ def _batch_end(
 ) -> None:
     """Drive one training batch through the callback, with or without an optimizer step.
 
-    ``optimizer_stepped=False`` is the accumulation case — a batch whose gradients were
-    only accumulated, leaving ``trainer.global_step`` where it was.
+    ``optimizer_stepped=False`` is the accumulation case — a batch whose gradients were only accumulated, leaving
+    ``trainer.global_step`` where it was.
 
     Examples:
         >>> module = _TinyEMAModule()
@@ -218,7 +220,11 @@ def _batch_end(
 
 @pytest.mark.parametrize("num_steps", [pytest.param(1, id="one-step"), pytest.param(5, id="five-steps")])
 def test_shadow_updates(num_steps: int) -> None:
-    """The shadow equals the warmup-ramped EMA recursion recomputed step by step."""
+    """The shadow equals the warmup-ramped EMA recursion recomputed step by step.
+
+    The DoD check of WP-037: the weight is overwritten with a new value before each step, the expected shadow is folded
+    in the test with the callback's own ramp, and a single step and several steps both have to agree.
+    """
     module = _TinyEMAModule()
     callback = _fitted_callback(module, decay=0.99, tau=50)
     trainer = _StepTrainer()
@@ -233,12 +239,13 @@ def test_shadow_updates(num_steps: int) -> None:
     assert torch.allclose(callback._shadow["weight"], expected)
 
 
-def test_shadow_update_uses_one_foreach_call_per_dtype(monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(torch, "_foreach_lerp_", wraps=torch._foreach_lerp_)
+def test_shadow_update_uses_one_foreach_call_per_dtype(foreach_lerp: MagicMock) -> None:
     """Floating tensors are grouped by dtype and each group reaches one interpolation call.
 
-    The module carries two float32 tensors and one float64 tensor, so a per-bucket update makes
-    two calls (a pair, then a single) while a per-tensor regression would make three. With only
-    one tensor per dtype the two shapes of code produce the same call list and cannot be told apart.
+    The module carries two float32 tensors and one float64 tensor, so a per-bucket update makes two calls (a pair, then
+    a single) while a per-tensor regression would make three. With only one tensor per dtype the two shapes of code
+    produce the same call list and cannot be told apart.
     """
 
     class MixedDtypeModule(LightningModule):
@@ -252,29 +259,22 @@ def test_shadow_update_uses_one_foreach_call_per_dtype(monkeypatch: pytest.Monke
 
     module = MixedDtypeModule()
     callback = _fitted_callback(module, decay=0.9, tau=1)
-    calls: list[tuple[int, torch.dtype]] = []
-    real = torch._foreach_lerp_
 
-    def recording(shadows: list[Tensor], live_tensors: list[Tensor], weight: float) -> list[Tensor]:
-        calls.append((len(shadows), shadows[0].dtype))
-        return real(shadows, live_tensors, weight)
-
-    monkeypatch.setattr(torch, "_foreach_lerp_", recording)
     _batch_end(callback, module, _StepTrainer())
 
+    calls = [(len(call.args[0]), call.args[0][0].dtype) for call in foreach_lerp.call_args_list]
     assert sorted(calls, key=lambda call: str(call[1])) == [(2, torch.float32), (1, torch.float64)]
 
 
 def test_shadow_update_tolerates_restored_dtype_mismatch() -> None:
     """A shadow whose dtype differs from the live parameter's still blends, cast to the shadow's dtype.
 
-    :meth:`~lucid_yolo.ptl.callbacks.EMACallback.load_state_dict` keeps whatever dtype the
-    checkpoint carried and only :meth:`~lucid_yolo.ptl.callbacks.EMACallback.on_fit_start`
-    moves the shadow's device, never its dtype — so a module resumed under a different
-    precision than the one its EMA checkpoint was written under reaches
-    :meth:`on_train_batch_end` with a shadow/live dtype pair ``torch._foreach_lerp_`` rejects.
-    Such a pair is blended with the scalar recurrence the fused update replaced,
-    ``shadow.mul_(decay).add_(live, alpha=...)``, which casts into ``shadow``'s dtype itself.
+    :meth:`~lucid_yolo.ptl.callbacks.EMACallback.load_state_dict` keeps whatever dtype the checkpoint carried and only
+    :meth:`~lucid_yolo.ptl.callbacks.EMACallback.on_fit_start` moves the shadow's device, never its dtype — so a module
+    resumed under a different precision than the one its EMA checkpoint was written under reaches
+    :meth:`on_train_batch_end` with a shadow/live dtype pair ``torch._foreach_lerp_`` rejects. Such a pair is blended
+    with the scalar recurrence the fused update replaced, ``shadow.mul_(decay).add_(live, alpha=...)``, which casts into
+    ``shadow``'s dtype itself.
     """
     module = _TinyEMAModule()
     callback = _fitted_callback(module, decay=0.9, tau=1)
@@ -295,12 +295,11 @@ def test_shadow_update_tolerates_restored_dtype_mismatch() -> None:
 def test_shadow_update_blends_live_value_beyond_shadow_dtype_range() -> None:
     """A float32 live value outside the float16 range blends into a float16 shadow as a finite value.
 
-    A shadow restored from a half-precision checkpoint meets a float32 live parameter holding
-    ``7e4``, which float16 cannot represent (its maximum is ``65504``). The blended result,
-    about ``3e4``, does fit. Casting the live value into the shadow's dtype *before* blending
-    turns it into ``inf`` and poisons the shadow; the scalar recurrence the fused update
-    replaced, ``shadow.mul_(decay).add_(live, alpha=...)``, only casts the finished result and
-    stays finite, so a mismatched-dtype pair must keep that behaviour.
+    A shadow restored from a half-precision checkpoint meets a float32 live parameter holding ``7e4``, which float16
+    cannot represent (its maximum is ``65504``). The blended result, about ``3e4``, does fit. Casting the live value
+    into the shadow's dtype *before* blending turns it into ``inf`` and poisons the shadow; the scalar recurrence the
+    fused update replaced, ``shadow.mul_(decay).add_(live, alpha=...)``, only casts the finished result and stays
+    finite, so a mismatched-dtype pair must keep that behaviour.
     """
 
     class WideLiveModule(LightningModule):
@@ -330,9 +329,9 @@ def test_shadow_update_blends_live_value_beyond_shadow_dtype_range() -> None:
 def test_foreach_shadow_trajectory_matches_scalar_recurrence(decay: float, tau: int) -> None:
     """The fused interpolation stays close to the original scalar recurrence over 50 updates.
 
-    With ``tau=2000`` the lerp weight stays within ``[0.95, 1]`` for the whole run, so only the
-    warmup end of the ramp is exercised. ``tau=1`` reaches the steady-state weight of about
-    ``1.5e-4`` from the tenth update, the regime nearly all of a long run is spent in.
+    With ``tau=2000`` the lerp weight stays within ``[0.95, 1]`` for the whole run, so only the warmup end of the ramp
+    is exercised. ``tau=1`` reaches the steady-state weight of about ``1.5e-4`` from the tenth update, the regime
+    nearly all of a long run is spent in.
     """
     module = _TinyEMAModule()
     callback = _fitted_callback(module, decay=decay, tau=tau)
@@ -356,9 +355,9 @@ def test_foreach_shadow_trajectory_matches_scalar_recurrence(decay: float, tau: 
 def test_zero_decay_copies_live_weights_into_shadow() -> None:
     """With ``decay=0.0`` a single update leaves the shadow equal to the live weights.
 
-    Zero is the lower bound of the documented ``[0, 1)`` range for ``decay``. The ramped decay is
-    zero at every update then, so the interpolation weight is exactly ``1`` and the shadow must be
-    a verbatim copy of the live tensors, not a blend that only approaches them.
+    Zero is the lower bound of the documented ``[0, 1)`` range for ``decay``. The ramped decay is zero at every update
+    then, so the interpolation weight is exactly ``1`` and the shadow must be a verbatim copy of the live tensors, not
+    a blend that only approaches them.
     """
     module = _TinyEMAModule()
     callback = _fitted_callback(module, decay=0.0, tau=1)
@@ -374,8 +373,13 @@ def test_zero_decay_copies_live_weights_into_shadow() -> None:
 
 
 @requires_cuda
-def test_foreach_shadow_runs_on_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The unwidened CUDA callback reaches one foreach bucket and matches the scalar formula."""
+@patch.object(torch, "_foreach_lerp_", wraps=torch._foreach_lerp_)
+def test_foreach_shadow_runs_on_cuda(foreach_lerp: MagicMock) -> None:
+    """The unwidened CUDA callback reaches one foreach bucket and matches the scalar formula.
+
+    All tracked tensors of a CUDA module share a dtype, so the fused update must collapse them into a single call, and
+    its result must agree with the scalar recurrence it replaced.
+    """
     module = _TinyEMAModule().cuda()
     callback = _fitted_callback(module, decay=0.9, tau=1)
     assert callback._shadow is not None
@@ -386,24 +390,21 @@ def test_foreach_shadow_runs_on_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
     decay = callback._decay_at(1)
     for name, live in callback._ema_tensors(module):
         expected[name].mul_(decay).add_(live.detach(), alpha=1.0 - decay)
-    calls = 0
-    real = torch._foreach_lerp_
 
-    def recording(shadows: list[Tensor], live_tensors: list[Tensor], weight: float) -> list[Tensor]:
-        nonlocal calls
-        calls += 1
-        return real(shadows, live_tensors, weight)
-
-    monkeypatch.setattr(torch, "_foreach_lerp_", recording)
     _batch_end(callback, module, _StepTrainer())
 
-    assert calls == 1
+    assert foreach_lerp.call_count == 1
     for name, shadow in callback._shadow.items():
         torch.testing.assert_close(shadow, expected[name], rtol=2e-6, atol=2e-7)
 
 
 def test_warmup_ramp_starts_far_below_nominal_decay() -> None:
-    """The first-step effective decay is a small fraction of the nominal decay."""
+    """The first-step effective decay is a small fraction of the nominal decay.
+
+    With ``decay=0.9999`` and ``tau=2000`` the ramp is ``decay * (1 - exp(-1 / tau))`` at the first update, about a
+    ten-thousandth of nominal, so the shadow follows the freshly initialised weights closely instead of being pinned to
+    them.
+    """
     callback = EMACallback(decay=0.9999, tau=2000)
     first_step_decay = callback._decay_at(1)
     assert first_step_decay == pytest.approx(0.9999 * (1.0 - math.exp(-1.0 / 2000)))
@@ -411,7 +412,11 @@ def test_warmup_ramp_starts_far_below_nominal_decay() -> None:
 
 
 def test_validation_swap_loads_shadow_then_restores_live() -> None:
-    """During validation the module holds the shadow; afterwards the live weights return."""
+    """During validation the module holds the shadow; afterwards the live weights return.
+
+    The shadow and the live weight are set to different constants so a swap that did nothing, or a restore that
+    returned the shadow, is told apart from the correct round trip.
+    """
     module = _TinyEMAModule()
     callback = _fitted_callback(module)
     assert callback._shadow is not None
@@ -427,7 +432,11 @@ def test_validation_swap_loads_shadow_then_restores_live() -> None:
 
 
 def test_float_buffers_tracked_integer_buffers_skipped() -> None:
-    """A batch-norm running mean is EMA-tracked; the integer step counter is not shadowed."""
+    """A batch-norm running mean is EMA-tracked; the integer step counter is not shadowed.
+
+    ``BatchNorm1d`` carries both kinds: the floating ``running_mean`` must follow the same warmup-ramped blend as a
+    parameter, while ``num_batches_tracked`` is an integer counter that an average would corrupt.
+    """
     module = _TinyEMAModule()
     callback = _fitted_callback(module, decay=0.9, tau=1)
     assert callback._shadow is not None
@@ -443,7 +452,11 @@ def test_float_buffers_tracked_integer_buffers_skipped() -> None:
 
 
 def test_state_dict_round_trip_restores_shadow_and_counters() -> None:
-    """Saving, mutating, then loading restores the shadow tensors and update counters."""
+    """Saving, mutating, then loading restores the shadow tensors and update counters.
+
+    After one update the state is saved, then the shadow and both counters are overwritten with garbage; loading the
+    saved state must bring back the original values, the property a resumed run depends on.
+    """
     module = _TinyEMAModule()
     callback = _fitted_callback(module)
     _batch_end(callback, module, _StepTrainer())
@@ -462,9 +475,9 @@ def test_state_dict_round_trip_restores_shadow_and_counters() -> None:
 def test_legacy_batches_seen_counter_read_as_steps_seen() -> None:
     """A checkpoint predating the optimizer-step cadence still resumes its ``update_every`` phase.
 
-    Before WP-158 the ``update_every`` counter was written under ``batches_seen``. Resuming
-    such a run must continue the gate where it stood rather than silently restart it at
-    zero, which would shift every subsequent update by one step.
+    Before WP-158 the ``update_every`` counter was written under ``batches_seen``. Resuming such a run must continue
+    the gate where it stood rather than silently restart it at zero, which would shift every subsequent update by one
+    step.
     """
     module = _TinyEMAModule()
     callback = _fitted_callback(module, update_every=2)
@@ -475,7 +488,11 @@ def test_legacy_batches_seen_counter_read_as_steps_seen() -> None:
 
 
 def test_update_every_skips_intermediate_steps() -> None:
-    """With ``update_every=2`` the first step is skipped and the second applies an update."""
+    """With ``update_every=2`` the first step is skipped and the second applies an update.
+
+    The weight is moved before the second step so that the update which finally fires visibly changes the shadow, while
+    the skipped first step must leave both the counter and the shadow untouched.
+    """
     module = _TinyEMAModule()
     callback = _fitted_callback(module, decay=0.9, tau=1, update_every=2)
     assert callback._shadow is not None
@@ -492,10 +509,14 @@ def test_update_every_skips_intermediate_steps() -> None:
 
 
 def test_two_epoch_run_diverges_shadow_from_live() -> None:
-    """A two-epoch Trainer run with the callback attached leaves the shadow off the live weights."""
+    """A two-epoch Trainer run with the callback attached leaves the shadow off the live weights.
+
+    The integration smoke check: a real Lightning loop drives the hooks, the run finishes, the callback performed
+    updates, and the average lags the weight that SGD keeps moving toward one.
+    """
     module = _TinyEMAModule()
     callback = EMACallback(decay=0.9, tau=1)
-    loader: DataLoader[tuple[Tensor, int]] = DataLoader(_SyntheticVectorDataset(8), batch_size=2)
+    loader = _synthetic_loader()
     trainer = Trainer(
         max_epochs=2,
         limit_train_batches=2,
@@ -523,9 +544,8 @@ def _cadence_trainer(
 ) -> Trainer:
     """Build a one-epoch CPU trainer over ``_TRAIN_BATCHES`` batches at a given accumulation.
 
-    Checkpointing is off unless ``extra_callbacks`` brings a
-    :class:`~pytorch_lightning.callbacks.ModelCheckpoint`, so the cadence runs write nothing
-    to disk while the L-48 test can still ask for a real saved file.
+    Checkpointing is off unless ``extra_callbacks`` brings a :class:`~pytorch_lightning.callbacks.ModelCheckpoint`, so
+    the cadence runs write nothing to disk while the L-48 test can still ask for a real saved file.
 
     Examples:
         >>> _cadence_trainer(EMACallback(), accumulate=2).accumulate_grad_batches
@@ -551,10 +571,9 @@ def _cadence_trainer(
 class TestOptimizerStepCadence:
     """The blend follows optimizer steps, so gradient accumulation does not multiply updates.
 
-    The audit (A05/M-14) reproduced the opposite with a real Trainer: four batches at
-    ``accumulate_grad_batches=2`` gave two optimizer steps but four EMA updates, because the
-    callback counted batches. ``tau`` and ``update_every`` are both documented in optimizer
-    steps, so that silently re-tuned the warmup ramp of every accumulated run.
+    The audit (A05/M-14) reproduced the opposite with a real Trainer: four batches at ``accumulate_grad_batches=2`` gave
+    two optimizer steps but four EMA updates, because the callback counted batches. ``tau`` and ``update_every`` are
+    both documented in optimizer steps, so that silently re-tuned the warmup ramp of every accumulated run.
     """
 
     @pytest.mark.parametrize(
@@ -565,18 +584,16 @@ class TestOptimizerStepCadence:
     def test_matches_hand_computed_recursion(self, accumulate: int, expected_steps: int, update_every: int) -> None:
         """Update count equals optimizer steps, and the shadow equals the folded recursion.
 
-        Four batches run at accumulation 1 and 2, each with ``update_every`` 1 and 2. The
-        expectation is folded over the weights the module itself recorded after each real
-        optimizer step, so it is independent of the callback's own step accounting; both the
-        parameter and the batch-norm running buffer are checked, since the callback blends
-        floating buffers on the same schedule.
+        Four batches run at accumulation 1 and 2, each with ``update_every`` 1 and 2. The expectation is folded over
+        the weights the module itself recorded after each real optimizer step, so it is independent of the callback's
+        own step accounting; both the parameter and the batch-norm running buffer are checked, since the callback
+        blends floating buffers on the same schedule.
         """
         module = _TinyEMAModule()
         callback = EMACallback(decay=0.9, tau=1, update_every=update_every)
-        loader: DataLoader[tuple[Tensor, int]] = DataLoader(_SyntheticVectorDataset(8), batch_size=2)
         initial = {name: tensor.detach().clone() for name, tensor in callback._ema_tensors(module)}
 
-        _cadence_trainer(callback, accumulate).fit(module, train_dataloaders=loader)
+        _cadence_trainer(callback, accumulate).fit(module, train_dataloaders=_synthetic_loader())
 
         assert len(module.post_step_tensors) == expected_steps
         assert callback._steps_seen == expected_steps
@@ -590,13 +607,12 @@ class TestOptimizerStepCadence:
     def test_resume_continues_same_average_under_accumulation(self, tmp_path: Path) -> None:
         """A save/resume round trip at accumulation 2 continues the update count, not restarts it.
 
-        Resuming re-seeds the optimizer-step watermark from the restored
-        ``trainer.global_step``; getting that wrong would either replay the first batch of the
-        resumed epoch as a spurious update or stall the counter entirely.
+        Resuming re-seeds the optimizer-step watermark from the restored ``trainer.global_step``; getting that wrong
+        would either replay the first batch of the resumed epoch as a spurious update or stall the counter entirely.
         """
         module = _TinyEMAModule()
         callback = EMACallback(decay=0.9, tau=1)
-        loader: DataLoader[tuple[Tensor, int]] = DataLoader(_SyntheticVectorDataset(8), batch_size=2)
+        loader = _synthetic_loader()
         checkpoint = tmp_path / "resume.ckpt"
         first_leg = _cadence_trainer(callback, accumulate=2)
         first_leg.fit(module, train_dataloaders=loader)
@@ -616,21 +632,20 @@ class TestOptimizerStepCadence:
 class TestRestoreOnFailure:
     """A validation failure must not leave the EMA shadow wearing the live model's identity.
 
-    Restoration used to live only in ``on_validation_end``, which an exception raised inside
-    the validation loop never reaches (audit A06): the module was left holding the shadow
-    while the trained weights survived only in the callback's private backup, so any
-    handler that inspected, saved or resumed from the module got the average instead.
+    Restoration used to live only in ``on_validation_end``, which an exception raised inside the validation loop never
+    reaches (audit A06): the module was left holding the shadow while the trained weights survived only in the
+    callback's private backup, so any handler that inspected, saved or resumed from the module got the average instead.
     """
 
     def test_caught_validation_failure_leaves_raw_weights_installed(self) -> None:
         """Every floating tensor equals its pre-swap raw value and the backup is cleared.
 
-        The run trains first so the shadow has genuinely diverged from the live weights —
-        against an untouched shadow the assertion would hold for the wrong reason.
+        The run trains first so the shadow has genuinely diverged from the live weights — against an untouched shadow
+        the assertion would hold for the wrong reason.
         """
         module = _TinyEMAModule(fail_validation=True)
         callback = EMACallback(decay=0.9, tau=1)
-        loader: DataLoader[tuple[Tensor, int]] = DataLoader(_SyntheticVectorDataset(8), batch_size=2)
+        loader = _synthetic_loader()
         trainer = _cadence_trainer(callback, accumulate=1, limit_val_batches=1)
 
         with pytest.raises(RuntimeError, match=_VALIDATION_FAILURE):
@@ -646,9 +661,9 @@ class TestRestoreOnFailure:
     def test_restoration_idempotent(self) -> None:
         """A second restore after the normal one does not re-install stale weights.
 
-        ``on_exception`` can fire after ``on_validation_end`` already ran — a failure later
-        in the epoch, say. Clearing the backup is what makes that second call a no-op rather
-        than a copy of weights the training loop has since moved on from.
+        ``on_exception`` can fire after ``on_validation_end`` already ran — a failure later in the epoch, say. Clearing
+        the backup is what makes that second call a no-op rather than a copy of weights the training loop has since
+        moved on from.
         """
         module = _TinyEMAModule()
         callback = _fitted_callback(module, decay=0.9, tau=1)
@@ -670,19 +685,22 @@ class TestRestoreOnFailure:
 class TestSavedWeights:
     """A checkpoint written during validation holds the raw weights, not the EMA shadow.
 
-    ``ModelCheckpoint`` also saves from ``on_validation_end``, and Lightning reorders it to
-    the end of the callback list, so within one validation the EMA restore runs first. That
-    ordering is Lightning's to change and nothing asserted it (audit L-48); the EMA reaches a
-    checkpoint only through this callback's own ``state_dict``, which is the split
-    ``lucid_yolo.eval.checkpoint`` relies on when it overlays the shadow on request.
+    ``ModelCheckpoint`` also saves from ``on_validation_end``, and Lightning reorders it to the end of the callback
+    list, so within one validation the EMA restore runs first. That ordering is Lightning's to change and nothing
+    asserted it (audit L-48); the EMA reaches a checkpoint only through this callback's own ``state_dict``, which is
+    the split ``lucid_yolo.eval.checkpoint`` relies on when it overlays the shadow on request.
     """
 
     def test_state_dict_raw_weights_with_shadow_kept_separately(self, tmp_path: Path) -> None:
-        """The saved model ``state_dict`` matches the live weights and differs from the shadow."""
+        """The saved model ``state_dict`` matches the live weights and differs from the shadow.
+
+        A real run with a ``ModelCheckpoint`` writes a file mid-validation; the model entry must hold the raw weight
+        while the average survives only under the callback's own state key.
+        """
         module = _TinyEMAModule()
         callback = EMACallback(decay=0.9, tau=1)
         checkpointer = ModelCheckpoint(dirpath=str(tmp_path), filename="last", save_top_k=1, monitor=None)
-        loader: DataLoader[tuple[Tensor, int]] = DataLoader(_SyntheticVectorDataset(8), batch_size=2)
+        loader = _synthetic_loader()
         trainer = _cadence_trainer(callback, accumulate=1, limit_val_batches=1, extra_callbacks=[checkpointer])
 
         trainer.fit(module, train_dataloaders=loader, val_dataloaders=loader)

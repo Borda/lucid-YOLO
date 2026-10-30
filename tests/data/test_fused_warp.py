@@ -1,17 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-070 fused affine+letterbox single warp, delegated in WP-156.
 
-The fusion is now ``RandomAffine(letterbox=...)``: the affine and the
-aspect-preserving fit are two transforms in one upstream segment, composed into
-one matrix and one resample. The local class that used to hold that composition
-is gone, and this file follows the behaviour rather than the class.
+The fusion is now ``RandomAffine(letterbox=...)``: the affine and the aspect-preserving fit are two transforms in one
+upstream segment, composed into one matrix and one resample. The local class that used to hold that composition is
+gone, and this file follows the behaviour rather than the class.
 
-Covers the output contract (shape/dtype/value range), hand-computed box mapping
-for identity-affine cases on both the mosaic-square and single-image branches,
-byte-for-byte equivalence of the targets against the two-transform
-``RandomAffine`` then ``Letterbox`` path (the fusion changes only the image
-resampling, never the geometry), the rotated-box guard, and determinism under a
-seeded generator.
+Covers the output contract (shape/dtype/value range), hand-computed box mapping for identity-affine cases on both the
+mosaic-square and single-image branches, byte-for-byte equivalence of the targets against the two-transform
+``RandomAffine`` then ``Letterbox`` path (the fusion changes only the image resampling, never the geometry), the
+rotated-box guard, and determinism under a seeded generator.
 """
 
 from __future__ import annotations
@@ -27,6 +24,14 @@ from lucid_yolo.data import (
     boxes_from_polygons,
 )
 from lucid_yolo.data.transforms import GeometricTransform
+
+#: Source ``(height, width)`` sizes covering the mosaic-square branch and the single-image wide, tall and upscale ones.
+_SOURCE_SIZES = [
+    pytest.param(256, 256, id="mosaic-square"),
+    pytest.param(200, 360, id="single-wide"),
+    pytest.param(360, 200, id="single-tall"),
+    pytest.param(90, 120, id="single-upscale"),
+]
 
 
 def _polygon_targets(canvas: int) -> Targets:
@@ -58,15 +63,7 @@ class TestProtocol:
 class TestOutputContract:
     """The emitted image has the target shape, float32 dtype and in-range values."""
 
-    @pytest.mark.parametrize(
-        ("in_h", "in_w"),
-        [
-            pytest.param(256, 256, id="mosaic-square"),
-            pytest.param(200, 360, id="single-wide"),
-            pytest.param(360, 200, id="single-tall"),
-            pytest.param(90, 120, id="single-upscale"),
-        ],
-    )
+    @pytest.mark.parametrize(("in_h", "in_w"), _SOURCE_SIZES)
     def test_image_shape_dtype_range(self, in_h: int, in_w: int) -> None:
         """Any source size letterboxes to a square float32 image within the fill range."""
         fused = RandomAffine(degrees=10.0, translate=0.1, scale=0.2, generator=seeded_generator(), letterbox=128)
@@ -105,15 +102,7 @@ class TestKnownBoxMapping:
 class TestTwoStepEquivalence:
     """Fused targets equal the two-transform affine-then-letterbox targets exactly."""
 
-    @pytest.mark.parametrize(
-        ("in_h", "in_w"),
-        [
-            pytest.param(256, 256, id="mosaic-square"),
-            pytest.param(200, 360, id="single-wide"),
-            pytest.param(360, 200, id="single-tall"),
-            pytest.param(90, 120, id="single-upscale"),
-        ],
-    )
+    @pytest.mark.parametrize(("in_h", "in_w"), _SOURCE_SIZES)
     def test_targets_match_two_step_path(self, in_h: int, in_w: int) -> None:
         """Boxes, polygons and labels are byte-identical to RandomAffine then Letterbox."""
         image = torch.rand(3, in_h, in_w)

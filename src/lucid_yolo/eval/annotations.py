@@ -1,53 +1,42 @@
 # SPDX-License-Identifier: Apache-2.0
 """COCO annotation loading and letterboxed batching for the dual-path evaluator.
 
-The reader side of :class:`~lucid_yolo.eval.coco_eval.DualPathEvaluator`: it turns a
-COCO ``instances`` file into the evaluator's two inputs — the per-image ground-truth
-mapping in **original** image coordinates (A10) and the ``(images, image_ids,
-orig_sizes)`` batch stream — without going through the training datamodule, whose
-transforms would move the boxes into the letterboxed frame.
+The reader side of :class:`~lucid_yolo.eval.coco_eval.DualPathEvaluator`: it turns a COCO ``instances`` file into the
+evaluator's two inputs — the per-image ground-truth mapping in **original** image coordinates (A10) and the ``(images,
+image_ids, orig_sizes)`` batch stream — without going through the training datamodule, whose transforms would move
+the boxes into the letterboxed frame.
 
-``iscrowd`` flags and annotation areas are preserved so the COCO crowd-ignore rule
-and the small/medium/large breakdown stay faithful; degenerate boxes (non-list
-``bbox``, wrong arity, non-positive extent) are dropped rather than propagated as
-zero-area targets.
+``iscrowd`` flags and annotation areas are preserved so the COCO crowd-ignore rule and the small/medium/large
+breakdown stay faithful; degenerate boxes (non-list ``bbox``, wrong arity, non-positive extent) are dropped rather than
+propagated as zero-area targets.
 
-Numeric metadata outside the COCO domain is **refused**, not carried
-(:func:`_require_valid_metadata`): a non-finite box coordinate, a non-finite or
-negative ``area``, or an ``iscrowd`` that is neither ``0`` nor ``1`` raises naming the
-image and annotation id. That is a different class from the degenerate boxes above —
-a dropped degenerate box is an annotation this reader can read and decline, whereas
-these values have no reading at all, and both scorers answer ``-1`` for every summary
-when one reaches them, which is an undefined metric report with nothing in it pointing
-at the annotation that caused it. Unusual-but-legal input keeps working: coordinates
-off the image edge, ``area = 0``, and ``iscrowd = 1`` are all untouched.
+Numeric metadata outside the COCO domain is **refused**, not carried (:func:`_require_valid_metadata`): a non-finite
+box coordinate, a non-finite or negative ``area``, or an ``iscrowd`` that is neither ``0`` nor ``1`` raises naming the
+image and annotation id. That is a different class from the degenerate boxes above — a dropped degenerate box is an
+annotation this reader can read and decline, whereas these values have no reading at all, and both scorers answer
+``-1`` for every summary when one reaches them, which is an undefined metric report with nothing in it pointing at the
+annotation that caused it. Unusual-but-legal input keeps working: coordinates off the image edge, ``area = 0``, and
+``iscrowd = 1`` are all untouched.
 
-Instance **masks** (WP-053b) are opt-in: pass an ``image_size`` to
-:func:`annotations_to_target` (or ``with_masks=True`` to
-:func:`load_eval_annotations`) and every target additionally carries a ``(M, H,
-W)`` bool ``masks`` tensor at the original image size, aligned row-for-row with
-``boxes``. The default stays detection-only, so the existing callers neither
-change shape nor pay the segmentation-decode cost.
+Instance **masks** (WP-053b) are opt-in: pass an ``image_size`` to :func:`annotations_to_target` (or
+``with_masks=True`` to :func:`load_eval_annotations`) and every target additionally carries a ``(M, H, W)`` bool
+``masks`` tensor at the original image size, aligned row-for-row with ``boxes``. The default stays detection-only, so
+the existing callers neither change shape nor pay the segmentation-decode cost.
 
-Instance **keypoints** (WP-134) are opt-in the same way: ``with_keypoints=True``
-adds ``keypoints`` ``(M, K, 2)``, ``visibility`` ``(M, K)`` and ``num_keypoints``
-``(M,)`` to every target, parsed from the annotation's own flat COCO
-``keypoints`` field by :func:`~lucid_yolo.data.coco.parse_coco_keypoints` — the
-parser the training reader uses, not a second one. ``num_keypoints`` is read from
-the field COCO supplies rather than recounted from ``visibility``, because it is
-that supplied value the OKS protocol ignores an instance on.
+Instance **keypoints** (WP-134) are opt-in the same way: ``with_keypoints=True`` adds ``keypoints`` ``(M, K, 2)``,
+``visibility`` ``(M, K)`` and ``num_keypoints`` ``(M,)`` to every target, parsed from the annotation's own flat COCO
+``keypoints`` field by :func:`~lucid_yolo.data.coco.parse_coco_keypoints` — the parser the training reader uses, not a
+second one. ``num_keypoints`` is read from the field COCO supplies rather than recounted from ``visibility``, because
+it is that supplied value the OKS protocol ignores an instance on.
 
-With masks on, the returned ground truth is **lazy** (:class:`LazyTargets`): a
-mapping that decodes an image's masks when that image is looked up and keeps
-nothing afterwards. Eager decoding is not an option at COCO scale -- val2017's
-~36.8k instance annotations at ~0.3 MB per original-resolution bool mask is
-about 11 GB resident before the first image is even read, where the evaluator
-needs only one batch's worth alive at a time.
+With masks on, the returned ground truth is **lazy** (:class:`LazyTargets`): a mapping that decodes an image's masks
+when that image is looked up and keeps nothing afterwards. Eager decoding is not an option at COCO scale --
+val2017's ~36.8k instance annotations at ~0.3 MB per original-resolution bool mask is about 11 GB resident before the
+first image is even read, where the evaluator needs only one batch's worth alive at a time.
 
-This lives in the library rather than in a script because more than one entry point
-consumes it — the val2017 checkpoint evaluation and the synthetic-shapes regression
-producer — and a second copy of the annotation-to-target conversion would be free to
-drift from the first.
+This lives in the library rather than in a script because more than one entry point consumes it — the val2017
+checkpoint evaluation and the synthetic-shapes regression producer — and a second copy of the annotation-to-target
+conversion would be free to drift from the first.
 
 Provenance: R12 (COCO annotation format), R1 sec. 4.4. Assumptions: A9, A10.
 """
@@ -117,21 +106,18 @@ def empty_target(image_size: tuple[int, int] | None = None, with_keypoints: bool
     """Return the ground-truth mapping of an image carrying no usable annotation.
 
     Args:
-        image_size: Original image ``(height, width)``. When given, the target also
-            carries an empty ``(0, height, width)`` ``masks`` tensor, so an
-            annotation-free image still satisfies the segm metric's requirement that
-            **every** target dict hold a ``masks`` key. ``None`` (the default) keeps
-            the detection-only shape.
-        with_keypoints: When ``True``, the target additionally carries empty
-            ``keypoints``, ``visibility`` and ``num_keypoints`` entries. The point
-            count is ``0`` rather than the dataset's ``K``: no instance is present to
-            have points, and nothing iterates the point axis of an empty instance axis.
+        image_size: Original image ``(height, width)``. When given, the target also carries an empty
+            ``(0, height, width)`` ``masks`` tensor, so an annotation-free image still satisfies the segm metric's
+            requirement that **every** target dict hold a ``masks`` key. ``None`` (the default) keeps the
+            detection-only shape.
+        with_keypoints: When ``True``, the target additionally carries empty ``keypoints``, ``visibility`` and
+            ``num_keypoints`` entries. The point count is ``0`` rather than the dataset's ``K``: no instance is present
+            to have points, and nothing iterates the point axis of an empty instance axis.
 
     Returns:
-        A target dict whose ``boxes``, ``labels``, ``iscrowd`` and ``area`` entries are
-        all empty, with the dtypes torchmetrics expects, plus ``masks`` when
-        ``image_size`` is given and the three keypoint entries when ``with_keypoints``
-        is set.
+        A target dict whose ``boxes``, ``labels``, ``iscrowd`` and ``area`` entries are all empty, with the dtypes
+        torchmetrics expects, plus ``masks`` when ``image_size`` is given and the three keypoint entries when
+        ``with_keypoints`` is set.
 
     Examples:
         ```pycon
@@ -165,27 +151,22 @@ def empty_target(image_size: tuple[int, int] | None = None, with_keypoints: bool
 def _require_valid_metadata(annotation: dict[str, object], bbox: Sequence[float]) -> None:
     """Refuse one annotation whose numeric metadata falls outside the COCO domain.
 
-    Three fields, each with a domain the format states and the metric relies on: the
-    box coordinates must be finite, ``area`` must be finite and non-negative, and
-    ``iscrowd`` must be ``0`` or ``1``. A value outside them is not scored to a wrong
-    number — both backends answer ``-1`` for *every* summary — so it is refused here,
-    at the one place that reads the annotation and still knows which one it is.
+    Three fields, each with a domain the format states and the metric relies on: the box coordinates must be finite,
+    ``area`` must be finite and non-negative, and ``iscrowd`` must be ``0`` or ``1``. A value outside them is not
+    scored to a wrong number — both backends answer ``-1`` for *every* summary — so it is refused here, at the one place
+    that reads the annotation and still knows which one it is.
 
-    Legal-but-unusual values are deliberately untouched: a coordinate off the image
-    edge is a normal COCO occurrence, ``area = 0`` is what a protocol may assign a
-    hairline instance, and ``iscrowd = 1`` is the crowd flag itself.
+    Legal-but-unusual values are deliberately untouched: a coordinate off the image edge is a normal COCO occurrence,
+    ``area = 0`` is what a protocol may assign a hairline instance, and ``iscrowd = 1`` is the crowd flag itself.
 
     Args:
-        annotation: The raw annotation dict, read only for its ids and its ``area``
-            and ``iscrowd`` fields.
-        bbox: That annotation's ``bbox`` already parsed to floats, of any length —
-            the arity filter is the caller's, and a wrongly sized box still has
-            coordinates worth checking.
+        annotation: The raw annotation dict, read only for its ids and its ``area`` and ``iscrowd`` fields.
+        bbox: That annotation's ``bbox`` already parsed to floats, of any length — the arity filter is the caller's,
+            and a wrongly sized box still has coordinates worth checking.
 
     Raises:
-        ValueError: If a coordinate or the area is non-finite, the area is negative,
-            or ``iscrowd`` is outside ``{0, 1}``. The message names the image id, the
-            annotation id, the field and the value.
+        ValueError: If a coordinate or the area is non-finite, the area is negative, or ``iscrowd`` is outside
+            ``{0, 1}``. The message names the image id, the annotation id, the field and the value.
 
     Examples:
         ```pycon
@@ -212,10 +193,9 @@ def _require_valid_metadata(annotation: dict[str, object], bbox: Sequence[float]
 def _require_valid_annotations(annotations: Iterable[dict[str, object]]) -> None:
     """Run :func:`_require_valid_metadata` over a whole file's annotations.
 
-    The eager path validates while it builds its targets, so it refuses a malformed
-    file at load. :class:`LazyTargets` builds nothing until the evaluator looks an
-    image up, which would move the same refusal to the middle of a scoring run — this
-    is the one cheap pass that keeps both paths failing at the same moment.
+    The eager path validates while it builds its targets, so it refuses a malformed file at load. :class:`LazyTargets`
+    builds nothing until the evaluator looks an image up, which would move the same refusal to the middle of a scoring
+    run — this is the one cheap pass that keeps both paths failing at the same moment.
 
     Args:
         annotations: Every annotation record of the file, in any order.
@@ -243,41 +223,35 @@ def annotations_to_target(
 ) -> dict[str, Tensor]:
     """Convert one image's COCO annotations into a torchmetrics target mapping.
 
-    Boxes are converted from COCO ``xywh`` to ``xyxy`` and left in original image
-    coordinates. Annotations whose ``bbox`` is not a list, does not hold exactly four
-    values, or has a non-positive width or height are skipped — a degenerate box would
-    otherwise enter the match as an unmatchable zero-area target and depress recall.
+    Boxes are converted from COCO ``xywh`` to ``xyxy`` and left in original image coordinates. Annotations whose
+    ``bbox`` is not a list, does not hold exactly four values, or has a non-positive width or height are skipped — a
+    degenerate box would otherwise enter the match as an unmatchable zero-area target and depress recall.
 
-    Passing ``image_size`` additionally decodes each surviving annotation's
-    ``segmentation`` into a bool mask at the original image size (see
-    :func:`annotation_mask`), stacked row-for-row with ``boxes``. The **same**
-    ``bbox`` filter governs both, so a dropped degenerate annotation drops its mask
-    too and the two tensors cannot describe different instances. ``iscrowd``
-    annotations are treated exactly as the box path treats them — kept, with the flag
-    recorded, never skipped — so a crowd region carries its mask as well.
+    Passing ``image_size`` additionally decodes each surviving annotation's ``segmentation`` into a bool mask at the
+    original image size (see :func:`annotation_mask`), stacked row-for-row with ``boxes``. The **same** ``bbox`` filter
+    governs both, so a dropped degenerate annotation drops its mask too and the two tensors cannot describe different
+    instances. ``iscrowd`` annotations are treated exactly as the box path treats them — kept, with the flag recorded,
+    never skipped — so a crowd region carries its mask as well.
 
     Args:
         annotations: The raw annotation dicts belonging to a single image.
-        image_size: Original image ``(height, width)``. When given, masks are decoded
-            and the target carries a ``(M, height, width)`` bool ``masks`` entry.
-            ``None`` (the default) is detection-only and pays no decode cost.
-        with_keypoints: When ``True``, each surviving annotation's flat COCO
-            ``keypoints`` field is parsed into ``keypoints`` ``(M, K, 2)`` and
-            ``visibility`` ``(M, K)``, and its supplied ``num_keypoints`` count is
-            carried as ``num_keypoints`` ``(M,)``. Governed by the **same** ``bbox``
-            filter as the boxes, for the reason the masks are.
+        image_size: Original image ``(height, width)``. When given, masks are decoded and the target carries a
+            ``(M, height, width)`` bool ``masks`` entry. ``None`` (the default) is detection-only and pays
+            no decode cost.
+        with_keypoints: When ``True``, each surviving annotation's flat COCO ``keypoints`` field is parsed into
+            ``keypoints`` ``(M, K, 2)`` and ``visibility`` ``(M, K)``, and its supplied ``num_keypoints`` count is
+            carried as ``num_keypoints`` ``(M,)``. Governed by the **same** ``bbox`` filter as the boxes,
+            for the reason the masks are.
 
     Returns:
-        A target dict with ``boxes`` (``xyxy``), ``labels`` (category ids), ``iscrowd``
-        and ``area`` — plus ``masks`` when ``image_size`` is given and the three
-        keypoint entries when ``with_keypoints`` is set;
+        A target dict with ``boxes`` (``xyxy``), ``labels`` (category ids), ``iscrowd`` and ``area`` — plus
+        ``masks`` when ``image_size`` is given and the three keypoint entries when ``with_keypoints`` is set;
         :func:`empty_target` when nothing survives filtering.
 
     Raises:
-        ValueError: If an annotation's box coordinates or ``area`` are non-finite, its
-            ``area`` is negative, or its ``iscrowd`` is outside ``{0, 1}``
-            (:func:`_require_valid_metadata`). Distinct from the degenerate-box filter
-            above, which drops rather than refuses.
+        ValueError: If an annotation's box coordinates or ``area`` are non-finite, its ``area`` is negative, or its
+            ``iscrowd`` is outside ``{0, 1}`` (:func:`_require_valid_metadata`). Distinct from the
+            degenerate-box filter above, which drops rather than refuses.
 
     Examples:
         ```pycon
@@ -310,8 +284,8 @@ def annotations_to_target(
         if not isinstance(raw_bbox, list):
             continue
         bbox = [float(value) for value in raw_bbox]
-        # Before the extent filter, not after: a NaN width fails every comparison, so
-        # `bbox[2] <= 0` is False for it and the malformed box would pass as a good one.
+        # Before the extent filter, not after: a NaN width fails every comparison, so `bbox[2] <= 0` is False for it and
+        # the malformed box would pass as a good one.
         _require_valid_metadata(annotation, bbox)
         if len(bbox) != _XYWH_LEN or bbox[2] <= 0 or bbox[3] <= 0:
             continue
@@ -323,9 +297,9 @@ def annotations_to_target(
         if image_size is not None:
             masks.append(annotation_mask(annotation.get("segmentation"), image_size))
         if with_keypoints:
-            # `.get` rather than `[...]`: an annotation file with no keypoints at all --
-            # `instances_val2017.json` handed to the pose protocol -- then fails with the
-            # parser's own message about the field, not a bare KeyError.
+            # `.get` rather than `[...]`: an annotation file with no keypoints at all -- `instances_val2017.json`
+            # handed to the pose protocol -- then fails with the parser's own message about the field, not a bare
+            # KeyError.
             coords, visible = parse_coco_keypoints(annotation.get("keypoints"), str(annotation.get("image_id", "?")))
             points.append(coords)
             visibility.append(visible)
@@ -350,19 +324,16 @@ def annotations_to_target(
 def annotation_mask(segmentation: object, image_size: tuple[int, int]) -> Tensor:
     """Decode one COCO ``segmentation`` field into a bool mask at the original size.
 
-    COCO stores instance segmentation in three interchangeable encodings — a list of
-    flat polygon vertex lists, an uncompressed RLE (``counts`` a list of run lengths),
-    and a compressed RLE (``counts`` a byte string, the form ``iscrowd`` regions use).
-    All three are dispatched through :func:`faster_coco_eval.mask.segmToRle`, which
-    also merges a multi-part polygon into the single RLE the instance deserves; a
-    per-encoding branch written here would be a second decoder free to disagree with
-    the one the metric itself uses. Note its ``(width, height)`` argument order, the
-    reverse of the ``frPyObjects`` convention.
+    COCO stores instance segmentation in three interchangeable encodings — a list of flat polygon vertex lists, an
+    uncompressed RLE (``counts`` a list of run lengths), and a compressed RLE (``counts`` a byte string, the form
+    ``iscrowd`` regions use). All three are dispatched through :func:`faster_coco_eval.mask.segmToRle`, which also
+    merges a multi-part polygon into the single RLE the instance deserves; a per-encoding branch written here would be a
+    second decoder free to disagree with the one the metric itself uses. Note its ``(width, height)`` argument order,
+    the reverse of the ``frPyObjects`` convention.
 
-    An annotation with no ``segmentation`` field (or an empty one) yields an all-zero
-    mask rather than being skipped: dropping the row would leave ``masks`` shorter
-    than ``boxes``, and every later row would then describe a different instance in
-    the two tensors.
+    An annotation with no ``segmentation`` field (or an empty one) yields an all-zero mask rather than being skipped:
+    dropping the row would leave ``masks`` shorter than ``boxes``, and every later row would then describe a different
+    instance in the two tensors.
 
     Args:
         segmentation: The raw ``segmentation`` value of one COCO annotation, or
@@ -395,28 +366,25 @@ def annotation_mask(segmentation: object, image_size: tuple[int, int]) -> Tensor
 class LazyTargets(Mapping[int, dict[str, Tensor]]):
     """Ground truth that decodes an image's masks on lookup and keeps nothing after.
 
-    A drop-in for the ``dict`` the detection path returns — same keys, same target
-    dicts — differing only in *when* the work happens. That distinction is what
-    makes segmentation evaluation runnable at COCO scale: the eager mapping holds
-    every instance mask of every image at original resolution simultaneously
-    (~11 GB on val2017), while the evaluator consumes them one batch at a time and
-    the metric RLE-encodes each one on ``update``, so nothing needs to stay dense.
+    A drop-in for the ``dict`` the detection path returns — same keys, same target dicts — differing only in *when* the
+    work happens. That distinction is what makes segmentation evaluation runnable at COCO scale: the eager mapping
+    holds every instance mask of every image at original resolution simultaneously (~11 GB on val2017), while the
+    evaluator consumes them one batch at a time and the metric RLE-encodes each one on ``update``, so nothing needs to
+    stay dense.
 
-    Lookups are not memoised. A repeated lookup re-decodes rather than growing the
-    footprint this class exists to bound; the evaluator visits each image once.
+    Lookups are not memoised. A repeated lookup re-decodes rather than growing the footprint this class exists to
+    bound; the evaluator visits each image once.
 
-    The keypoint option composes with this rather than being lost to it: masks are why
-    the mapping is lazy, and ``with_keypoints`` decides what each looked-up target
-    additionally carries, so a caller asking for both gets both. The two options are
-    documented as independent, and a target that quietly dropped its points would reach
-    an OKS consumer looking complete.
+    The keypoint option composes with this rather than being lost to it: masks are why the mapping is lazy, and
+    ``with_keypoints`` decides what each looked-up target additionally carries, so a caller asking for both gets both.
+    The two options are documented as independent, and a target that quietly dropped its points would reach an OKS
+    consumer looking complete.
 
     Attributes:
-        grouped: Raw COCO annotations per image id; a missing id means an image
-            with no annotations, which still gets an :func:`empty_target`.
+        grouped: Raw COCO annotations per image id; a missing id means an image with no annotations,
+            which still gets an :func:`empty_target`.
         sizes: Original ``(height, width)`` per image id, the grid masks decode onto.
-        with_keypoints: Whether each looked-up target also carries ``keypoints``,
-            ``visibility`` and ``num_keypoints``.
+        with_keypoints: Whether each looked-up target also carries ``keypoints``, ``visibility`` and ``num_keypoints``.
 
     Examples:
         ```pycon
@@ -470,40 +438,33 @@ def load_eval_annotations(
 ) -> tuple[list[EvalImage], Mapping[int, dict[str, Tensor]], dict[int, int]]:
     """Parse a COCO instances file into eval images, target dicts, and the label map.
 
-    Every image in the file gets a target entry, including images with no annotation,
-    so the evaluator sees the full split rather than only the annotated part of it.
-    The label map reproduces :class:`~lucid_yolo.data.coco.CocoDetectionDataset`'s
-    sorted-category-id order, so predicted contiguous labels can be mapped back into
-    the target dicts' category-id space.
+    Every image in the file gets a target entry, including images with no annotation, so the evaluator sees the full
+    split rather than only the annotated part of it. The label map reproduces
+    :class:`~lucid_yolo.data.coco.CocoDetectionDataset`'s sorted-category-id order, so predicted contiguous labels
+    can be mapped back into the target dicts' category-id space.
 
     Args:
-        ann_file: Path to a COCO ``instances`` JSON file (val2017 or any compatible
-            subset or synthetic split).
-        with_masks: When ``True``, every target additionally carries the ``masks``
-            entry :func:`annotations_to_target` decodes at that image's own
-            ``(height, width)`` — the ground truth the segm half of the metric scores
-            against. Defaults to ``False``: detection-only callers keep the target
-            shape they have and skip the segmentation decode entirely.
-        with_keypoints: When ``True``, every target additionally carries the
-            ``keypoints``, ``visibility`` and ``num_keypoints`` entries
-            :func:`annotations_to_target` parses — the ground truth the OKS protocol
-            scores against, read off a ``person_keypoints`` file. Independent of
-            ``with_masks``: on its own it needs no laziness, since a whole split's
-            points are a few megabytes where its masks are gigabytes, and combined with
-            ``with_masks`` it rides the :class:`LazyTargets` lookup that the masks
-            require. Either way the entries are on every target.
+        ann_file: Path to a COCO ``instances`` JSON file (val2017 or any compatible subset or synthetic split).
+        with_masks: When ``True``, every target additionally carries the ``masks`` entry :func:`annotations_to_target`
+            decodes at that image's own ``(height, width)`` — the ground truth the segm half of the metric scores
+            against. Defaults to ``False``: detection-only callers keep the target shape they have and skip
+            the segmentation decode entirely.
+        with_keypoints: When ``True``, every target additionally carries the ``keypoints``, ``visibility`` and
+            ``num_keypoints`` entries :func:`annotations_to_target` parses — the ground truth the OKS protocol scores
+            against, read off a ``person_keypoints`` file. Independent of ``with_masks``: on its own it needs no
+            laziness, since a whole split's points are a few megabytes where its masks are gigabytes, and combined with
+            ``with_masks`` it rides the :class:`LazyTargets` lookup that the masks require. Either way the entries
+            are on every target.
 
     Returns:
-        A triple of the image records sorted by ascending image id, the per-image-id
-        ground truth in original coordinates, and the contiguous-label to category-id
-        map. The ground truth is a plain ``dict`` for the detection default and a
-        :class:`LazyTargets` when ``with_masks`` is set; both satisfy the evaluator's
+        A triple of the image records sorted by ascending image id, the per-image-id ground truth
+        in original coordinates, and the contiguous-label to category-id map. The ground truth is a plain ``dict`` for
+        the detection default and a :class:`LazyTargets` when ``with_masks`` is set; both satisfy the evaluator's
         ``Mapping`` contract.
 
     Raises:
-        ValueError: If any annotation's numeric metadata is outside the COCO domain
-            (:func:`_require_valid_metadata`). Refused here rather than at first
-            lookup, so the lazy and eager paths fail at the same moment — the load —
+        ValueError: If any annotation's numeric metadata is outside the COCO domain (:func:`_require_valid_metadata`).
+            Refused here rather than at first lookup, so the lazy and eager paths fail at the same moment — the load —
             instead of part-way through a scoring run.
 
     Examples:
@@ -547,28 +508,24 @@ def load_eval_annotations(
 def read_letterboxed_image(path: Path, letterbox: Letterbox) -> tuple[Tensor, tuple[int, int]]:
     """Read one image file and letterbox it exactly as the evaluation path does.
 
-    The whole of what happens to an image between the disk and the model: read as RGB,
-    scaled to the unit float range the model was trained on, letterboxed with the
-    validation geometry. :func:`letterboxed_batches` is this function in a loop, and
-    single-image inference (:func:`lucid_yolo.predict.predict_image`) is one call of it
-    — which is why it is a function rather than three lines inside the batcher. A second
-    copy would be free to read ``ImageReadMode.UNCHANGED``, or to scale a 16-bit PNG by
-    the 8-bit ``255``, and the model would answer plausibly either way.
+    The whole of what happens to an image between the disk and the model: read as RGB, scaled to the unit float range
+    the model was trained on, letterboxed with the validation geometry. :func:`letterboxed_batches` is this function in
+    a loop, and single-image inference (:func:`lucid_yolo.predict.predict_image`) is one call of it — which is why
+    it is a function rather than three lines inside the batcher. A second copy would be free to read
+    ``ImageReadMode.UNCHANGED``, or to scale a 16-bit PNG by the 8-bit ``255``, and the model would answer plausibly
+    either way.
 
-    The decode and the scale are the training readers' own
-    (:func:`~lucid_yolo.data._image.decode_rgb`,
-    :func:`~lucid_yolo.data._image.to_unit_float`): codes are divided by their dtype's
-    maximum, so an 8-bit image reads exactly as ``code / 255.0`` and a 16-bit one by
-    ``65535``, as it does in training.
+    The decode and the scale are the training readers' own (:func:`~lucid_yolo.data._image.decode_rgb`,
+    :func:`~lucid_yolo.data._image.to_unit_float`): codes are divided by their dtype's maximum, so an 8-bit image reads
+    exactly as ``code / 255.0`` and a 16-bit one by ``65535``, as it does in training.
 
     Args:
         path: Image file to read.
         letterbox: The validation letterbox applied to it.
 
     Returns:
-        The letterboxed ``(3, out_h, out_w)`` float image, and the **original**
-        ``(height, width)`` the file decoded to — the frame an inverse letterbox maps
-        predictions back onto (A10).
+        The letterboxed ``(3, out_h, out_w)`` float image, and the **original** ``(height, width)`` the file decoded to
+        — the frame an inverse letterbox maps predictions back onto (A10).
 
     Raises:
         OSError: If the file is missing or cannot be decoded; the path is named.
@@ -587,30 +544,26 @@ def read_letterboxed_image(path: Path, letterbox: Letterbox) -> tuple[Tensor, tu
 def letterbox_image_tensor(image: Tensor, letterbox: Letterbox) -> tuple[Tensor, tuple[int, int]]:
     """Letterbox an already-decoded image exactly as :func:`read_letterboxed_image` does a file.
 
-    The tensor half of the file reader, and the one both share: a decoded file and an
-    image a caller already holds reach the model through the same scale and the same
-    letterbox, so a picture passed as a tensor and the same picture saved and read back
-    get the same answer. Unsigned integer codes are divided by their dtype's maximum
-    (:func:`~lucid_yolo.data._image.to_unit_float`); a floating-point image is taken as
-    already in that unit range and refused when it is not, because a ``0..255`` float
-    image would otherwise be letterboxed, run and answered plausibly from saturated
-    pixels.
+    The tensor half of the file reader, and the one both share: a decoded file and an image a caller already holds
+    reach the model through the same scale and the same letterbox, so a picture passed as a tensor and the same picture
+    saved and read back get the same answer. Unsigned integer codes are divided by their dtype's maximum
+    (:func:`~lucid_yolo.data._image.to_unit_float`); a floating-point image is taken as already in that unit range and
+    refused when it is not, because a ``0..255`` float image would otherwise be letterboxed, run and answered plausibly
+    from saturated pixels.
 
     Args:
-        image: A ``(3, H, W)`` RGB image: ``uint8``/``uint16`` codes, or floating point
-            in ``[0, 1]``.
+        image: A ``(3, H, W)`` RGB image: ``uint8``/``uint16`` codes, or floating point in ``[0, 1]``.
         letterbox: The validation letterbox applied to it.
 
     Returns:
-        The letterboxed ``(3, out_h, out_w)`` float32 image, and the **original**
-        ``(height, width)`` -- the frame an inverse letterbox maps predictions back onto
-        (A10).
+        The letterboxed ``(3, out_h, out_w)`` float32 image, and the **original** ``(height, width)`` -- the frame an
+        inverse letterbox maps predictions back onto (A10).
 
     Raises:
-        ValueError: If ``image`` is not ``(3, H, W)``, or is floating point with any NaN
-            or infinite value or with values outside ``[0, 1]``.
-        TypeError: If ``image`` holds signed integer, boolean or complex values, none of
-            which carries an image code range.
+        ValueError: If ``image`` is not ``(3, H, W)``, or is floating point with any NaN or infinite value or with
+            values outside ``[0, 1]``.
+        TypeError: If ``image`` holds signed integer, boolean or complex values, none of which carries an image
+            code range.
 
     Examples:
         ```pycon
@@ -661,9 +614,9 @@ def letterboxed_batches(
 ) -> Iterator[tuple[Tensor, list[int], list[tuple[int, int]]]]:
     """Yield ``(images, image_ids, orig_sizes)`` batches for the dual-path evaluator.
 
-    Each image is read as RGB, scaled to the unit float range, and letterboxed with the
-    validation geometry. The original ``(height, width)`` travels with the batch so the
-    evaluator can invert the letterbox and score in original coordinates (A10).
+    Each image is read as RGB, scaled to the unit float range, and letterboxed with the validation geometry. The
+    original ``(height, width)`` travels with the batch so the evaluator can invert the letterbox and score in original
+    coordinates (A10).
 
     Args:
         images: The eval image records to iterate, in order.

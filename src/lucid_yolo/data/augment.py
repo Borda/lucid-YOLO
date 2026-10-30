@@ -5,38 +5,31 @@ Two more :class:`~lucid_yolo.data.transforms.GeometricTransform` implementations
 the YOLO-lineage recipe ([R1] Table S3: ``fliplr=0.5`` plus per-channel HSV gains):
 
 :class:`HSVJitter`
-    A **photometric-only** transform. It perturbs the image in hue/saturation/value
-    space and leaves every target modality untouched — geometry is invariant under a
-    colour change, so the :class:`~lucid_yolo.data.targets.Targets` pass straight
-    through. The HSV conversion is done in pure torch by the module-level
-    :func:`rgb_to_hsv` / :func:`hsv_to_rgb` pair, written from the standard
-    colorimetric (hexcone) definition so the project carries no torchvision
-    dependency for this hot-path op. The two converters are exact round-trip inverses
-    of each other up to float error, which the unit gate pins.
+    A **photometric-only** transform. It perturbs the image in hue/saturation/value space and leaves every target
+    modality untouched — geometry is invariant under a colour change, so the
+    :class:`~lucid_yolo.data.targets.Targets` pass straight through. The HSV conversion is done in pure torch by the
+    module-level :func:`rgb_to_hsv` / :func:`hsv_to_rgb` pair, written from the standard colorimetric (hexcone)
+    definition so the project carries no torchvision dependency for this hot-path op. The two converters are
+    exact round-trip inverses of each other up to float error, which the unit gate pins.
 
 :class:`HorizontalFlip`
-    A geometric mirror about the vertical axis. With probability ``p`` it reverses the
-    image columns and mirrors every carried modality about ``x = (W - 1) / 2``:
-    axis-aligned boxes swap and reflect their x-extent (``x1' = (W - 1) - x2``,
-    ``x2' = (W - 1) - x1``), polygon points reflect (``x' = (W - 1) - x``), and
-    rotated boxes go through
-    :func:`~lucid_yolo.data.rotated_aug.mirror_rboxes` — centre reflected, long-edge
-    direction reflected with it, result re-canonicalized. The mirror itself is *exact* for
-    the carried long-edge representation, so no instance is ever dropped here and no guard
-    is needed. The re-canonicalization is WP-058 closing a WP-013 defect: the bare negation
-    this transform used to carry out left every box with ``theta > pi/4`` outside the
-    ``[-pi/4, 3*pi/4)`` long-edge range.
+    A geometric mirror about the vertical axis. With probability ``p`` it reverses the image columns and mirrors
+    every carried modality about ``x = (W - 1) / 2``: axis-aligned boxes swap and reflect their x-extent
+    (``x1' = (W - 1) - x2``, ``x2' = (W - 1) - x1``), polygon points reflect (``x' = (W - 1) - x``), and rotated
+    boxes go through :func:`~lucid_yolo.data.rotated_aug.mirror_rboxes` — centre reflected, long-edge
+    direction reflected with it, result re-canonicalized. The mirror itself is *exact* for the carried long-edge
+    representation, so no instance is ever dropped here and no guard is needed. The re-canonicalization is WP-058
+    closing a WP-013 defect: the bare negation this transform used to carry out left every box with ``theta > pi/4``
+    outside the ``[-pi/4, 3*pi/4)`` long-edge range.
 
-    The keypoint identity swap is :func:`~fuse_augmentations.permute_keypoint_pairs` since
-    WP-157, fed a full-length index this module builds from the dataset's pair list. It
-    permutes *coordinates* and nothing else, so the matching permutation of
-    ``keypoint_vis`` stays here — without it a mirrored sample would carry a visible point
-    marked occluded and its partner marked visible, at identical shapes and with every
-    coordinate assertion still passing.
+    The keypoint identity swap is :func:`~fuse_augmentations.permute_keypoint_pairs` since WP-157, fed a full-length
+    index this module builds from the dataset's pair list. It permutes *coordinates* and nothing else, so the
+    matching permutation of ``keypoint_vis`` stays here — without it a mirrored sample would carry a visible point
+    marked occluded and its partner marked visible, at identical shapes and with every coordinate assertion
+    still passing.
 
-Both transforms draw every random quantity from an optional :class:`torch.Generator`,
-so a seeded generator gives byte-identical output (the determinism policy of blueprint
-sec. 7).
+Both transforms draw every random quantity from an optional :class:`torch.Generator`, so a seeded generator gives
+byte-identical output (the determinism policy of blueprint sec. 7).
 """
 
 from __future__ import annotations
@@ -60,27 +53,26 @@ _RGB_CHANNELS = 3
 def _keypoint_flip_index(keypoint_flip_pairs: list[tuple[int, int]], keypoint_count: int) -> Tensor:
     """Expand dataset ``(left, right)`` pairs into upstream's full-length permutation.
 
-    The two shapes disagree and the conversion is this project's, not the caller's: a
-    dataset publishes the *pairs* it wants swapped (A64 keeps that the public surface, so
-    ``K`` stays generic), while :func:`~fuse_augmentations.permute_keypoint_pairs` takes a
-    ``(K,)`` index in which slot ``i`` takes its value from slot ``index[i]`` — identity
-    slots included, not omitted, since upstream rejects an index that is not one entry per
-    slot. Applying the swaps in list order to ``range(K)`` reproduces the sequential
-    per-pair swap this transform used to perform, overlapping pairs included: ``[(0, 1),
-    (1, 2)]`` composes to the same 3-cycle either way.
+    The two shapes disagree and the conversion is this project's, not the caller's: a dataset publishes the *pairs*
+    it wants swapped (A64 keeps that the public surface, so ``K`` stays generic), while
+    :func:`~fuse_augmentations.permute_keypoint_pairs` takes a ``(K,)`` index in which slot ``i`` takes its value
+    from slot ``index[i]`` — identity slots included, not omitted, since upstream rejects an index that is not one
+    entry per slot. Applying the swaps in list order to ``range(K)`` reproduces the sequential per-pair swap this
+    transform used to perform, overlapping pairs included: ``[(0, 1), (1, 2)]`` composes to the same 3-cycle
+    either way.
 
     Args:
         keypoint_flip_pairs: ``(left_index, right_index)`` pairs on the keypoint axis.
         keypoint_count: ``K``, the number of keypoint slots per instance.
 
     Returns:
-        A ``(K,)`` ``int64`` permutation, usable as the index for both the coordinate
-        permutation and the visibility one.
+        A ``(K,)`` ``int64`` permutation, usable as the index for both the coordinate permutation and the
+        visibility one.
 
     Raises:
-        ValueError: If either index of a pair falls outside ``[0, keypoint_count)``. A bad
-            pair is a caller error whichever side does the permutation, so the check stays
-            here rather than surfacing as an out-of-bounds gather from upstream.
+        ValueError: If either index of a pair falls outside ``[0, keypoint_count)``. A bad pair is a caller error
+            whichever side does the permutation, so the check stays here rather than surfacing as an out-of-bounds
+            gather from upstream.
 
     Examples:
         ```pycon
@@ -103,12 +95,10 @@ def _keypoint_flip_index(keypoint_flip_pairs: list[tuple[int, int]], keypoint_co
 def rgb_to_hsv(image: Tensor) -> Tensor:
     """Convert a CHW RGB float image to HSV, in pure torch (hexcone definition).
 
-    Implements the standard colorimetric conversion (matching :func:`colorsys.rgb_to_hsv`
-    channel-wise): value is the per-pixel channel maximum, saturation is the chroma
-    relative to that maximum, and hue is the angular position on the colour hexcone
-    normalised to ``[0, 1)``. Achromatic pixels (zero chroma) map to hue ``0`` and
-    saturation ``0``. On red/green/blue ties the red sector wins, then green, matching
-    the reference ``colorsys`` ordering.
+    Implements the standard colorimetric conversion (matching :func:`colorsys.rgb_to_hsv` channel-wise): value is the
+    per-pixel channel maximum, saturation is the chroma relative to that maximum, and hue is the angular position
+    on the colour hexcone normalised to ``[0, 1)``. Achromatic pixels (zero chroma) map to hue ``0`` and saturation
+    ``0``. On red/green/blue ties the red sector wins, then green, matching the reference ``colorsys`` ordering.
 
     Args:
         image: ``(3, H, W)`` RGB image with values in ``[0, 1]``.
@@ -137,10 +127,9 @@ def rgb_to_hsv(image: Tensor) -> Tensor:
 def _rgb_to_hsv(image: Tensor, hue_divisor: float | Tensor) -> Tensor:
     """Convert RGB with the hue division owned by the caller's execution device.
 
-    ``rgb_to_hsv`` retains its scalar divisor. The deferred training batch supplies
-    a device tensor: CUDA lowers division by a host scalar to multiplication by its
-    reciprocal, whereas the CPU training transform divides. Keeping the divisor
-    on-device preserves that division when the existing operations move to CUDA.
+    ``rgb_to_hsv`` retains its scalar divisor. The deferred training batch supplies a device tensor: CUDA lowers
+    division by a host scalar to multiplication by its reciprocal, whereas the CPU training transform divides.
+    Keeping the divisor on-device preserves that division when the existing operations move to CUDA.
 
     Args:
         image: A validated ``(3, H, W)`` RGB image.
@@ -179,11 +168,9 @@ def _rgb_to_hsv(image: Tensor, hue_divisor: float | Tensor) -> Tensor:
 def hsv_to_rgb(image: Tensor) -> Tensor:
     """Convert a CHW HSV float image back to RGB, in pure torch (hexcone definition).
 
-    Exact inverse of :func:`rgb_to_hsv` up to float rounding: hue selects one of six
-    colour-hexcone sectors and the fractional position within the sector interpolates
-    the RGB triple. Achromatic input (saturation ``0``) yields a neutral grey ``(v, v,
-    v)`` for any hue, which the ``p == q == t == v`` degeneracy handles without a
-    special case.
+    Exact inverse of :func:`rgb_to_hsv` up to float rounding: hue selects one of six colour-hexcone sectors and the
+    fractional position within the sector interpolates the RGB triple. Achromatic input (saturation ``0``) yields a
+    neutral grey ``(v, v, v)`` for any hue, which the ``p == q == t == v`` degeneracy handles without a special case.
 
     Args:
         image: ``(3, H, W)`` HSV image with all channels in ``[0, 1]``.
@@ -237,10 +224,9 @@ def _select_sector(index: Tensor, choices: list[Tensor]) -> Tensor:
 def _jitter_hsv_batch(images: Tensor, gains: Tensor) -> Tensor:
     """Apply the existing HSV operations to a batch with one stated gain row per image.
 
-    ``vmap`` batches the two converters without replacing their expressions. The
-    gains stay double until ``1 + gain`` has been formed, matching the Python
-    addition in ``HSVJitter.apply``, then take the image dtype. The caller quantizes
-    the result at the same boundary the worker-side transform previously reached.
+    ``vmap`` batches the two converters without replacing their expressions. The gains stay double until ``1 + gain``
+    has been formed, matching the Python addition in ``HSVJitter.apply``, then take the image dtype.
+    The caller quantizes the result at the same boundary the worker-side transform previously reached.
 
     Args:
         images: ``(B, 3, H, W)`` floating-point images after geometry and flipping.
@@ -326,17 +312,14 @@ class FlipParams:
 class HSVJitter:
     """Photometric HSV jitter applied to the image alone (WP-013).
 
-    Each call samples three independent gains — hue from ``[-hsv_h, hsv_h]``,
-    saturation from ``[-hsv_s, hsv_s]`` and value from ``[-hsv_v, hsv_v]`` — converts
-    the image to HSV, applies the hue gain **additively modulo 1**, the saturation and
-    value gains **multiplicatively** as ``channel * (1 + gain)`` clamped to ``[0, 1]``,
-    and converts back to RGB. Targets are geometry only and pass through unchanged.
+    Each call samples three independent gains — hue from ``[-hsv_h, hsv_h]``, saturation from ``[-hsv_s, hsv_s]`` and
+    value from ``[-hsv_v, hsv_v]`` — converts the image to HSV, applies the hue gain **additively modulo 1**, the
+    saturation and value gains **multiplicatively** as ``channel * (1 + gain)`` clamped to ``[0, 1]``, and converts
+    back to RGB. Targets are geometry only and pass through unchanged.
 
     Args:
-        hsv_h: Half-width of the additive hue-gain range, as a fraction of the hue
-            circle. Defaults to ``0.015``.
-        hsv_s: Half-width of the multiplicative saturation-gain range. Defaults to
-            ``0.7``.
+        hsv_h: Half-width of the additive hue-gain range, as a fraction of the hue circle. Defaults to ``0.015``.
+        hsv_s: Half-width of the multiplicative saturation-gain range. Defaults to ``0.7``.
         hsv_v: Half-width of the multiplicative value-gain range. Defaults to ``0.4``.
         generator: Optional :class:`torch.Generator` for seeded, reproducible
             sampling. Defaults to ``None`` (global RNG).
@@ -403,13 +386,11 @@ class HSVJitter:
     def sample(self) -> HSVParams:
         """Draw one :class:`HSVParams` from the configured ranges, consuming the RNG.
 
-        The sampling half of the seam: this is the only method that touches
-        :attr:`generator`, so a caller wanting stated gains rather than drawn ones
-        builds :class:`HSVParams` directly (WP-147).
+        The sampling half of the seam: this is the only method that touches :attr:`generator`, so a caller wanting
+        stated gains rather than drawn ones builds :class:`HSVParams` directly (WP-147).
 
         Returns:
-            The three sampled gains. Nothing is stashed on the instance --
-            ``last_gains`` is set by :meth:`apply`.
+            The three sampled gains. Nothing is stashed on the instance -- ``last_gains`` is set by :meth:`apply`.
 
         Examples:
             ```pycon
@@ -461,23 +442,19 @@ class HSVJitter:
 class HorizontalFlip:
     """Left-right image flip with matching target mirroring (WP-013).
 
-    With probability ``p`` (drawn per call) the image columns are reversed and every
-    target modality is mirrored about the vertical axis at ``x = (W - 1) / 2`` — the
-    axis the column reversal itself reflects about, since a coordinate names a sample
-    point and the outermost samples sit at ``0`` and ``W - 1`` (WP-154b). Boxes swap and
-    reflect their x-extent (``x1' = (W - 1) - x2``, ``x2' = (W - 1) - x1``), polygon and
-    keypoint points reflect (``x' = (W - 1) - x``), and rotated boxes reflect their centre
-    (``cx' = (W - 1) - cx``) with the long edge reflected and re-canonicalized (WP-058).
-    When a dataset keypoint pair map is supplied, it then swaps left/right keypoint
-    identities (WP-120) — coordinates and visibility flags together, so a mirrored "left
-    elbow" arrives in the right slot carrying its own flag. With probability ``1 - p`` the
-    image and targets pass through unchanged.
+    With probability ``p`` (drawn per call) the image columns are reversed and every target modality is mirrored
+    about the vertical axis at ``x = (W - 1) / 2`` — the axis the column reversal itself reflects about, since a
+    coordinate names a sample point and the outermost samples sit at ``0`` and ``W - 1`` (WP-154b). Boxes swap
+    and reflect their x-extent (``x1' = (W - 1) - x2``, ``x2' = (W - 1) - x1``), polygon and keypoint points reflect
+    (``x' = (W - 1) - x``), and rotated boxes reflect their centre (``cx' = (W - 1) - cx``) with the long edge
+    reflected and re-canonicalized (WP-058). When a dataset keypoint pair map is supplied, it then swaps left/right
+    keypoint identities (WP-120) — coordinates and visibility flags together, so a mirrored "left elbow" arrives in
+    the right slot carrying its own flag. With probability ``1 - p`` the image and targets pass through unchanged.
 
-    The rotated-box mirror is exact — an isometry maps the rectangle to a rectangle, and
-    ``-theta`` names the mirrored long edge up to the half turn a rectangle is invariant
-    under — so nothing is dropped and, unlike
-    :class:`~lucid_yolo.data.affine.RandomAffine`, this transform imposes no instance-axis
-    requirement on the rotated modality.
+    The rotated-box mirror is exact — an isometry maps the rectangle to a rectangle, and ``-theta`` names the
+    mirrored long edge up to the half turn a rectangle is invariant under — so nothing is dropped and, unlike
+    :class:`~lucid_yolo.data.affine.RandomAffine`, this transform imposes no instance-axis requirement
+    on the rotated modality.
 
     Args:
         p: Probability of flipping. Defaults to ``0.5``.
@@ -488,8 +465,7 @@ class HorizontalFlip:
             an identity swap, the safe default when a task has no left/right symmetry.
 
     Attributes:
-        last_flipped: Whether the most recent call flipped, or ``None`` before the
-            first call.
+        last_flipped: Whether the most recent call flipped, or ``None`` before the first call.
 
     Examples:
         ```pycon
@@ -557,13 +533,11 @@ class HorizontalFlip:
     def sample(self) -> FlipParams:
         """Draw whether this call flips, consuming one uniform against ``p``.
 
-        The sampling half of the seam: this is the only method that touches
-        :attr:`generator`, so a caller wanting a stated flip rather than a drawn one
-        builds :class:`FlipParams` directly (WP-147).
+        The sampling half of the seam: this is the only method that touches :attr:`generator`, so a caller wanting a
+        stated flip rather than a drawn one builds :class:`FlipParams` directly (WP-147).
 
         Returns:
-            The drawn decision. Nothing is stashed on the instance --
-            ``last_flipped`` is set by :meth:`apply`.
+            The drawn decision. Nothing is stashed on the instance -- ``last_flipped`` is set by :meth:`apply`.
 
         Examples:
             ```pycon
@@ -585,8 +559,8 @@ class HorizontalFlip:
             params: Whether to mirror.
 
         Returns:
-            Either the original ``(image, targets)`` or the left-right flipped image
-            with every target modality mirrored.
+            Either the original ``(image, targets)`` or the left-right flipped image with every target modality
+            mirrored.
 
         Examples:
             ```pycon
@@ -612,30 +586,26 @@ class HorizontalFlip:
 
         Two canvas conventions meet here, and the transform needs both:
 
-        * The **mirror axis** is ``(width - 1) / 2``, not ``width / 2``. A coordinate names
-          a sample point, the outermost samples sit at ``0`` and ``width - 1``, and that is
-          the axis ``image.flip(-1)`` itself reflects about — so ``width - 1`` is the only
-          choice under which a target keeps bounding the pixels it bounded before the flip
-          (WP-154b). ``width`` would displace every mirrored coordinate by one pixel.
+        * The **mirror axis** is ``(width - 1) / 2``, not ``width / 2``. A coordinate names a sample point,
+          the outermost samples sit at ``0`` and ``width - 1``, and that is the axis ``image.flip(-1)`` itself
+          reflects about — so ``width - 1`` is the only choice under which a target keeps bounding the pixels
+          it bounded before the flip (WP-154b). ``width`` would displace every mirrored coordinate by one pixel.
         * The **canvas extent** is ``[0, width]``, the area reading the readers and every
           other transform clamp an ``x`` coordinate to (``coco.py`` on load, ``affine.py``
           after a warp, and :func:`~fuse_augmentations.clip_bbox_xyxy` upstream).
 
-        Their meeting point is the defect this closes: a box legitimately clamped to
-        ``x2 = width`` on load mirrors to ``x1 = (width - 1) - width = -1``, one pixel off
-        the canvas. The flip is the last stage of the train pipeline, so that coordinate
-        goes straight to the assigner unless it is clipped here.
+        Their meeting point is the defect this closes: a box legitimately clamped to ``x2 = width`` on load
+        mirrors to ``x1 = (width - 1) - width = -1``, one pixel off the canvas. The flip is the last stage
+        of the train pipeline, so that coordinate goes straight to the assigner unless it is clipped here.
 
-        The clamp is on ``x`` alone, and only for boxes. A mirror moves nothing else, so
-        clamping ``y`` would edit geometry this transform never touched — a box that arrived
-        off-canvas vertically is another stage's business, and silently trimming it here
-        would make the flip's output depend on a height it does not otherwise read.
-        Keypoints are left where the mirror put them, as
-        :class:`~lucid_yolo.data.affine.RandomAffine` leaves its warped points unclipped and
-        A70 treats off-canvas as a visibility question rather than a coordinate one. Rotated
-        boxes are left alone because clamping a centre while keeping the extents describes a
-        *different* rectangle rather than a clipped one, and the mirror is an isometry that
-        cannot push a wholly on-canvas box off the canvas.
+        The clamp is on ``x`` alone, and only for boxes. A mirror moves nothing else, so clamping ``y`` would edit
+        geometry this transform never touched — a box that arrived off-canvas vertically is another stage's business,
+        and silently trimming it here would make the flip's output depend on a height it does not otherwise read.
+        Keypoints are left where the mirror put them, as :class:`~lucid_yolo.data.affine.RandomAffine` leaves
+        its warped points unclipped and A70 treats off-canvas as a visibility question rather than a coordinate one.
+        Rotated boxes are left alone because clamping a centre while keeping the extents describes a *different*
+        rectangle rather than a clipped one, and the mirror is an isometry that cannot push a wholly on-canvas box
+        off the canvas.
 
         Args:
             targets: The geometry to mirror.
@@ -664,17 +634,15 @@ class HorizontalFlip:
             if keypoint_flip_pairs is not None:
                 flip_index = _keypoint_flip_index(keypoint_flip_pairs, keypoints.shape[1])
                 reversed_mask = torch.ones(keypoints.shape[0], dtype=torch.bool, device=keypoints.device)
-                # Upstream moves coordinates only -- it says so, and it is the right split:
-                # which slot is "left elbow" is dataset schema, and a visibility flag is not
-                # geometry at all. So the same index is applied to `keypoint_vis` here, which
-                # is what makes each flag follow its own point instead of staying behind on a
-                # slot whose identity just changed (A70 keeps it a permutation, never a
-                # demotion).
+                # Upstream moves coordinates only -- it says so, and it is the right split: which slot is
+                # "left elbow" is dataset schema, and a visibility flag is not geometry at all.
+                # So the same index is applied to `keypoint_vis` here, which is what makes each flag follow its own
+                # point instead of staying behind on a slot whose identity just changed (A70 keeps it a permutation,
+                # never a demotion).
                 keypoints = permute_keypoint_pairs(keypoints, flip_index, reversed_mask)
-                # `_keypoint_flip_index` builds on the CPU because it is a Python-list
-                # construction; upstream moves it to the keypoint device itself, and this
-                # side does the same rather than inheriting a transform that only works on
-                # the CPU the gate happens to run on.
+                # `_keypoint_flip_index` builds on the CPU because it is a Python-list construction;
+                # upstream moves it to the keypoint device itself, and this side does the same rather than inheriting a
+                # transform that only works on the CPU the gate happens to run on.
                 keypoint_vis = keypoint_vis.index_select(1, flip_index.to(device=keypoint_vis.device))
         # A mirror keeps the instance axis, so the per-instance R18 flags ride along.
         return Targets(

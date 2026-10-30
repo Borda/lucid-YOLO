@@ -1,30 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 """Synthetic-shapes held-out validation generalization golden (WP-083).
 
-This accelerator-gated regression producer trains an ``n``-scale detector on a
-seeded 2,000-image synthetic shape dataset, then evaluates its separate validation
-split with :class:`lucid_yolo.eval.coco_eval.DualPathEvaluator`. Unlike the
-overfit-100 golden, training and scoring never reuse the same images: its three
-held-out mAP metrics make coordinate-frame mistakes, classification starvation, and
-collapsed augmentation randomness visible without running a COCO tier.
+This accelerator-gated regression producer trains an ``n``-scale detector on a seeded 2,000-image synthetic shape
+dataset, then evaluates its separate validation split with :class:`lucid_yolo.eval.coco_eval.DualPathEvaluator`.
+Unlike the overfit-100 golden, training and scoring never reuse the same images: its three held-out mAP metrics
+make coordinate-frame mistakes, classification starvation, and collapsed augmentation randomness visible without
+running a COCO tier.
 
-Mosaic remains enabled throughout the training portion of the recipe and closes
-only for the final epoch. That intentionally exercises the multi-image
-augmentation pipeline and its per-worker, per-epoch RNG reseeding; an overfit
-golden instead disables mosaic from epoch zero to make memorization stationary.
+Mosaic remains enabled throughout the training portion of the recipe and closes only for the final epoch. That
+intentionally exercises the multi-image augmentation pipeline and its per-worker, per-epoch RNG reseeding;
+an overfit golden instead disables mosaic from epoch zero to make memorization stationary.
 
-The model and optimizer recipe is loaded from the packaged Det-smoke n-scale config so
-the run-level hyperparameters remain single-source-of-truth. This script pins only
-the small generalization-gate budget, image size, dataset split, and worker count.
-The latter is deliberately fixed because a machine-dependent worker count changes
-which worker consumes each augmentation draw, making the golden unreproducible
-across machines.
+The model and optimizer recipe is loaded from the packaged Det-smoke n-scale config so the run-level
+hyperparameters remain single-source-of-truth. This script pins only the small generalization-gate budget,
+image size, dataset split, and worker count. The latter is deliberately fixed because a machine-dependent worker
+count changes which worker consumes each augmentation draw, making the golden unreproducible across machines.
 
-Golden policy: ``goldens/gpu/shapes_regression_det.json`` is deliberately absent
-until the lead runs this producer twice on real hardware and replaces the marked
-tolerance placeholder with the measured tolerance. The default offline golden
-harness excludes ``goldens/gpu/``; recomputing this producer is an explicit
-accelerator run.
+Golden policy: ``goldens/gpu/shapes_regression_det.json`` is deliberately absent until the lead runs this producer
+twice on real hardware and replaces the marked tolerance placeholder with the measured tolerance. The default
+offline golden harness excludes ``goldens/gpu/``; recomputing this producer is an explicit accelerator run.
 
 Provenance: R1 Eq. 2-3, R1 Table S3, R21. Assumptions: A8, A13, A26, A31.
 """
@@ -58,8 +52,8 @@ from lucid_yolo.ptl.module import DetectionLitModule
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root for path-based entry points
 from scripts._common import REPO_ROOT
 
-#: Packaged n-scale detector recipe; it remains the single source of truth for
-#: optimizer, loss, and LR-schedule hyperparameters shared with the Det-smoke run.
+#: Packaged n-scale detector recipe; it remains the single source of truth for optimizer, loss, and LR-schedule
+#: hyperparameters shared with the Det-smoke run.
 _RECIPE_PATH = Path(lucid_yolo.__file__).resolve().parent / "configs" / "det_nano_smoke.yaml"
 
 #: The frozen accelerator golden, isolated from the default offline golden harness.
@@ -68,12 +62,12 @@ _GOLDEN_PATH = REPO_ROOT / "goldens" / "gpu" / "shapes_regression_det.json"
 #: Harness producer spec recorded in the golden JSON schema.
 _PRODUCER_SPEC = "scripts.shapes_regression:shapes_regression_det"
 
-#: Gitignored canonical dataset cache; probes use sibling cache directories so a
-#: small CLI run cannot make the default 2,000-image dataset appear complete.
+#: Gitignored canonical dataset cache; probes use sibling cache directories so a small CLI run cannot make
+#: the default 2,000-image dataset appear complete.
 _DATASET_DIR = REPO_ROOT / ".cache" / "shapes_regression"
 
-#: A 2,000-image corpus gives the 90/10 held-out split enough examples to expose
-#: semantic training regressions while staying markedly cheaper than mini-COCO.
+#: A 2,000-image corpus gives the 90/10 held-out split enough examples to expose semantic training regressions
+#: while staying markedly cheaper than mini-COCO.
 _NUM_IMAGES = 2000
 
 #: Fixed held-out train/validation partition; test remains empty because this gate
@@ -87,53 +81,47 @@ _SLICE_SEED = 20260803
 #: every P3/P4/P5 stride used by the detection head.
 _IMG_SIZE = 320
 
-#: Six epochs leave mosaic active for five epochs and reserve exactly the final epoch
-#: for un-composited samples, exercising both sides of the close-mosaic schedule.
+#: Six epochs leave mosaic active for five epochs and reserve exactly the final epoch for un-composited samples,
+#: exercising both sides of the close-mosaic schedule.
 _EPOCHS = 6
 
-#: Fixed nonzero workers exercise the per-worker augmentation RNG seam. A
-#: machine-dependent auto count would change the augmentation draw sequence and make
-#: the golden unreproducible across machines.
+#: Fixed nonzero workers exercise the per-worker augmentation RNG seam. A machine-dependent auto count would change
+#: the augmentation draw sequence and make the golden unreproducible across machines.
 _NUM_WORKERS = 2
 
-#: Final-epoch mosaic window; unlike the overfit gate, this does not disable mosaic
-#: for the full training budget.
+#: Final-epoch mosaic window; unlike the overfit gate, this does not disable mosaic for the full training budget.
 _CLOSE_MOSAIC_EPOCHS = 1
 
-#: Absolute band on every held-out mAP metric. Three consecutive macOS-arm64 MPS runs
-#: reproduced 0.8823 / 0.8583 / 0.9842 to four decimals, so the same-platform spread is
-#: zero and this band exists only to absorb cross-accelerator kernel differences (A26
-#: records the same libm-rounding divergence for the fixture checksums). It is set an
-#: order of magnitude below the regressions it must catch: WP-078 moved Det-smoke mAP by
-#: 36% relative, which on this gate would be a swing of ~0.3, six times the band.
+#: Absolute band on every held-out mAP metric. Three consecutive macOS-arm64 MPS runs reproduced 0.8823 / 0.8583
+#: / 0.9842 to four decimals, so the same-platform spread is zero and this band exists only to absorb
+#: cross-accelerator kernel differences (A26 records the same libm-rounding divergence for the fixture checksums).
+#: It is set an order of magnitude below the regressions it must catch: WP-078 moved Det-smoke mAP by 36% relative,
+#: which on this gate would be a swing of ~0.3, six times the band.
 #:
-#: What it is *not* validated against, stated because the band's whole justification is
-#: the cross-accelerator case: no training run of this gate has ever happened on a second
-#: device, so the divergence this absorbs has never been measured. The one cross-accelerator
-#: datum this project holds -- oriented evaluation agreeing between MPS and CUDA to 1e-4 --
-#: does not bound it: that is a fixed checkpoint scored twice, while this trains for six
-#: epochs, where a kernel difference moves the gradients and compounds through the whole
-#: trajectory rather than appearing once at the end.
+#: What it is *not* validated against, stated because the band's whole justification is the cross-accelerator case:
+#: no training run of this gate has ever happened on a second device, so the divergence this absorbs has never
+#: been measured. The one cross-accelerator datum this project holds -- oriented evaluation agreeing between MPS
+#: and CUDA to 1e-4 -- does not bound it: that is a fixed checkpoint scored twice, while this trains for six epochs,
+#: where a kernel difference moves the gradients and compounds through the whole trajectory rather than appearing
+#: once at the end.
 #:
-#: The cost of the band being loose is on record. At WP-167's re-freeze the NMS mAP50-95
-#: moved 0.882337 to 0.870817 and passed silently; the same run absorbed a 0.026 shift on
-#: the oriented overfit gate. A band wide enough to hide the movement it was sized for is
-#: the defect ``clamped_tolerance`` fixes at the floor end, and this is its other end.
-#: Narrowing it needs the measurement that does not exist yet: this gate trained on two
-#: accelerators, several times each, with the spread between them read off the results.
-#: Until then the number stays where a measurement put it rather than where a guess would.
+#: The cost of the band being loose is on record. At WP-167's re-freeze the NMS mAP50-95 moved 0.882337 to 0.870817
+#: and passed silently; the same run absorbed a 0.026 shift on the oriented overfit gate. A band wide enough to
+#: hide the movement it was sized for is the defect ``clamped_tolerance`` fixes at the floor end, and this is its
+#: other end. Narrowing it needs the measurement that does not exist yet: this gate trained on two accelerators,
+#: several times each, with the spread between them read off the results. Until then the number stays where a
+#: measurement put it rather than where a guess would.
 _MAP_TOLERANCE = 0.05
 
-#: Held-out NMS mAP50-95 — the discriminating metric of the three, with headroom in
-#: both directions at 0.88.
+#: Held-out NMS mAP50-95 — the discriminating metric of the three, with headroom in both directions at 0.88.
 _VAL_MAP_50_95_NMS_TOLERANCE = _MAP_TOLERANCE
 
 #: Held-out E2E mAP50-95. Pinned alongside the NMS path so the two decode paths cannot
 #: silently diverge; the observed gap on this easy task is 0.024 AP.
 _VAL_MAP_50_95_E2E_TOLERANCE = _MAP_TOLERANCE
 
-#: Held-out NMS mAP50. Kept as a cheap sanity pin, not as the primary guard: at 0.9842
-#: it sits near the ceiling and so is the least sensitive of the three to a regression.
+#: Held-out NMS mAP50. Kept as a cheap sanity pin, not as the primary guard: at 0.9842 it sits near the ceiling
+#: and so is the least sensitive of the three to a regression.
 _VAL_MAP_50_NMS_TOLERANCE = _MAP_TOLERANCE
 
 #: Roboflow-style annotation name emitted by the configured COCO generator.
@@ -197,9 +185,8 @@ class _DatasetSummary:
 def load_recipe(path: Path = _RECIPE_PATH) -> Recipe:
     """Load the regression recipe from the packaged Det-smoke n-scale YAML.
 
-    The packaged config supplies model, optimizer, loss, schedule, seed, and batch
-    settings. The producer owns only its six-epoch budget and one-epoch
-    close-mosaic window, making the generalization gate reproducible without
+    The packaged config supplies model, optimizer, loss, schedule, seed, and batch settings. The producer owns
+    only its six-epoch budget and one-epoch close-mosaic window, making the generalization gate reproducible without
     duplicating the stable detector recipe.
 
     Args:
@@ -242,10 +229,9 @@ def generate_shapes_dataset(
 ) -> Path:
     """Materialize the seeded train/validation synthetic-shapes dataset.
 
-    The generator writes COCO-format segmentation annotations so each shape carries
-    both the polygon required by the repository reader and its detection box.
-    Existing datasets with both split annotations are reused, matching the overfit
-    producer's idempotent cache behavior.
+    The generator writes COCO-format segmentation annotations so each shape carries both the polygon required by
+    the repository reader and its detection box. Existing datasets with both split annotations are reused, matching
+    the overfit producer's idempotent cache behavior.
 
     Args:
         dataset_dir: Parent directory for the generated ``train`` and ``val`` splits.
@@ -278,12 +264,10 @@ def build_datamodule(dataset_dir: Path, recipe: Recipe) -> DetectionDataModule:
 
     Args:
         dataset_dir: Dataset parent holding ``train`` and ``val`` COCO splits.
-        recipe: Parsed hyperparameters supplying batch size, seed, and n-scale
-            augmentation policy.
+        recipe: Parsed hyperparameters supplying batch size, seed, and n-scale augmentation policy.
 
     Returns:
-        A datamodule with a fixed nonzero worker count for reproducible augmentation
-        stream coverage.
+        A datamodule with a fixed nonzero worker count for reproducible augmentation stream coverage.
 
     Examples:
         >>> dm = build_datamodule(generate_shapes_dataset(), load_recipe())  # doctest: +SKIP
@@ -343,10 +327,9 @@ def build_module(recipe: Recipe, num_classes: int) -> DetectionLitModule:
 def run_regression(num_images: int = _NUM_IMAGES, epochs: int = _EPOCHS) -> dict[str, float]:
     """Train the held-out shapes recipe and return exact counts plus val mAP metrics.
 
-    Probe image counts use a sibling cache directory so ``--images`` cannot make a
-    partial dataset masquerade as the canonical 2,000-image cache. Deterministic
-    execution is attempted first; the MPS deterministic-kernel fallback mirrors
-    the overfit producer and restarts from the fixed seed before retrying.
+    Probe image counts use a sibling cache directory so ``--images`` cannot make a partial dataset masquerade as the
+    canonical 2,000-image cache. Deterministic execution is attempted first; the MPS deterministic-kernel fallback
+    mirrors the overfit producer and restarts from the fixed seed before retrying.
 
     Args:
         num_images: Total generated images. Defaults to :data:`_NUM_IMAGES`.
@@ -381,9 +364,9 @@ def run_regression(num_images: int = _NUM_IMAGES, epochs: int = _EPOCHS) -> dict
 def shapes_regression_det() -> dict[str, float]:
     """Produce the canonical zero-argument synthetic-shapes golden metrics.
 
-    The golden harness resolves this function from :data:`_PRODUCER_SPEC`. It is
-    intentionally accelerator-gated because it generates data and retrains the
-    detector before evaluating both decode paths on the held-out validation split.
+    The golden harness resolves this function from :data:`_PRODUCER_SPEC`. It is intentionally accelerator-gated
+    because it generates data and retrains the detector before evaluating both decode paths on the held-out
+    validation split.
 
     Returns:
         The canonical 2,000-image metric mapping from :func:`run_regression`.
@@ -399,9 +382,8 @@ def shapes_regression_det() -> dict[str, float]:
 def write_golden(metrics: dict[str, float], path: Path = _GOLDEN_PATH) -> None:
     """Write real producer metrics in the accelerator-golden harness schema.
 
-    The tolerance fields deliberately retain their marked placeholder until the
-    lead measures two full runs. This function never invents metric values: callers
-    pass the measured mapping returned by :func:`run_regression`.
+    The tolerance fields deliberately retain their marked placeholder until the lead measures two full runs.
+    This function never invents metric values: callers pass the measured mapping returned by :func:`run_regression`.
 
     Args:
         metrics: Real metric mapping to store under the golden ``values`` key.
@@ -430,8 +412,7 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command-line arguments; defaults to ``sys.argv[1:]``.
 
     Returns:
-        ``0`` when the run completed, or ``1`` when a task or positive-budget guard
-        rejects the request.
+        ``0`` when the run completed, or ``1`` when a task or positive-budget guard rejects the request.
 
     Examples:
         The rejection reason is printed rather than returned, so the example

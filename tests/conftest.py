@@ -1,20 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """Shared pytest fixtures for the offline test suite.
 
-Seeds the torch RNG before every test (``_seed_torch_rng``) so no module can draw
-from leftover state, and exposes the WP-007 synthetic micro-datasets (A26) as
-session-scoped fixtures.
-Both sets are generated once into a gitignored on-disk cache
-(``tests/fixtures/_generated/``) and reused across the session; the generator
-helpers are idempotent, so a warm cache is left untouched, and each set is published
-by atomic rename, so pytest-xdist workers racing on a cold cache never read a
-half-written one.
+Seeds the torch RNG before every test (``_seed_torch_rng``) so no module can draw from leftover state, and exposes the
+WP-007 synthetic micro-datasets (A26) as session-scoped fixtures. Both sets are generated once into a gitignored on-disk
+cache (``tests/fixtures/_generated/``) and reused across the session; the generator helpers are idempotent, so a warm
+cache is left untouched, and each set is published by atomic rename, so pytest-xdist workers racing on a cold cache
+never read a half-written one.
 
-Import mechanism: ``synthetic.py`` lives in ``tests/fixtures/`` (a non-package
-directory, no ``__init__.py``). We prepend that directory to ``sys.path`` here so
-both this conftest and ``tests/fixtures/test_fixtures_load.py`` can ``import
-synthetic`` by bare module name, without turning ``tests`` into an importable
-package.
+Import mechanism: ``synthetic.py`` lives in ``tests/fixtures/`` (a non-package directory, no ``__init__.py``). We
+prepend that directory to ``sys.path`` here so both this conftest and ``tests/fixtures/test_fixtures_load.py`` can
+``import synthetic`` by bare module name, without turning ``tests`` into an importable package.
 """
 
 from __future__ import annotations
@@ -51,18 +46,16 @@ _SEED = 0
 def _seed_torch_rng() -> None:
     """Reset the torch RNG before every test so no module draws from leftover state.
 
-    Suite-wide default: modules that build random tensors would otherwise draw
-    inputs that depend on whichever test ran before them. Seeding centrally here
-    is the repo convention; a test module needs no seeding fixture of its own
-    unless it seeds differently or does more than seed.
+    Suite-wide default: modules that build random tensors would otherwise draw inputs that depend on whichever test ran
+    before them. Seeding centrally here is the repo convention; a test module needs no seeding fixture of its own unless
+    it seeds differently or does more than seed.
 
-    Only torch is seeded: the suite draws no randomness from ``numpy.random`` or
-    the stdlib ``random`` module (verified by grep over ``tests/``), so seeding
-    those would be dead code. ``torch.manual_seed`` already covers all CUDA
+    Only torch is seeded: the suite draws no randomness from ``numpy.random`` or the stdlib ``random`` module (verified
+    by grep over ``tests/``), so seeding those would be dead code. ``torch.manual_seed`` already covers all CUDA
     devices, so no separate ``manual_seed_all`` call is needed.
 
-    A module fixture of this exact name would *override* this one rather than
-    compose with it, silently disabling the seeding for that module.
+    A module fixture of this exact name would *override* this one rather than compose with it, silently disabling the
+    seeding for that module.
     """
     torch.manual_seed(_SEED)
 

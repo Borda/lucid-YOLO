@@ -1,18 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """Anchor-point grid for the anchor-free detection head (WP-025).
 
-The detector is anchor-free: every feature-map cell contributes exactly one
-anchor *point* (not a set of anchor boxes), located at the cell centre. For a
-level with stride ``s`` the cell in row ``i`` (top to bottom) and column ``j``
-(left to right) maps to the pixel-space point ``((j + 0.5) * s, (i + 0.5) * s)``
-on the network input (A11: centres at ``(i + 0.5) * stride``; sources R4, R5).
+The detector is anchor-free: every feature-map cell contributes exactly one anchor *point* (not a set of anchor boxes),
+located at the cell centre. For a level with stride ``s`` the cell in row ``i`` (top to bottom) and column ``j``
+(left to right) maps to the pixel-space point ``((j + 0.5) * s, (i + 0.5) * s)`` on the network input
+(A11: centres at ``(i + 0.5) * stride``; sources R4, R5).
 
-Points are laid out level by level and, within a level, in row-major order — the
-same order a ``(H, W)`` feature map flattens to ``(H * W,)`` — so the returned
-tensors align position-for-position with a head that flattens and concatenates
-its per-level predictions in the same ``(strides[0], strides[1], ...)`` order.
-At a 640-pixel input with strides ``[8, 16, 32]`` this yields
-``80*80 + 40*40 + 20*20 = 8400`` points.
+Points are laid out level by level and, within a level, in row-major order — the same order a ``(H, W)`` feature map
+flattens to ``(H * W,)`` — so the returned tensors align position-for-position with a head that flattens and
+concatenates its per-level predictions in the same ``(strides[0], strides[1], ...)`` order. At a 640-pixel input with
+strides ``[8, 16, 32]`` this yields ``80*80 + 40*40 + 20*20 = 8400`` points.
 """
 
 from __future__ import annotations
@@ -25,11 +22,10 @@ __all__ = ["HEAD_STRIDES", "anchor_grid", "make_anchor_points", "require_grid_ca
 #: Column count of an ``(x, y)`` anchor point.
 _POINT_DIM = 2
 
-#: Input-pixel strides of the P3/P4/P5 detection levels (blueprint sec. 5.4). Public
-#: vocabulary about the architecture rather than a local convenience: every consumer that
-#: builds a grid for the head — the training step, both evaluators, single-image
-#: inference — is describing the *same* three levels, and three private copies of the
-#: triple are three chances for one to be edited alone.
+#: Input-pixel strides of the P3/P4/P5 detection levels (blueprint sec. 5.4). Public vocabulary about the architecture
+#: rather than a local convenience: every consumer that builds a grid for the head — the training step, both
+#: evaluators, single-image inference — is describing the *same* three levels, and three private copies of the triple
+#: are three chances for one to be edited alone.
 HEAD_STRIDES: tuple[int, int, int] = (8, 16, 32)
 
 
@@ -97,9 +93,8 @@ def make_anchor_points(
 def _fits_strides(side: int, strides: tuple[int, ...]) -> bool:
     """Report whether one canvas side tiles every level exactly.
 
-    Positivity is a separate condition rather than a consequence of the remainder:
-    ``0 % 32`` and ``-32 % 32`` are both zero, so divisibility alone admits an empty
-    canvas and a negative one.
+    Positivity is a separate condition rather than a consequence of the remainder: ``0 % 32`` and ``-32 % 32`` are both
+    zero, so divisibility alone admits an empty canvas and a negative one.
 
     Examples:
         ```pycon
@@ -116,13 +111,11 @@ def _fits_strides(side: int, strides: tuple[int, ...]) -> bool:
 def require_grid_side(name: str, side: int, strides: tuple[int, ...] = HEAD_STRIDES) -> None:
     """Refuse a letterbox side the head's levels cannot tile, naming the flag it arrived as.
 
-    The rule is one line of arithmetic and the reason it is worth a public function is
-    what a violation does instead of failing: at 641 px the stride-32 level floors to 20
-    cells covering 640 px, its upsampling doubles that to 40 against P4's 41, and
-    :meth:`~lucid_yolo.models.neck.DetectionNeck.forward` concatenates the two — so the
-    refusal has to happen at the flag, before a model runs, rather than inside a tensor
-    op several frames down. :func:`anchor_grid` is the second half of the same guard,
-    for the callers that have a canvas rather than a flag.
+    The rule is one line of arithmetic and the reason it is worth a public function is what a violation does instead
+    of failing: at 641 px the stride-32 level floors to 20 cells covering 640 px, its upsampling doubles that to 40
+    against P4's 41, and :meth:`~lucid_yolo.models.neck.DetectionNeck.forward` concatenates the two — so the refusal
+    has to happen at the flag, before a model runs, rather than inside a tensor op several frames down.
+    :func:`anchor_grid` is the second half of the same guard, for the callers that have a canvas rather than a flag.
 
     Args:
         name: The argument or flag spelling the caller used (``"img_size"`` at every
@@ -151,9 +144,8 @@ def require_grid_side(name: str, side: int, strides: tuple[int, ...] = HEAD_STRI
 def require_grid_canvas(canvas: tuple[int, int], strides: tuple[int, ...] = HEAD_STRIDES) -> None:
     """Refuse a ``(height, width)`` canvas the head's levels cannot tile.
 
-    :func:`require_grid_side` for callers holding a canvas instead of a flag — both
-    axes, one message, so a canvas that is rectangular by accident is refused on the axis
-    that is wrong rather than on the first one checked.
+    :func:`require_grid_side` for callers holding a canvas instead of a flag — both axes, one message, so a canvas that
+    is rectangular by accident is refused on the axis that is wrong rather than on the first one checked.
 
     Args:
         canvas: Input canvas ``(height, width)`` in pixels.
@@ -187,22 +179,18 @@ def anchor_grid(
 ) -> tuple[Tensor, Tensor]:
     """Build the head's anchor grid for one input canvas, on ``device``.
 
-    :func:`make_anchor_points` takes feature-map sizes; every caller that has an *image*
-    rather than a feature map divides the canvas by the strides to get them, then moves
-    both tensors onto the device the model runs on. That three-line step was written
-    once per consumer — the dual-path evaluator, the oriented evaluator, single-image
-    inference — which is three places for the stride triple to be edited alone, and the
-    grid is what pairs a prediction with the pixel it came from. It lives here now,
-    beside the function it wraps.
+    :func:`make_anchor_points` takes feature-map sizes; every caller that has an *image* rather than a feature map
+    divides the canvas by the strides to get them, then moves both tensors onto the device the model runs on. That
+    three-line step was written once per consumer — the dual-path evaluator, the oriented evaluator, single-image
+    inference — which is three places for the stride triple to be edited alone, and the grid is what pairs a prediction
+    with the pixel it came from. It lives here now, beside the function it wraps.
 
-    The canvas is a ``(height, width)`` pair rather than a square side because the
-    rectangular case is the general one: a square canvas is ``(s, s)``, while a square
-    signature cannot express a letterbox that is not square.
+    The canvas is a ``(height, width)`` pair rather than a square side because the rectangular case is the general one:
+    a square canvas is ``(s, s)``, while a square signature cannot express a letterbox that is not square.
 
-    The divisibility this docstring has always declared is now checked (WP-171). The
-    floor division below is silent about a canvas that does not satisfy it: at 100 px it
-    returns the grid of a 96 px canvas, and at 641 px the same 8400 anchors as 640 — a
-    grid that pairs every prediction with the wrong pixel, and no error anywhere.
+    The divisibility this docstring has always declared is now checked (WP-171). The floor division below is silent
+    about a canvas that does not satisfy it: at 100 px it returns the grid of a 96 px canvas, and at 641 px the same
+    8400 anchors as 640 — a grid that pairs every prediction with the wrong pixel, and no error anywhere.
 
     Args:
         canvas: Input canvas ``(height, width)`` in pixels, each divisible by every

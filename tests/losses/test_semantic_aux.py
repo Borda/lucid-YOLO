@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gates for the WP-051 auxiliary semantic BCE+Dice loss (A17, A36).
 
-Covers the two terms at both confidence extremes, the unit-coefficient reading of
-"equal weight", the empty-prediction-versus-empty-target smoothing case, and the
-end-to-end contract with :class:`~lucid_yolo.models.heads.semantic.SemanticAux`'s
-training-mode output.
+Covers the two terms at both confidence extremes, the unit-coefficient reading of "equal weight", the
+empty-prediction-versus-empty-target smoothing case, and the end-to-end contract with
+:class:`~lucid_yolo.models.heads.semantic.SemanticAux`'s training-mode output.
 """
 
 from __future__ import annotations
@@ -24,9 +23,8 @@ _CONFIDENT = 20.0
 def test_confident_correct_predictions_drive_both_terms_to_zero() -> None:
     """Saturated logits matching their targets leave both terms near zero.
 
-    Catches an inverted sign in either term (a Dice returning the coefficient
-    rather than ``1 - coefficient``, or a BCE fed the complement target), which
-    would peak exactly where the loss should bottom out.
+    Catches an inverted sign in either term (a Dice returning the coefficient rather than ``1 - coefficient``, or a BCE
+    fed the complement target), which would peak exactly where the loss should bottom out.
     """
     targets = torch.zeros(2, 3, 4, 5)
     targets[:, 0, 1:3, 1:4] = 1.0
@@ -41,8 +39,8 @@ def test_confident_correct_predictions_drive_both_terms_to_zero() -> None:
 def test_confident_wrong_predictions_make_both_terms_large() -> None:
     """Saturated logits opposing their targets push BCE high and Dice to ~1.
 
-    Complements the correct-prediction floor: a term that is near zero at the
-    optimum but also flat elsewhere would train nothing.
+    Complements the correct-prediction floor: a term that is near zero at the optimum but also flat elsewhere would
+    train nothing.
     """
     targets = torch.zeros(2, 3, 4, 5)
     targets[:, 0, 1:3, 1:4] = 1.0
@@ -57,9 +55,8 @@ def test_confident_wrong_predictions_make_both_terms_large() -> None:
 def test_total_unweighted_sum_of_two_terms() -> None:
     """``total`` equals ``bce + dice`` bit for bit, pinning the A36 unit coefficients.
 
-    Catches a gain silently baked into the term (e.g. a 0.5 or 4.0 on Dice),
-    which would make the reported components incomparable with the value that is
-    actually backpropagated.
+    Catches a gain silently baked into the term (e.g. a 0.5 or 4.0 on Dice), which would make the reported components
+    incomparable with the value that is actually backpropagated.
     """
     logits = torch.randn(2, 3, 5, 7)
     targets = (torch.rand(2, 3, 5, 7) > 0.5).float()
@@ -73,9 +70,8 @@ def test_total_unweighted_sum_of_two_terms() -> None:
 def test_empty_target_and_empty_prediction_smooth_to_zero_dice() -> None:
     """An all-negative prediction against an all-zero target gives Dice ~0, not NaN.
 
-    This is the A36 smoothing case: with intersection and cardinality both ~0,
-    an unsmoothed ratio is 0/0. It is the common case for the many classes absent
-    from any given image, so a NaN here would poison nearly every batch.
+    This is the A36 smoothing case: with intersection and cardinality both ~0, an unsmoothed ratio is 0/0. It is the
+    common case for the many classes absent from any given image, so a NaN here would poison nearly every batch.
     """
     logits = torch.full((2, 3, 4, 4), -_CONFIDENT)
     targets = torch.zeros(2, 3, 4, 4)
@@ -89,9 +85,8 @@ def test_empty_target_and_empty_prediction_smooth_to_zero_dice() -> None:
 def test_consumes_semantic_branch_training_output_directly() -> None:
     """SemanticAux's train-mode logits feed the loss and gradients reach its classifier.
 
-    Catches a shape or activation contract drift between the branch and the loss
-    — the branch emits raw ``(B, C, H, W)`` logits and this loss applies its own
-    sigmoid, so an adapter appearing between them would mean one of the two is
+    Catches a shape or activation contract drift between the branch and the loss — the branch emits raw ``(B, C, H, W)``
+    logits and this loss applies its own sigmoid, so an adapter appearing between them would mean one of the two is
     wrong.
     """
     branch = SemanticAux(6, num_classes=3).train()
@@ -113,11 +108,10 @@ def test_consumes_semantic_branch_training_output_directly() -> None:
 def test_dice_averaged_per_class_not_pooled_over_batch() -> None:
     """A tiny wrong class keeps its full weight beside a large correct one.
 
-    Pins the A36 reduction: Dice is one ratio per ``(B, C)`` pair, averaged
-    afterwards. Pooling every element into a single ratio instead would let the
-    large, perfectly predicted class absorb the small, entirely wrong one, and
-    the term would report roughly 0.33 where the per-pair mean reports 0.47 —
-    both finite and plausible, so only the value distinguishes them.
+    Pins the A36 reduction: Dice is one ratio per ``(B, C)`` pair, averaged afterwards. Pooling every element into a
+    single ratio instead would let the large, perfectly predicted class absorb the small, entirely wrong one, and the
+    term would report roughly 0.33 where the per-pair mean reports 0.47 — both finite and plausible, so only the value
+    distinguishes them.
     """
     logits = torch.full((1, 2, 4, 4), _CONFIDENT)  # both classes predicted present
     targets = torch.zeros(1, 2, 4, 4)
@@ -134,9 +128,8 @@ def test_dice_averaged_per_class_not_pooled_over_batch() -> None:
 class TestEmptyBatch:
     """An empty batch returns a defined zero, not the ``nan`` an empty mean gives (M-25).
 
-    Every other loss in the package reduces so that an empty input stays finite —
-    ``mask_loss``, ``rle_loss`` and ``keypoint_nll_loss`` all divide by
-    ``max(n, 1)``. This one reduced with ``mean`` on both terms and returned ``nan``
+    Every other loss in the package reduces so that an empty input stays finite — ``mask_loss``, ``rle_loss`` and
+    ``keypoint_nll_loss`` all divide by ``max(n, 1)``. This one reduced with ``mean`` on both terms and returned ``nan``
     in all three fields. Reachability is low; the inconsistency was the finding.
     """
 
@@ -172,9 +165,8 @@ class TestEmptyBatch:
     def test_non_empty_batch_untouched_by_guard(self) -> None:
         """The guard is an early return, so every non-empty reduction is bit-unchanged.
 
-        Pins the reason the fix is a branch rather than a swap of the two divisors:
-        ``reduction="mean"`` and ``.mean()`` still reduce every real batch, so no
-        value produced on any device can move.
+        Pins the reason the fix is a branch rather than a swap of the two divisors: ``reduction="mean"`` and ``.mean()``
+        still reduce every real batch, so no value produced on any device can move.
         """
         logits = torch.randn(2, 3, 4, 5)
         targets = (torch.rand(2, 3, 4, 5) > 0.5).float()

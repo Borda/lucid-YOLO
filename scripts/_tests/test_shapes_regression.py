@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from scripts import shapes_regression
 
 
@@ -73,7 +74,7 @@ def test_write_golden_round_trips_harness_schema(tmp_path: Path) -> None:
     }
 
 
-def test_main_rejects_non_detection_task(capsys) -> None:
+def test_main_rejects_non_detection_task(capsys: pytest.CaptureFixture[str]) -> None:
     """The task guard fails before dataset generation or training starts."""
     assert shapes_regression.main(["--task", "seg"]) == 1
     assert "unsupported task" in capsys.readouterr().out

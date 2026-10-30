@@ -1,24 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gates for the WP-123 RLE loss (R14, A65, A66).
 
-Since the flow's own correctness cannot be checked against a training-run
-metric until the [GPU][PRINCIPAL]-gated pose-smoke tier (WP-125), every property a
-unit test *can* pin here is load-bearing: invertibility (the flow's synthesis
-and inverse must be exact inverses of each other, or the density evaluation is
-wrong), the log-determinant bookkeeping (checked against autograd's own
-Jacobian, not just self-consistency), that the flow's induced density actually
-integrates to one over its domain (the single most discriminating check of a
-change-of-variables implementation), the fixed Laplace base term against
-``torch.distributions`` directly, R14's own "gradient shortcut" claim (the
-paper's stated reason ``Q``/flow are summed rather than composed), sigma's
-sigmoid range (A65), visibility masking (A66), and a toy convergence run
-mirroring this repo's existing MuSGD toy-convergence precedent
+Since the flow's own correctness cannot be checked against a training-run metric until the [GPU][PRINCIPAL]-gated
+pose-smoke tier (WP-125), every property a unit test *can* pin here is load-bearing: invertibility (the flow's synthesis
+and inverse must be exact inverses of each other, or the density evaluation is wrong), the log-determinant bookkeeping
+(checked against autograd's own Jacobian, not just self-consistency), that the flow's induced density actually
+integrates to one over its domain (the single most discriminating check of a change-of-variables implementation), the
+fixed Laplace base term against ``torch.distributions`` directly, R14's own "gradient shortcut" claim (the paper's
+stated reason ``Q``/flow are summed rather than composed), sigma's sigmoid range (A65), visibility masking (A66), and a
+toy convergence run mirroring this repo's existing MuSGD toy-convergence precedent
 (``tests/optim/test_toy_convergence.py``).
 """
 
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -28,26 +26,31 @@ from torch.distributions import Laplace
 from lucid_yolo.losses import RLELoss
 from lucid_yolo.losses.rle_loss import _MIN_SIGMA, _AffineCoupling, _CouplingConditioner, _RealNVPFlow
 
+if TYPE_CHECKING:
+    from unittest.mock import MagicMock
+
 _LAPLACE_ATOL = 1e-5
 
 
 class TestAffineCouplingInvertibility:
     """A single coupling layer's synthesis and inverse are exact inverses."""
 
-    def test_invert_undoes_synthesize(self) -> None:
-        """``invert(synthesize(z)) == z`` for random 2-D inputs, both transform axes."""
+    @pytest.mark.parametrize("transform_index", [0, 1])
+    def test_invert_undoes_synthesize(self, transform_index: int) -> None:
+        """``invert(synthesize(z)) == z`` for random 2-D inputs, on either transform axis."""
         z = torch.randn(16, 2)
-        for transform_index in (0, 1):
-            layer = _AffineCoupling(transform_index=transform_index)
-            x, _ = layer.synthesize(z)
-            z_back, _ = layer.invert(x)
-            assert torch.allclose(z_back, z, atol=1e-5)
+        layer = _AffineCoupling(transform_index=transform_index)
+
+        x, _ = layer.synthesize(z)
+        z_back, _ = layer.invert(x)
+
+        assert torch.allclose(z_back, z, atol=1e-5)
 
     def test_conditioning_axis_unchanged_by_synthesize(self) -> None:
         """The coordinate a layer conditions on rides through untouched.
 
-        RealNVP's coupling identity only transforms one axis per layer; the
-        other must be a literal pass-through, not merely numerically close.
+        RealNVP's coupling identity only transforms one axis per layer; the other must be a literal pass-through, not
+        merely numerically close.
         """
         z = torch.randn(8, 2)
         layer = _AffineCoupling(transform_index=1)
@@ -59,8 +62,8 @@ class TestAffineCouplingInvertibility:
     def test_rejects_transform_index_outside_2d_residual(self) -> None:
         """A ``transform_index`` other than 0 or 1 raises rather than silently no-op.
 
-        The 2-D residual has exactly two coordinates; any other index would
-        name a coordinate that does not exist rather than transform nothing.
+        The 2-D residual has exactly two coordinates; any other index would name a coordinate that does not exist
+        rather than transform nothing.
         """
         with pytest.raises(ValueError, match="transform_index must be 0 or 1"):
             _AffineCoupling(transform_index=2)
@@ -82,10 +85,9 @@ class TestRealNVPFlowInvertibility:
     def test_forward_and_inverse_log_determinants_negatives(self) -> None:
         """The stack's forward log-det and its inverse's log-det sum to zero.
 
-        A layer's inverse divides by exactly what synthesis multiplied by, so
-        undoing a transform must exactly cancel its own log-determinant --
-        this is a stronger check than invertibility alone, since it also
-        pins the log-det *bookkeeping*, not just the recovered value.
+        A layer's inverse divides by exactly what synthesis multiplied by, so undoing a transform must exactly cancel
+        its own log-determinant -- this is a stronger check than invertibility alone, since it also pins the log-det
+        *bookkeeping*, not just the recovered value.
         """
         flow = _RealNVPFlow()
         z = torch.randn(10, 2)
@@ -99,11 +101,9 @@ class TestRealNVPFlowInvertibility:
 def test_log_determinant_matches_autograd_jacobian() -> None:
     """The analytic per-layer log-determinant matches autograd's own Jacobian determinant.
 
-    Self-consistency between :meth:`synthesize` and :meth:`invert` alone could
-    not catch a sign error or a missing term that happened to cancel between
-    the two; comparing against an independently computed Jacobian determinant
-    (``torch.autograd.functional.jacobian``) cannot make that mistake, since it
-    never calls :meth:`invert` at all.
+    Self-consistency between :meth:`synthesize` and :meth:`invert` alone could not catch a sign error or a missing term
+    that happened to cancel between the two; comparing against an independently computed Jacobian determinant
+    (``torch.autograd.functional.jacobian``) cannot make that mistake, since it never calls :meth:`invert` at all.
     """
     layer = _AffineCoupling(transform_index=1)
     z = torch.randn(2)
@@ -123,10 +123,9 @@ def test_log_determinant_matches_autograd_jacobian() -> None:
 def test_flow_density_integrates_to_one() -> None:
     """The flow's induced density, numerically integrated over a 2-D grid, is close to 1.
 
-    The single most discriminating test of the change-of-variables
-    bookkeeping: a base-density term without its accompanying log-determinant
-    (or vice versa) would not raise an error anywhere else in this suite, but
-    it would not integrate to a proper probability density either.
+    The single most discriminating test of the change-of-variables bookkeeping: a base-density term without its
+    accompanying log-determinant (or vice versa) would not raise an error anywhere else in this suite, but it would not
+    integrate to a proper probability density either.
     """
     flow = _RealNVPFlow()
     grid_1d = torch.linspace(-8.0, 8.0, 161)
@@ -145,10 +144,8 @@ def test_flow_density_integrates_to_one() -> None:
 def test_laplace_base_term_matches_torch_distributions_directly() -> None:
     """The Laplace base term, summed over both axes, matches ``torch.distributions`` exactly.
 
-    Pins the "sum over the two coordinate axes" convention the module
-    docstring states (``Q`` evaluated per axis, then summed) against a
-    hand-picked residual whose per-axis log-probabilities are independently
-    computable.
+    Pins the "sum over the two coordinate axes" convention the module docstring states (``Q`` evaluated per axis, then
+    summed) against a hand-picked residual whose per-axis log-probabilities are independently computable.
     """
     residual = torch.tensor([[0.5, -1.5]])
 
@@ -159,19 +156,15 @@ def test_laplace_base_term_matches_torch_distributions_directly() -> None:
 
 
 class TestSigmaRange:
-    """sigma_hat stays in the sigmoid's open (0, 1) range (A65, R14 sec.
-
-    3.3).
-    """
+    """sigma_hat stays in the sigmoid's open (0, 1) range (A65, R14 section 3.3)."""
 
     def test_large_positive_raw_input_approaches_but_never_reaches_one(self) -> None:
         """A large positive raw sigma logit saturates near, but strictly below, 1.
 
-        15.0 rather than an even larger value: float32's precision near 1.0 is
-        coarser than near 0, and a sufficiently extreme logit rounds
-        ``sigmoid`` to exactly ``1.0`` — a float32 saturation artifact, not a
-        property of :func:`torch.sigmoid`'s true open range, so the input is
-        chosen to stay inside where the distinction is still representable.
+        15.0 rather than an even larger value: float32's precision near 1.0 is coarser than near 0, and a sufficiently
+        extreme logit rounds ``sigmoid`` to exactly ``1.0`` — a float32 saturation artifact, not a property of
+        :func:`torch.sigmoid`'s true open range, so the input is chosen to stay inside where the distinction is still
+        representable.
         """
         loss_fn = RLELoss()
         mu_hat = torch.zeros(1, 1, 2)
@@ -201,9 +194,8 @@ class TestVisibilityMasking:
     def test_unlabeled_points_excluded(self) -> None:
         """An instance whose only point is ``v == 0`` contributes nothing to the loss.
 
-        Compares a batch carrying one visible and one unlabeled point against
-        the same batch with the unlabeled point's target corrupted -- an
-        unchanged loss proves that point was never read.
+        Compares a batch carrying one visible and one unlabeled point against the same batch with the unlabeled point's
+        target corrupted -- an unchanged loss proves that point was never read.
         """
         loss_fn = RLELoss()
         mu_hat = torch.zeros(2, 1, 2)
@@ -222,8 +214,8 @@ class TestVisibilityMasking:
     def test_occluded_but_labeled_points_included(self) -> None:
         """A ``v == 1`` (occluded) point changes the loss exactly like ``v == 2`` does.
 
-        A66 reads COCO's ``v in {1, 2}`` as equally valid supervision; this
-        asserts the mask does not silently narrow to ``v == 2`` only.
+        A66 reads COCO's ``v in {1, 2}`` as equally valid supervision; this asserts the mask does not silently narrow to
+        ``v == 2`` only.
         """
         loss_fn = RLELoss()
         mu_hat = torch.zeros(1, 1, 2)
@@ -238,10 +230,9 @@ class TestVisibilityMasking:
     def test_no_visible_points_gives_finite_zero_attached_to_graph(self) -> None:
         """All-``v=0`` input returns a finite zero, not ``NaN``, still connected to gradients.
 
-        Mirrors :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s
-        no-positives contract: a ``0 / 0`` mean over an empty mask would be
-        ``NaN``, and any loss returning ``NaN`` here would poison the whole
-        multi-task sum it gets added into.
+        Mirrors :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s no-positives contract: a ``0 / 0`` mean over
+        an empty mask would be ``NaN``, and any loss returning ``NaN`` here would poison the whole multi-task sum it
+        gets added into.
         """
         loss_fn = RLELoss()
         mu_hat = torch.zeros(3, 2, 2, requires_grad=True)
@@ -260,12 +251,10 @@ class TestVisibilityMasking:
 def test_gradient_shortcut_reaches_mu_and_sigma_with_flow_frozen() -> None:
     """R14's own claim: gradients through the Laplace base term do not depend on the flow.
 
-    R14 sec. 3.2 motivates summing a fixed base density with the learned flow
-    correction (rather than only using the flow) as a "gradient shortcut" --
-    the regression head keeps receiving a clean signal even when the flow's
-    own gradient is unavailable. Freezing every flow parameter and confirming
-    ``mu_hat``/``sigma_raw`` still receive nonzero gradient is a direct test
-    of that claim, not an incidental property.
+    R14 sec. 3.2 motivates summing a fixed base density with the learned flow correction (rather than only using the
+    flow) as a "gradient shortcut" -- the regression head keeps receiving a clean signal even when the flow's own
+    gradient is unavailable. Freezing every flow parameter and confirming ``mu_hat``/``sigma_raw`` still receive nonzero
+    gradient is a direct test of that claim, not an incidental property.
     """
     loss_fn = RLELoss()
     for parameter in loss_fn.flow.parameters():
@@ -288,10 +277,9 @@ def test_gradient_shortcut_reaches_mu_and_sigma_with_flow_frozen() -> None:
 def test_toy_convergence_mu_moves_toward_ground_truth() -> None:
     """Optimizing only ``mu_hat`` against a fixed target reduces the loss over steps.
 
-    Mirrors this repo's MuSGD toy-convergence precedent
-    (``tests/optim/test_toy_convergence.py``): a minimal, fully-seeded scenario
-    exercising the loss end to end through an optimizer step, rather than a
-    single forward-pass assertion.
+    Mirrors this repo's MuSGD toy-convergence precedent (``tests/optim/test_toy_convergence.py``): a minimal,
+    fully-seeded scenario exercising the loss end to end through an optimizer step, rather than a single forward-pass
+    assertion.
     """
     loss_fn = RLELoss()
     mu_hat = torch.zeros(1, 1, 2, requires_grad=True)
@@ -310,24 +298,22 @@ def test_toy_convergence_mu_moves_toward_ground_truth() -> None:
         last_loss = float(loss_fn(mu_hat, sigma_raw, mu_gt, visibility))
 
     assert last_loss < first_loss
-    # atol measured, not guessed: 50 Adam steps land ``mu_hat`` 0.064 from the target at
-    # seed 0, and within 0.040-0.098 over seeds 0-4 (the flow's Linear init is the only
-    # thing the seed moves here). 0.15 leaves ~50% headroom over the worst of that sweep
-    # while still rejecting a residual that converges to the wrong point -- the previous
-    # 0.5 was 5-12x the real spread and would have passed a quarter-unit offset bug.
+    # atol measured, not guessed: 50 Adam steps land ``mu_hat`` 0.064 from the target at seed 0, and within 0.040-0.098
+    # over seeds 0-4 (the flow's Linear init is the only thing the seed moves here). 0.15 leaves ~50% headroom over the
+    # worst of that sweep while still rejecting a residual that converges to the wrong point -- the previous 0.5 was
+    # 5-12x the real spread and would have passed a quarter-unit offset bug.
     assert torch.allclose(mu_hat.detach(), mu_gt, atol=0.15)
 
 
 class TestCouplingScaleBound:
     """A72: the coupling log-scale is a tanh times a learned scale, not the raw output.
 
-    RealNVP states this parameterization as a stability measure, and R14 cites RealNVP for
-    the coupling construction rather than restating it -- so the detail is easy to miss and
-    was, until this loss was first composed into a training run. The stack multiplies
-    ``exp(log_scale)`` once per layer, so an unbounded log-scale compounds: a measured
-    residual of 27 reached the latent as ``4e11`` and the loss as ``7e22``. These pin the
-    bound and, more importantly, the behaviour it exists for -- finiteness an order of
-    magnitude outside the residual range the equations are usually read at.
+    RealNVP states this parameterization as a stability measure, and R14 cites RealNVP for the coupling construction
+    rather than restating it -- so the detail is easy to miss and was, until this loss was first composed into a
+    training run. The stack multiplies ``exp(log_scale)`` once per layer, so an unbounded log-scale compounds: a
+    measured residual of 27 reached the latent as ``4e11`` and the loss as ``7e22``. These pin the bound and, more
+    importantly, the behaviour it exists for -- finiteness an order of magnitude outside the residual range the
+    equations are usually read at.
     """
 
     def test_log_scale_stays_inside_learned_bound(self) -> None:
@@ -342,10 +328,9 @@ class TestCouplingScaleBound:
     def test_far_out_residual_yields_finite_loss_and_gradient(self) -> None:
         """The regression this bound exists to prevent, stated as the property that failed.
 
-        A residual two orders of magnitude outside the ``O(1)`` range R14's equations are
-        read at is exactly what A70's off-canvas points produce, and it must produce a large
-        finite number rather than an overflow -- large is a likelihood doing its job,
-        non-finite is a run that ends.
+        A residual two orders of magnitude outside the ``O(1)`` range R14's equations are read at is exactly what A70's
+        off-canvas points produce, and it must produce a large finite number rather than an overflow -- large is a
+        likelihood doing its job, non-finite is a run that ends.
         """
         mu_hat = torch.zeros(3, 5, 2, requires_grad=True)
         sigma_raw = torch.zeros(3, 5, 2, requires_grad=True)
@@ -362,8 +347,8 @@ class TestCouplingScaleBound:
     def test_bound_learnable_rather_than_constant(self) -> None:
         """RealNVP's scale is *learned*; a hard constant would be a different layer.
 
-        Pinning it as a parameter keeps the deviation honest: A72 claims to restore the
-        paper's parameterization, and a frozen constant would not be it.
+        Pinning it as a parameter keeps the deviation honest: A72 claims to restore the paper's parameterization, and a
+        frozen constant would not be it.
         """
         layer = _AffineCoupling(transform_index=1)
 
@@ -408,17 +393,15 @@ class TestDensityAutocast:
 class TestUnlabeledPointsReachNoGradient:
     """A ``v == 0`` point cannot influence the backward pass either (WP-170, A66).
 
-    ``TestVisibilityMasking`` above asserts the loss *value* is independent of an
-    unlabeled point's target, and it was: the mask was applied to the reduction,
-    which makes the number right. Everything upstream of the reduction still ran.
-    Every ``v == 0`` residual was divided by ``sigma_hat``, pushed through the
-    RealNVP stack and evaluated under the standard-normal base, so one non-finite
-    unlabeled annotation produced ``NaN`` gradients on the shared flow weights and
-    on every *visible* point's ``mu_hat`` — while the reported loss stayed healthy
-    and the value assertion above stayed green.
+    ``TestVisibilityMasking`` above asserts the loss *value* is independent of an unlabeled point's target, and it was:
+    the mask was applied to the reduction, which makes the number right. Everything upstream of the reduction still ran.
+    Every ``v == 0`` residual was divided by ``sigma_hat``, pushed through the RealNVP stack and evaluated under the
+    standard-normal base, so one non-finite unlabeled annotation produced ``NaN`` gradients on the shared flow weights
+    and on every *visible* point's ``mu_hat`` — while the reported loss stayed healthy and the value assertion above
+    stayed green.
 
-    Value-independence and gradient-independence are different properties and only
-    the second one matters for training; these tests pin the second.
+    Value-independence and gradient-independence are different properties and only the second one matters for training;
+    these tests pin the second.
     """
 
     #: Placeholders a real unlabeled COCO point plausibly carries.
@@ -427,17 +410,15 @@ class TestUnlabeledPointsReachNoGradient:
     def _grads(self, corrupt: float | None) -> tuple[float, list[torch.Tensor]]:
         """Return the loss value and every gradient produced by one backward pass.
 
-        Builds the loss from a fixed seed each call so the flow's weights are
-        identical between the clean and the corrupted run, making the two directly
-        comparable under ``torch.equal``.
+        Builds the loss from a fixed seed each call so the flow's weights are identical between the clean and the
+        corrupted run, making the two directly comparable under ``torch.equal``.
 
         Args:
-            corrupt: Value written into the unlabeled point's target, or ``None``
-                to leave the clean target in place.
+            corrupt: Value written into the unlabeled point's target, or ``None`` to leave the clean target in place.
 
         Returns:
-            ``(loss_value, gradients)`` — the scalar loss, and the gradients of
-            ``mu_hat``, ``sigma_raw`` and every flow parameter in a fixed order.
+            ``(loss_value, gradients)`` — the scalar loss, and the gradients of ``mu_hat``, ``sigma_raw`` and every flow
+            parameter in a fixed order.
 
         Examples:
             >>> case = TestUnlabeledPointsReachNoGradient()
@@ -462,9 +443,8 @@ class TestUnlabeledPointsReachNoGradient:
     def test_gradients_identical_to_clean_run(self, corrupt: float) -> None:
         """Corrupting the unlabeled target changes no gradient anywhere, bit for bit.
 
-        The strong form of A66: not "the masked point contributes little" but "the
-        masked point is not in the graph", which ``torch.equal`` against the clean
-        run is what actually establishes.
+        The strong form of A66: not "the masked point contributes little" but "the masked point is not in the graph",
+        which ``torch.equal`` against the clean run is what actually establishes.
         """
         clean_value, clean_grads = self._grads(None)
         value, grads = self._grads(corrupt)
@@ -477,9 +457,8 @@ class TestUnlabeledPointsReachNoGradient:
     def test_every_gradient_stays_finite(self, corrupt: float) -> None:
         """No ``NaN`` reaches ``mu_hat``, ``sigma_raw`` or the flow's own weights.
 
-        The flow's weights are the consequence that outlives the step: they are
-        shared across every point in the batch, so one unlabeled annotation
-        poisoned the density for all of them.
+        The flow's weights are the consequence that outlives the step: they are shared across every point in the batch,
+        so one unlabeled annotation poisoned the density for all of them.
         """
         _, grads = self._grads(corrupt)
 
@@ -489,10 +468,9 @@ class TestUnlabeledPointsReachNoGradient:
     def test_masked_point_not_raise_from_argument_validation(self, corrupt: float) -> None:
         """A non-finite unlabeled target is not rejected by the base distribution.
 
-        ``torch.distributions`` validates its arguments by default, so before the
-        selection moved upstream the standard-normal base raised ``ValueError`` on
-        a residual belonging to a point the loss had already decided to ignore --
-        a masked-out annotation crashing the loss outright.
+        ``torch.distributions`` validates its arguments by default, so before the selection moved upstream the
+        standard-normal base raised ``ValueError`` on a residual belonging to a point the loss had already decided to
+        ignore -- a masked-out annotation crashing the loss outright.
         """
         mu_gt = torch.tensor([[[0.1, 0.1], [corrupt, corrupt]]])
 
@@ -500,23 +478,16 @@ class TestUnlabeledPointsReachNoGradient:
 
         assert bool(torch.isfinite(loss))
 
-    def test_flow_only_sees_labelled_points(self) -> None:
+    @patch.object(_RealNVPFlow, "log_density", autospec=True, side_effect=_RealNVPFlow.log_density)
+    def test_flow_only_sees_labelled_points(self, log_density: MagicMock) -> None:
         """Selection happens before the flow, so its input is ``(V, 2)`` not ``(N*K, 2)``.
 
-        The structural claim behind the two assertions above, and the reason the
-        fix also costs less: three of four points here are unlabeled and never
-        reach the RealNVP stack at all.
+        The structural claim behind the two assertions above, and the reason the fix also costs less: three of four
+        points here are unlabeled and never reach the RealNVP stack at all. The spy defers to the real method, so the
+        loss still runs end to end.
         """
-        seen: list[tuple[int, ...]] = []
         loss_fn = RLELoss()
-        original = loss_fn.flow.log_density
 
-        def _record(x: torch.Tensor) -> torch.Tensor:
-            """Record the shape the flow is called with, then defer to the real method."""
-            seen.append(tuple(x.shape))
-            return original(x)
-
-        loss_fn.flow.log_density = _record  # type: ignore[method-assign]
         loss_fn(
             torch.zeros(2, 2, 2),
             torch.zeros(2, 2, 2),
@@ -524,22 +495,20 @@ class TestUnlabeledPointsReachNoGradient:
             torch.tensor([[2, 0], [0, 0]]),
         )
 
-        assert seen == [(1, 2)]
+        assert [tuple(call.args[1].shape) for call in log_density.call_args_list] == [(1, 2)]
 
 
 class TestConditionerOutputActivation:
     """The trailing ``LeakyReLU`` on the conditioner's output head is pinned (M-24).
 
-    R14 says "Each fully-connected layer is followed by a Leaky-RELU" and this
-    module reads that literally, so the output ``Linear(64, 2)`` carries one too and
-    both emitted quantities arrive pre-squashed. That is a *reading* of a sentence
-    that does not distinguish hidden layers from the output projection, not a
-    transcription, and it is now recorded as such in the module docstring.
+    R14 says "Each fully-connected layer is followed by a Leaky-RELU" and this module reads that literally, so the
+    output ``Linear(64, 2)`` carries one too and both emitted quantities arrive pre-squashed. That is a *reading* of a
+    sentence that does not distinguish hidden layers from the output projection, not a transcription, and it is now
+    recorded as such in the module docstring.
 
-    These assertions pin the structure the assumption describes, so the activation
-    cannot be silently dropped as an oversight — and so that removing it, if the
-    paired same-seed run the register asks for ever settles the question the other
-    way, is a deliberate edit to a failing test rather than a quiet one.
+    These assertions pin the structure the assumption describes, so the activation cannot be silently dropped as an
+    oversight — and so that removing it, if the paired same-seed run the register asks for ever settles the question the
+    other way, is a deliberate edit to a failing test rather than a quiet one.
     """
 
     def test_output_projection_followed_by_leaky_relu(self) -> None:
@@ -562,9 +531,8 @@ class TestConditionerOutputActivation:
     def test_shift_output_one_sided_as_assumption_states(self) -> None:
         """The consequence the assumption names: ``shift`` is squashed towards non-negative.
 
-        With the projection's weights driven negative, every raw output is negative
-        and the leak scales them by 0.01 rather than passing them through — which is
-        the structural bias the register row is being opened about.
+        With the projection's weights driven negative, every raw output is negative and the leak scales them by 0.01
+        rather than passing them through — which is the structural bias the register row is being opened about.
         """
         torch.manual_seed(0)
         conditioner = _CouplingConditioner()

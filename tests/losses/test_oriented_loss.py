@@ -1,17 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gates for the WP-088 oriented branch terms (A41, A49, A50).
 
-The module had no test file of its own: its behaviour was covered only through the
-oriented training path, which is where L-09 was found. The gap that mattered is the
-compensating pair A50 argues for and nothing asserted — ProbIoU floors a collapsed
-side at ``min_side`` and gives it **zero** gradient there (A41), so the rotated IoU
-term alone cannot pull a collapsed extent back out, and ``rl1`` is kept for exactly
-that reason. These tests tie the two together: whenever ``rbox``'s gradient on a
-side is floored away, ``rl1``'s is not.
+The module had no test file of its own: its behaviour was covered only through the oriented training path, which is
+where L-09 was found. The gap that mattered is the compensating pair A50 argues for and nothing asserted — ProbIoU
+floors a collapsed side at ``min_side`` and gives it **zero** gradient there (A41), so the rotated IoU term alone cannot
+pull a collapsed extent back out, and ``rl1`` is kept for exactly that reason. These tests tie the two together:
+whenever ``rbox``'s gradient on a side is floored away, ``rl1``'s is not.
 
-Also covered: the form lookup, the normalizer's provenance, and the no-ground-truth
-path, all of which the module docstring states and none of which had an assertion
-outside a doctest.
+Also covered: the form lookup, the normalizer's provenance, and the no-ground-truth path, all of which the module
+docstring states and none of which had an assertion outside a doctest.
 """
 
 from __future__ import annotations
@@ -33,6 +30,29 @@ from lucid_yolo.losses.probiou import _MIN_SIDE
 #: Per-anchor stride of the single test level, in the frame the L1 term is measured in.
 _STRIDE = 8.0
 
+#: The rotated box every single-positive scene scores against; predictions are variations of it.
+_GT_RBOX = (4.0, 4.0, 8.0, 6.0, 0.2)
+
+
+def _gt_rbox() -> Tensor:
+    """Return the shared ground-truth rotated box as a padded ``(1, 1, 5)`` instance tensor.
+
+    Examples:
+        >>> _gt_rbox().tolist()
+        [[[4.0, 4.0, 8.0, 6.0, 0.20000000298023224]]]
+    """
+    return torch.tensor([[list(_GT_RBOX)]])
+
+
+def _prediction(rbox: list[float]) -> Tensor:
+    """Repeat one rotated box over both anchors as a fresh ``(1, 2, 5)`` leaf tensor.
+
+    Examples:
+        >>> _prediction([4.0, 4.0, 8.0, 6.0, 0.2]).shape
+        torch.Size([1, 2, 5])
+    """
+    return torch.tensor(rbox).expand(1, 2, 5).clone()
+
 
 def _single_positive_assignment(weight: float = 1.0) -> AssignResult:
     """One anchor, one instance, foreground — the smallest assignment that scores anything.
@@ -41,8 +61,8 @@ def _single_positive_assignment(weight: float = 1.0) -> AssignResult:
         weight: The positive anchor's alignment weight ``q_i``.
 
     Returns:
-        A two-anchor :class:`~lucid_yolo.assign.tal.AssignResult` whose first anchor
-        is a positive on instance ``0`` and whose second is background.
+        A two-anchor :class:`~lucid_yolo.assign.tal.AssignResult` whose first anchor is a positive on instance ``0`` and
+        whose second is background.
 
     Examples:
         >>> assignment = _single_positive_assignment()
@@ -88,12 +108,10 @@ def _terms_for(pred_rboxes: Tensor, gt_rboxes: Tensor, weight: float = 1.0) -> O
 class TestFlooredExtentKeepsAGradient:
     """A collapsed side is gradient-dead in ``rbox`` and alive in ``rl1`` (L-09, A50).
 
-    A41 floors ``w`` and ``h`` at ``min_side`` before they become variances, and a
-    clamped side has zero gradient by construction: the loss does not chase a box
-    that has collapsed. A50's argument for keeping the L1 term is that this is
-    precisely the state an untrained head starts in — raw ltrb distances routinely
-    decode to ``r < -l`` — so something must still pull the extent back out. Nothing
-    asserted that until now.
+    A41 floors ``w`` and ``h`` at ``min_side`` before they become variances, and a clamped side has zero gradient by
+    construction: the loss does not chase a box that has collapsed. A50's argument for keeping the L1 term is that this
+    is precisely the state an untrained head starts in — raw ltrb distances routinely decode to ``r < -l`` — so
+    something must still pull the extent back out. Nothing asserted that until now.
     """
 
     @staticmethod
@@ -101,20 +119,23 @@ class TestFlooredExtentKeepsAGradient:
         """Return ``(d rbox / d side, d rl1 / d side)`` for a prediction collapsed on one side.
 
         Args:
-            collapsed_side: Column index of the collapsed extent, ``2`` for ``w``
-                and ``3`` for ``h``.
+            collapsed_side: Column index of the collapsed extent, ``2`` for ``w`` and ``3`` for ``h``.
 
         Returns:
-            The two gradient magnitudes, taken on separate graphs so neither term's
-            backward pass can contaminate the other's.
+            The two gradient magnitudes, taken on separate graphs so neither term's backward pass can contaminate the
+            other's.
+
+        Examples:
+            >>> rbox_gradient, rl1_gradient = TestFlooredExtentKeepsAGradient._side_gradients(2)
+            >>> rbox_gradient, rl1_gradient > 0.0
+            (0.0, True)
         """
-        target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
         magnitudes = []
         for term in ("rbox", "rl1"):
-            box = torch.tensor([4.0, 4.0, 8.0, 6.0, 0.2])
+            box = list(_GT_RBOX)
             box[collapsed_side] = 0.0
-            pred = box.expand(1, 2, 5).clone().requires_grad_(True)
-            terms = _terms_for(pred, target)
+            pred = _prediction(box).requires_grad_(True)
+            terms = _terms_for(pred, _gt_rbox())
             getattr(terms, term).backward()
             assert pred.grad is not None
             magnitudes.append(float(pred.grad[0, 0, collapsed_side].abs()))
@@ -130,22 +151,20 @@ class TestFlooredExtentKeepsAGradient:
 
     def test_floor_what_kills_rbox_gradient(self) -> None:
         """Names the mechanism: a side above the floor still moves the rotated IoU term."""
-        target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
-        box = torch.tensor([4.0, 4.0, 8.0, 6.0, 0.2])
+        box = list(_GT_RBOX)
         box[2] = _MIN_SIDE * 100.0  # small, but clear of the clamp
-        pred = box.expand(1, 2, 5).clone().requires_grad_(True)
+        pred = _prediction(box).requires_grad_(True)
 
-        _terms_for(pred, target).rbox.backward()
+        _terms_for(pred, _gt_rbox()).rbox.backward()
 
         assert pred.grad is not None
         assert float(pred.grad[0, 0, 2].abs()) > 0.0
 
     def test_doubly_collapsed_prediction_moves(self) -> None:
         """Both extents floored at once — the untrained-head state A50 names — stays trainable."""
-        target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
-        pred = torch.tensor([4.0, 4.0, 0.0, 0.0, 0.2]).expand(1, 2, 5).clone().requires_grad_(True)
+        pred = _prediction([4.0, 4.0, 0.0, 0.0, 0.2]).requires_grad_(True)
 
-        terms = _terms_for(pred, target)
+        terms = _terms_for(pred, _gt_rbox())
         (terms.rbox + terms.rl1).backward()
 
         assert pred.grad is not None
@@ -159,8 +178,8 @@ class TestNormalizer:
 
     def test_weight_sum_above_one_divides_by_sum(self) -> None:
         """Two unit weights halve a term that a single unit weight reports in full."""
-        target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
-        pred = torch.tensor([5.0, 4.0, 8.0, 6.0, 0.2]).expand(1, 2, 5).clone()
+        target = _gt_rbox()
+        pred = _prediction([5.0, 4.0, 8.0, 6.0, 0.2])
 
         both_positive = oriented_branch_terms(
             pred,
@@ -181,8 +200,8 @@ class TestNormalizer:
 
     def test_below_unit_weight_floor_makes_term_weighted_sum(self) -> None:
         """The documented consequence of ``clamp(min=1.0)``: a sparse batch weighs less."""
-        target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
-        pred = torch.tensor([5.0, 4.0, 8.0, 6.0, 0.2]).expand(1, 2, 5).clone()
+        target = _gt_rbox()
+        pred = _prediction([5.0, 4.0, 8.0, 6.0, 0.2])
 
         full = _terms_for(pred, target, weight=1.0)
         quarter = _terms_for(pred, target, weight=0.25)
@@ -200,8 +219,8 @@ class TestFormSelection:
 
     def test_unbounded_form_scores_separated_pair_higher(self) -> None:
         """``B_D`` is unbounded above where ``H_D`` saturates towards one."""
-        target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
-        pred = torch.tensor([400.0, 400.0, 8.0, 6.0, 0.2]).expand(1, 2, 5).clone()
+        target = _gt_rbox()
+        pred = _prediction([400.0, 400.0, 8.0, 6.0, 0.2])
         assignment = _single_positive_assignment()
         strides = torch.tensor([_STRIDE, _STRIDE])
 
@@ -213,8 +232,8 @@ class TestFormSelection:
 
     def test_unknown_form_names_alternatives(self) -> None:
         """The error is actionable rather than a bare ``KeyError``."""
-        target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
-        pred = target.expand(1, 2, 5).clone()
+        target = _gt_rbox()
+        pred = _prediction(list(_GT_RBOX))
 
         with pytest.raises(ValueError, match="unknown rotated-IoU form"):
             oriented_branch_terms(
@@ -227,7 +246,7 @@ class TestNoGroundTruth:
 
     def test_every_term_zero_finite_and_connected(self) -> None:
         """``N == 0`` pads to a tensor no ``gather`` can index; the step needs no special case."""
-        pred = torch.tensor([4.0, 4.0, 8.0, 6.0, 0.2]).expand(1, 2, 5).clone().requires_grad_(True)
+        pred = _prediction(list(_GT_RBOX)).requires_grad_(True)
 
         terms = _terms_for(pred, torch.zeros(1, 0, 5))
         (terms.rbox + terms.rl1 + terms.angle).backward()
@@ -244,8 +263,8 @@ def _masked_oriented_terms_oracle(
 ) -> OrientedLossOutput:
     """The pre-WP-183 ``oriented_branch_terms`` body, verbatim: boolean gathers over the positives.
 
-    The Hellinger form only — the reference the dense form is held against, with the
-    ``N == 0`` early return left out because that path did not change.
+    The Hellinger form only — the reference the dense form is held against, with the ``N == 0`` early return left out
+    because that path did not change.
 
     Examples:
         >>> box = torch.tensor([[4.0, 4.0, 8.0, 2.0, 0.25]])
@@ -291,8 +310,8 @@ def _random_rboxes(*leading: int) -> Tensor:
 def _random_assign(fg_mask: Tensor, num_instances: int) -> AssignResult:
     """A contract-conforming assignment whose positives index random instances in ``[0, N)``.
 
-    ``gt_index`` is drawn rather than fixed at ``0`` so the ``gather`` over the padded
-    instance axis is exercised, not only its first column.
+    ``gt_index`` is drawn rather than fixed at ``0`` so the ``gather`` over the padded instance axis is exercised, not
+    only its first column.
 
     Examples:
         >>> assign = _random_assign(torch.tensor([[True, False]]), num_instances=3)
@@ -314,17 +333,26 @@ def _random_assign(fg_mask: Tensor, num_instances: int) -> AssignResult:
 class TestDenseOrientedTermsMatchMaskedReference:
     """The dense ``(B, A)`` oriented terms reproduce the masked-gather implementation (WP-183).
 
-    Each scenario scores one random assignment with the shipped dense form and with
-    the pre-change oracle above, on separate leaf tensors for ``pred_rboxes`` and
-    ``pred_theta`` so the two backward passes cannot accumulate. All three terms and
-    both gradients must agree to ``1e-6``, and the gradients must be finite.
+    Each scenario scores one random assignment with the shipped dense form and with the pre-change oracle above, on
+    separate leaf tensors for ``pred_rboxes`` and ``pred_theta`` so the two backward passes cannot accumulate. All three
+    terms and both gradients must agree to ``1e-6``, and the gradients must be finite.
     """
 
     @staticmethod
     def _score_both(
         pred_rboxes: Tensor, pred_theta: Tensor, gt_rboxes: Tensor, assign: AssignResult
     ) -> tuple[tuple[OrientedLossOutput, Tensor, Tensor], tuple[OrientedLossOutput, Tensor, Tensor]]:
-        """Return ``(terms, d/d pred_rboxes, d/d pred_theta)`` from the dense form and from the oracle."""
+        """Return ``(terms, d/d pred_rboxes, d/d pred_theta)`` from the dense form and from the oracle.
+
+        Examples:
+            >>> assign = _random_assign(torch.zeros(1, 2, dtype=torch.bool), num_instances=1)
+            >>> pred = _random_rboxes(1, 2)
+            >>> dense, oracle = TestDenseOrientedTermsMatchMaskedReference._score_both(
+            ...     pred, pred[..., 4], _random_rboxes(1, 1), assign
+            ... )
+            >>> float(dense[0].rbox), float(oracle[0].rbox)
+            (0.0, 0.0)
+        """
         strides = torch.tensor([8.0, 16.0, 32.0, 8.0, 16.0, 32.0])[: assign.fg_mask.shape[1]]
         dense_rboxes, dense_theta = pred_rboxes.clone().requires_grad_(True), pred_theta.clone().requires_grad_(True)
         dense = oriented_branch_terms(dense_rboxes, dense_theta, gt_rboxes, assign, strides)
@@ -341,7 +369,13 @@ class TestDenseOrientedTermsMatchMaskedReference:
     def _assert_agree(
         dense: tuple[OrientedLossOutput, Tensor, Tensor], oracle: tuple[OrientedLossOutput, Tensor, Tensor]
     ) -> None:
-        """Every term and both gradients agree to ``1e-6``, and the dense gradients are finite."""
+        """Every term and both gradients agree to ``1e-6``, and the dense gradients are finite.
+
+        Examples:
+            >>> terms = OrientedLossOutput(rbox=torch.zeros(()), rl1=torch.zeros(()), angle=torch.zeros(()))
+            >>> same = (terms, torch.zeros(1, 5), torch.zeros(1))
+            >>> TestDenseOrientedTermsMatchMaskedReference._assert_agree(same, same)
+        """
         dense_terms, dense_rbox_grad, dense_theta_grad = dense
         oracle_terms, oracle_rbox_grad, oracle_theta_grad = oracle
         assert torch.allclose(dense_terms.rbox, oracle_terms.rbox, atol=1e-6)
@@ -354,11 +388,10 @@ class TestDenseOrientedTermsMatchMaskedReference:
     def test_mixed_batch_with_one_empty_image(self) -> None:
         """A ``B=4`` batch where one image has no positive scores identically in value and gradient.
 
-        Positives index three padded instances at random, so the dense gather is held
-        against the masked one on every column of the instance axis. The empty image
-        carries all-zero padded ground truth, as a collated batch does, so every one
-        of its background anchors scores densely against a ``(0, 0, 0, 0, 0)`` box —
-        the row the masked form drops and the dense form must carry as exact zeros.
+        Positives index three padded instances at random, so the dense gather is held against the masked one on every
+        column of the instance axis. The empty image carries all-zero padded ground truth, as a collated batch does, so
+        every one of its background anchors scores densely against a ``(0, 0, 0, 0, 0)`` box — the row the masked form
+        drops and the dense form must carry as exact zeros.
         """
         fg_mask = torch.rand(4, 6) < 0.5
         fg_mask[1] = False
@@ -375,9 +408,8 @@ class TestDenseOrientedTermsMatchMaskedReference:
     def test_all_background_batch_zero_and_connected(self) -> None:
         """No positive anywhere gives three exact zeros and finite, all-zero gradients.
 
-        The ground truth is padded but every anchor is background, so the masked form
-        gathers nothing and the dense form selects nothing — both must be the same
-        zero, still connected to both predictions.
+        The ground truth is padded but every anchor is background, so the masked form gathers nothing and the dense form
+        selects nothing — both must be the same zero, still connected to both predictions.
         """
         assign = _random_assign(torch.zeros(4, 6, dtype=torch.bool), num_instances=2)
         pred_rboxes = _random_rboxes(4, 6)
@@ -394,10 +426,9 @@ class TestDenseOrientedTermsMatchMaskedReference:
     def test_collapsed_background_predictions_leak_nothing(self) -> None:
         """Collapsed and zero predictions on background anchors reach neither the value nor the gradient.
 
-        A background anchor scores against instance ``0`` in the dense form and against
-        nothing in the masked one; planting a fully collapsed box and an all-zero box
-        there proves the ``torch.where`` selection keeps whatever ProbIoU makes of them
-        out of the sum and the gradient.
+        A background anchor scores against instance ``0`` in the dense form and against nothing in the masked one;
+        planting a fully collapsed box and an all-zero box there proves the ``torch.where`` selection keeps whatever
+        ProbIoU makes of them out of the sum and the gradient.
         """
         fg_mask = torch.tensor([[True, False, False], [False, True, False]])
         assign = _random_assign(fg_mask, num_instances=2)

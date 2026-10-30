@@ -1,64 +1,50 @@
 # SPDX-License-Identifier: Apache-2.0
 """Four-image mosaic assembly for boxes and instance masks (WP-011, blueprint section 5.9).
 
-Mosaic (R9, YOLOv4, arXiv:2004.10934) stitches four training images into one
-``2S x 2S`` canvas so a single training sample carries four scenes' worth of
-context and scale variety. A centre point ``(cx, cy)`` is sampled uniformly from
-the central region ``[0.5S, 1.5S]`` on each axis; the four images are anchored to
-that centre — the first with its bottom-right corner at ``(cx, cy)``, the second
-its bottom-left, the third its top-right, the fourth its top-left — so each fills
-the quadrant between the centre and one canvas corner, cropped where it overruns
-its quadrant. Uncovered canvas is filled with the same ``114/255`` grey as
-letterbox and affine.
+Mosaic (R9, YOLOv4, arXiv:2004.10934) stitches four training images into one ``2S x 2S`` canvas so a single training
+sample carries four scenes' worth of context and scale variety. A centre point ``(cx, cy)`` is sampled uniformly
+from the central region ``[0.5S, 1.5S]`` on each axis; the four images are anchored to that centre — the first
+with its bottom-right corner at ``(cx, cy)``, the second its bottom-left, the third its top-right, the fourth
+its top-left — so each fills the quadrant between the centre and one canvas corner, cropped where it overruns its
+quadrant. Uncovered canvas is filled with the same ``114/255`` grey as letterbox and affine.
 
 Not a :class:`~lucid_yolo.data.transforms.GeometricTransform`:
-    Every transform in that protocol maps *one* image and its targets to a
-    transformed pair. Mosaic instead **consumes four** ``(image, targets)`` pairs
-    and yields one, so it deliberately does not conform to the protocol; it is an
-    *assembly* run before the per-image geometric transforms. The stitched
-    ``2S x 2S`` result is typically letterboxed/affined down to ``S`` by the
-    surrounding pipeline — that resize is **not** done here.
+    Every transform in that protocol maps *one* image and its targets to a transformed pair. Mosaic instead
+    **consumes four** ``(image, targets)`` pairs and yields one, so it deliberately does not conform to the protocol;
+    it is an *assembly* run before the per-image geometric transforms. The stitched ``2S x 2S`` result is typically
+    letterboxed/affined down to ``S`` by the surrounding pipeline — that resize is **not** done here.
 
 Targets:
-    Each image's boxes (and polygon rings, when present) are shifted by that
-    image's placement offset, clipped to the canvas, and filtered by a minimum
-    clipped side length (``min_box_size``) and a minimum kept-area fraction
-    (``min_visibility`` = clipped-extent area / pre-clip-extent area) — the same
-    criteria :class:`~lucid_yolo.data.affine.RandomAffine` applies, kept local here
-    to avoid coupling the two transforms. Because each image is anchored at the
-    centre and extends only toward its canvas corner, clipping to the canvas is
-    equivalent to clipping to the quadrant: no box can leak across the centre
-    into a neighbour's territory. The four filtered target sets are merged with
-    :meth:`~lucid_yolo.data.targets.Targets.concat`, which requires consistent
-    polygon presence across all inputs.
+    Each image's boxes (and polygon rings, when present) are shifted by that image's placement offset, clipped to the
+    canvas, and filtered by a minimum clipped side length (``min_box_size``) and a minimum kept-area fraction
+    (``min_visibility`` = clipped-extent area / pre-clip-extent area) — the same criteria
+    :class:`~lucid_yolo.data.affine.RandomAffine` applies, kept local here to avoid coupling the two transforms.
+    Because each image is anchored at the centre and extends only toward its canvas corner, clipping to the canvas
+    is equivalent to clipping to the quadrant: no box can leak across the centre into a neighbour's territory. The
+    four filtered target sets are merged with :meth:`~lucid_yolo.data.targets.Targets.concat`, which requires
+    consistent polygon presence across all inputs.
 
 Keypoints (WP-132):
-    Points shift with their image and are the one modality left unclipped afterwards.
-    A70 governs what the quadrant crop does to a point on an instance it keeps: the point
-    is carried through unchanged rather than clamped to the edge or demoted to invisible.
-    The argument, and why "off-canvas" is the only place such a point can go, are in
+    Points shift with their image and are the one modality left unclipped afterwards. A70 governs what the quadrant
+    crop does to a point on an instance it keeps: the point is carried through unchanged rather than clamped to the
+    edge or demoted to invisible. The argument, and why "off-canvas" is the only place such a point can go, are in
     :meth:`MosaicAssembly._shift_keypoints`.
 
 Rotated boxes (WP-058):
-    Placement is a pure translation, which preserves the long-edge form exactly, so
-    a rotated box is shifted rather than re-fitted
-    (:func:`~lucid_yolo.data.rotated_aug.shift_rboxes`). What the canvas edge does to
-    it is the interesting part: the box is clipped by WP-057's clipper and re-fitted
-    at its own orientation, ``boxes`` becomes the envelope of the clipped region, and
-    the ``min_box_size`` / ``min_visibility`` rule above decides survival — the same
-    rule, over both modalities. This is where augmentation **diverges from WP-057**:
-    R18's rule *flags* a clipped part difficult and keeps it, but that is dataset
-    preparation, and :class:`~lucid_yolo.data.targets.Targets` carries no ``difficult``
-    field for a training-time transform to flag into, so an instance below the
-    threshold is dropped instead (A40). Filtering means the rotated path needs
-    WP-056's instance-axis invariant; an input breaking it raises
-    :class:`ValueError`.
+    Placement is a pure translation, which preserves the long-edge form exactly, so a rotated box is shifted rather
+    than re-fitted (:func:`~lucid_yolo.data.rotated_aug.shift_rboxes`). What the canvas edge does to it is the
+    interesting part: the box is clipped by WP-057's clipper and re-fitted at its own orientation, ``boxes`` becomes
+    the envelope of the clipped region, and the ``min_box_size`` / ``min_visibility`` rule above decides survival —
+    the same rule, over both modalities. This is where augmentation **diverges from WP-057**: R18's rule *flags* a
+    clipped part difficult and keeps it, but that is dataset preparation, and
+    :class:`~lucid_yolo.data.targets.Targets` carries no ``difficult`` field for a training-time transform to flag
+    into, so an instance below the threshold is dropped instead (A40). Filtering means the rotated path needs
+    WP-056's instance-axis invariant; an input breaking it raises :class:`ValueError`.
 
 Testability:
-    Centre sampling is driven by an optional :class:`torch.Generator`, so a seeded
-    generator gives byte-identical results. The sampled centre is stashed on
-    :attr:`MosaicAssembly.last_center` after each call for introspection (asserting
-    quadrant placement, recovering the centre, etc.).
+    Centre sampling is driven by an optional :class:`torch.Generator`, so a seeded generator gives byte-identical
+    results. The sampled centre is stashed on :attr:`MosaicAssembly.last_center` after each call for introspection
+    (asserting quadrant placement, recovering the centre, etc.).
 """
 
 from __future__ import annotations
@@ -108,8 +94,7 @@ class MosaicParams:
         """Return the centre as ``(center_x, center_y)``.
 
         Returns:
-            The centre as a plain tuple, the shape
-            :attr:`MosaicAssembly.last_center` has carried since WP-011.
+            The centre as a plain tuple, the shape :attr:`MosaicAssembly.last_center` has carried since WP-011.
 
         Examples:
             ```pycon
@@ -124,38 +109,33 @@ class MosaicParams:
 class MosaicAssembly:
     """Assemble four images and their targets into one ``2S x 2S`` mosaic (WP-011).
 
-    Each call samples a centre ``(cx, cy)`` uniformly from ``[0.5S, 1.5S]`` on each
-    axis, anchors the four images to that centre (image 0's bottom-right corner,
-    image 1's bottom-left, image 2's top-right, image 3's top-left all meet at the
-    centre), crops each to its quadrant, and grey-fills any uncovered canvas. Each
-    image's boxes/polygons are shifted by its placement offset, clipped to the
-    canvas, filtered by ``min_box_size`` and ``min_visibility``, then merged via
-    :meth:`~lucid_yolo.data.targets.Targets.concat`.
+    Each call samples a centre ``(cx, cy)`` uniformly from ``[0.5S, 1.5S]`` on each axis, anchors the four images to
+    that centre (image 0's bottom-right corner, image 1's bottom-left, image 2's top-right, image 3's top-left all
+    meet at the centre), crops each to its quadrant, and grey-fills any uncovered canvas. Each image's boxes/polygons
+    are shifted by its placement offset, clipped to the canvas, filtered by ``min_box_size`` and ``min_visibility``,
+    then merged via :meth:`~lucid_yolo.data.targets.Targets.concat`.
 
-    This is an **assembly, not** a :class:`~lucid_yolo.data.transforms.GeometricTransform`:
-    it consumes four ``(image, targets)`` pairs rather than one, so its call
-    signature deliberately differs from that protocol. The images may differ in
-    size but must share a channel count, dtype and device.
+    This is an **assembly, not** a :class:`~lucid_yolo.data.transforms.GeometricTransform`: it consumes four
+    ``(image, targets)`` pairs rather than one, so its call signature deliberately differs from that protocol. The
+    images may differ in size but must share a channel count, dtype and device.
 
-    Rotated boxes are shifted with their image, clipped to the canvas and filtered
-    by the same two thresholds (WP-058, module docstring), with ``boxes`` recomputed
-    as the envelope of the rotated geometry. Because that path filters, an input
-    whose ``rboxes`` do not share the instance axis with its ``boxes``, or that
-    carries polygons alongside them, raises :class:`ValueError`.
+    Rotated boxes are shifted with their image, clipped to the canvas and filtered by the same two thresholds
+    (WP-058, module docstring), with ``boxes`` recomputed as the envelope of the rotated geometry. Because that path
+    filters, an input whose ``rboxes`` do not share the instance axis with its ``boxes``, or that carries polygons
+    alongside them, raises :class:`ValueError`.
 
     Args:
         target_size: The base size ``S``; the assembled canvas is ``2S x 2S``.
-        generator: Optional :class:`torch.Generator` for seeded, reproducible
-            centre sampling. Defaults to ``None`` (global RNG).
+        generator: Optional :class:`torch.Generator` for seeded, reproducible centre sampling. Defaults to ``None``
+            (global RNG).
         pad_value: Fill value for uncovered canvas. Defaults to ``114 / 255``.
-        min_box_size: Minimum clipped side length in pixels for an instance to be
-            kept. Defaults to ``2.0``.
-        min_visibility: Minimum kept-area fraction (clipped-extent area divided by
-            pre-clip-extent area) for an instance to be kept. Defaults to ``0.1``.
+        min_box_size: Minimum clipped side length in pixels for an instance to be kept. Defaults to ``2.0``.
+        min_visibility: Minimum kept-area fraction (clipped-extent area divided by pre-clip-extent area) for an
+            instance to be kept. Defaults to ``0.1``.
 
     Attributes:
-        last_center: The ``(cx, cy)`` integer centre sampled on the most recent
-            call, or ``None`` before the first call.
+        last_center: The ``(cx, cy)`` integer centre sampled on the most recent call, or ``None`` before the first
+            call.
 
     Examples:
         ```pycon
@@ -192,21 +172,18 @@ class MosaicAssembly:
         """Assemble ``items`` into one mosaic image and its merged targets.
 
         Args:
-            items: Exactly four ``(image, targets)`` pairs. Each ``image`` is a CHW
-                float tensor (in the same value range as the grey fill, i.e.
-                ``[0, 1]``); the images may differ in spatial size but must share a
-                channel count, dtype and device. Non-empty ``rboxes`` must share the
-                instance axis with that input's ``boxes``, and polygon presence must
-                be consistent across all four (a requirement of
+            items: Exactly four ``(image, targets)`` pairs. Each ``image`` is a CHW float tensor (in the same value
+                range as the grey fill, i.e. ``[0, 1]``); the images may differ in spatial size but must share a
+                channel count, dtype and device. Non-empty ``rboxes`` must share the instance axis with that input's
+                ``boxes``, and polygon presence must be consistent across all four (a requirement of
                 :meth:`~lucid_yolo.data.targets.Targets.concat`).
 
         Returns:
-            The ``(C, 2S, 2S)`` stitched image and the shifted, clipped, filtered
-            and merged targets.
+            The ``(C, 2S, 2S)`` stitched image and the shifted, clipped, filtered and merged targets.
 
         Raises:
-            ValueError: If ``items`` does not hold exactly four pairs, or an input's
-                non-empty ``rboxes`` break WP-056's instance-axis invariant.
+            ValueError: If ``items`` does not hold exactly four pairs, or an input's non-empty ``rboxes`` break
+                WP-056's instance-axis invariant.
 
         Examples:
             ```pycon
@@ -229,14 +206,12 @@ class MosaicAssembly:
     def sample(self) -> MosaicParams:
         """Draw the stitch centre, consuming two uniforms from the RNG.
 
-        The sampling half of the seam: this is the only method that touches
-        :attr:`generator`, so a caller wanting a stated centre rather than a drawn
-        one builds :class:`MosaicParams` directly (WP-147).
+        The sampling half of the seam: this is the only method that touches :attr:`generator`, so a caller wanting a
+        stated centre rather than a drawn one builds :class:`MosaicParams` directly (WP-147).
 
         Returns:
-            The sampled centre, each axis an integer drawn uniformly from
-            ``[0.5S, 1.5S]``. Nothing is stashed on the instance -- ``last_center``
-            is set by :meth:`apply`.
+            The sampled centre, each axis an integer drawn uniformly from ``[0.5S, 1.5S]``. Nothing is stashed on the
+            instance -- ``last_center`` is set by :meth:`apply`.
 
         Examples:
             ```pycon
@@ -258,17 +233,15 @@ class MosaicAssembly:
         """Stitch ``items`` about ``params``' centre, drawing nothing.
 
         Args:
-            items: Exactly four ``(image, targets)`` pairs, as :meth:`__call__`
-                requires.
+            items: Exactly four ``(image, targets)`` pairs, as :meth:`__call__` requires.
             params: The stitch centre to anchor the four images to.
 
         Returns:
-            The ``(C, 2S, 2S)`` stitched image and the shifted, clipped, filtered
-            and merged targets.
+            The ``(C, 2S, 2S)`` stitched image and the shifted, clipped, filtered and merged targets.
 
         Raises:
-            ValueError: If ``items`` does not hold exactly four pairs, or an input's
-                non-empty ``rboxes`` break WP-056's instance-axis invariant.
+            ValueError: If ``items`` does not hold exactly four pairs, or an input's non-empty ``rboxes`` break
+                WP-056's instance-axis invariant.
 
         Examples:
             ```pycon
@@ -308,11 +281,10 @@ class MosaicAssembly:
     ) -> tuple[int, int, tuple[int, int, int, int]]:
         """Return the image's placement offset and its destination quadrant.
 
-        The offset maps image-local pixel coordinates to canvas coordinates
-        (``canvas = local + offset``). The quadrant ``(x1, y1, x2, y2)`` is the
-        canvas region this image may occupy; the image is anchored so its inner
-        corner sits at the centre and it extends toward the corresponding canvas
-        corner. Indices ``0..3`` are top-left, top-right, bottom-left, bottom-right.
+        The offset maps image-local pixel coordinates to canvas coordinates (``canvas = local + offset``). The quadrant
+        ``(x1, y1, x2, y2)`` is the canvas region this image may occupy; the image is anchored so its inner corner
+        sits at the centre and it extends toward the corresponding canvas corner. Indices ``0..3`` are top-left,
+        top-right, bottom-left, bottom-right.
         """
         left = index in (0, 2)
         top = index in (0, 1)
@@ -401,23 +373,20 @@ class MosaicAssembly:
     def _shift_keypoints(keypoints: Tensor, off_x: int, off_y: int) -> Tensor:
         """Translate ``(N, K, 2)`` points onto the canvas — no clamp, per A70.
 
-        Placement is the same pure translation the boxes get, so nothing here is
-        keypoint-specific except what is missing: the canvas clamp every other modality
-        takes. A70 decides that case — a point the quadrant crop pushes past the canvas
-        edge, on an instance the crop keeps, is carried through with its true coordinate
-        and its visibility intact, because clamping it to the edge would supervise the
-        model toward a location the object is not at and zeroing it would collide with
-        A66's "never annotated" meaning of ``v=0``.
+        Placement is the same pure translation the boxes get, so nothing here is keypoint-specific except what is
+        missing: the canvas clamp every other modality takes. A70 decides that case — a point the quadrant crop pushes
+        past the canvas edge, on an instance the crop keeps, is carried through with its true coordinate and its
+        visibility intact, because clamping it to the edge would supervise the model toward a location the object is
+        not at and zeroing it would collide with A66's "never annotated" meaning of ``v=0``.
 
-        For a point inside its own tile, off-canvas is the only direction it can go: each
-        image is anchored at the sampled centre and extends toward one canvas corner, so
-        leaving the quadrant means leaving the canvas — it cannot land inside a
-        neighbour's image and be read as a landmark of that scene. A point annotated
-        *outside* its tile to begin with has no such guarantee, but it is carried
-        unchanged either way, which is what A70 asks for.
+        For a point inside its own tile, off-canvas is the only direction it can go: each image is anchored at the
+        sampled centre and extends toward one canvas corner, so leaving the quadrant means leaving the canvas — it
+        cannot land inside a neighbour's image and be read as a landmark of that scene. A point annotated *outside*
+        its tile to begin with has no such guarantee, but it is carried unchanged either way, which is what A70 asks
+        for.
 
-        Whole instances still drop normally: the caller filters on the shared axis, so a
-        box that fails ``min_visibility`` takes its points with it.
+        Whole instances still drop normally: the caller filters on the shared axis, so a box that fails
+        ``min_visibility`` takes its points with it.
 
         Args:
             keypoints: ``(N, K, 2)`` point coordinates in image-local pixels.
@@ -425,9 +394,8 @@ class MosaicAssembly:
             off_y: Vertical placement offset in canvas pixels.
 
         Returns:
-            The shifted points, shaped and typed as given. A keypoint-free ``Targets``
-            carries the canonical ``(0, 0, 2)`` empty and gets the same empty back, so
-            this is an exact no-op for detect/segment/obb.
+            The shifted points, shaped and typed as given. A keypoint-free ``Targets`` carries the canonical
+            ``(0, 0, 2)`` empty and gets the same empty back, so this is an exact no-op for detect/segment/obb.
         """
         if keypoints.shape[0] == 0:
             return keypoints.clone()

@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-009 letterbox transform (blueprint section 5.9, A10).
 
-Covers the sub-pixel forward/inverse round trip across boxes and polygons,
-aspect preservation and symmetric padding of the resized canvas, box/polygon
-consistency after warping, rotated-box handling (centre warp, ``w``/``h`` scale,
-``theta`` fixed), keypoint handling (WP-132 — points on the same affine as the
-box corners, visibilities carried, an exact no-op when absent) and byte-for-byte
-determinism.
+Covers the sub-pixel forward/inverse round trip across boxes and polygons, aspect preservation and symmetric padding of
+the resized canvas, box/polygon consistency after warping, rotated-box handling (centre warp, ``w``/``h`` scale,
+``theta`` fixed), keypoint handling (WP-132 — points on the same affine as the box corners, visibilities carried, an
+exact no-op when absent) and byte-for-byte determinism.
 """
 
 from __future__ import annotations
@@ -21,6 +19,8 @@ _ORIG_H = 500
 _ORIG_W = 800
 _TARGET = 640
 _EXPECTED_R = 0.8
+#: Rows of padding above the content: the vertical slack of the 400 px tall resized image, split evenly.
+_PAD_TOP = (_TARGET - round(_ORIG_H * _EXPECTED_R)) // 2
 
 
 def _random_polygons(n: int, n_points: int = 5) -> list[torch.Tensor]:
@@ -69,7 +69,11 @@ class TestRoundTrip:
     """Forward letterbox then inverse map recovers the original geometry."""
 
     def test_roundtrip_subpixel(self) -> None:
-        """Boxes and polygons survive letterbox -> inverse_map within sub-pixel error."""
+        """Boxes and polygons survive letterbox -> inverse_map within sub-pixel error.
+
+        Six random polygon targets (boxes derived from their rings) go through the forward warp and back through
+        ``inverse_map``; every box corner and every ring point must return within 1e-4 px of where it started.
+        """
         targets = _targets_with_polygons()
         letterbox = Letterbox(_TARGET)
 
@@ -87,12 +91,14 @@ class TestRoundTrip:
             assert torch.allclose(recovered, original, atol=1e-4)
 
     def test_inverse_of_forward_matches_source_points(self) -> None:
-        """Applying the forward affine then inverse_map is identity on arbitrary points."""
+        """Applying the forward affine then inverse_map is identity on arbitrary points.
+
+        The forward affine is built by hand (scale 0.8, top pad), independent of ``Letterbox``'s own matrix, so
+        this pins ``inverse_map`` alone against the documented mapping.
+        """
         letterbox = Letterbox(_TARGET)
         points = torch.tensor([[0.0, 0.0], [_ORIG_W, _ORIG_H], [123.5, 456.25]])
-        forward = apply_affine_to_points(
-            points, _forward_matrix(_EXPECTED_R, pad_top=(_TARGET - round(_ORIG_H * _EXPECTED_R)) // 2)
-        )
+        forward = apply_affine_to_points(points, _forward_matrix(_EXPECTED_R, pad_top=_PAD_TOP))
 
         recovered = letterbox.inverse_map(forward, orig_size=(_ORIG_H, _ORIG_W), letterboxed_size=(_TARGET, _TARGET))
 
@@ -103,13 +109,20 @@ class TestAspectPreservation:
     """The output canvas is the target size with symmetric, ratio-preserving content."""
 
     def test_output_target_size(self) -> None:
-        """The letterboxed image has exactly the requested canvas dimensions."""
+        """The letterboxed image has exactly the requested canvas dimensions.
+
+        A non-square 500x800 source is letterboxed to 640, so the output must be square regardless of the input
+        aspect.
+        """
         out_image, _ = Letterbox(_TARGET)(_image(), Targets.empty())
 
         assert out_image.shape == (3, _TARGET, _TARGET)
 
     def test_content_region_ratio_equals_min_ratio(self) -> None:
-        """The resized content spans round(dim * r) on each axis for the min ratio r."""
+        """The resized content spans round(dim * r) on each axis for the min ratio r.
+
+        With a 500x800 source and a 640 target the limiting axis is the width, so r = 0.8 on both axes.
+        """
         expected_new_h = round(_ORIG_H * _EXPECTED_R)
         expected_new_w = round(_ORIG_W * _EXPECTED_R)
 
@@ -119,7 +132,10 @@ class TestAspectPreservation:
         assert abs(expected_new_h / _ORIG_H - _EXPECTED_R) < 1e-6
 
     def test_padding_split_symmetric_within_one_pixel(self) -> None:
-        """A box at the source origin lands at (pad_left, pad_top) with balanced slack."""
+        """A box at the source origin lands at (pad_left, pad_top) with balanced slack.
+
+        The origin box reveals the top-left pad offsets; the slack on the opposite side must match within one pixel.
+        """
         origin_box = Targets(boxes=torch.zeros((1, 4)), labels=torch.zeros(1, dtype=torch.int64))
 
         _, out_targets = Letterbox(_TARGET)(_image(), origin_box)
@@ -138,9 +154,9 @@ class TestUpstreamFit:
     def test_forward_affine_upstreams_matrix(self) -> None:
         """``forward_affine`` returns exactly what ``letterbox_matrix`` builds for the same size.
 
-        The whole point of delegating: a local re-derivation that agreed today could drift
-        from upstream's on any future bump while every coordinate test stayed green, since
-        both sides would be reading the same local number.
+        The whole point of delegating: a local re-derivation that agreed today could drift from upstream's on any
+        future bump while every coordinate test stayed green, since both sides would be reading the same local
+        number.
         """
         matrix, out_h, out_w = Letterbox(_TARGET).forward_affine(_ORIG_H, _ORIG_W)
         upstream = letterbox_matrix(_ORIG_H, _ORIG_W, _TARGET, _TARGET, True, dtype=torch.float64)[0]
@@ -151,16 +167,15 @@ class TestUpstreamFit:
     def test_pad_value_reaches_upstream_resample(self) -> None:
         """The requested pad colour fills the padded band of the resampled image.
 
-        ``pad_value`` travels as upstream's ``fill=`` with ``padding_mode="zeros"``; drop
-        either half and the band comes back black while the geometry stays perfect.
+        ``pad_value`` travels as upstream's ``fill=`` with ``padding_mode="zeros"``; drop either half and the band
+        comes back black while the geometry stays perfect.
         """
         pad_value = 114.0 / 255.0
 
         out_image, _ = Letterbox(_TARGET, pad_value=pad_value)(_image(), Targets.empty())
 
-        pad_top = (_TARGET - round(_ORIG_H * _EXPECTED_R)) // 2
         assert torch.allclose(
-            out_image[:, : pad_top - 1, :], torch.full_like(out_image[:, : pad_top - 1, :], pad_value)
+            out_image[:, : _PAD_TOP - 1, :], torch.full_like(out_image[:, : _PAD_TOP - 1, :], pad_value)
         )
 
 
@@ -168,7 +183,11 @@ class TestTargetConsistency:
     """Warped polygons and their derived boxes stay mutually consistent."""
 
     def test_boxes_from_warped_polygons_match_warped_boxes(self) -> None:
-        """boxes_from_polygons of the warped rings equals the warped boxes."""
+        """boxes_from_polygons of the warped rings equals the warped boxes.
+
+        Boxes and polygons are warped independently by the same affine, so the extent of the warped rings has to
+        reproduce the warped boxes (the box/mask agreement the loss relies on).
+        """
         targets = _targets_with_polygons()
 
         _, out_targets = Letterbox(_TARGET)(_image(), targets)
@@ -181,14 +200,17 @@ class TestRotatedBoxes:
     """Rotated boxes: centres warp as points, extents scale by r, angle is fixed."""
 
     def test_rboxes_centre_scale_and_angle(self) -> None:
-        """Centres match the point warp, w/h scale by r, theta is unchanged."""
+        """Centres match the point warp, w/h scale by r, theta is unchanged.
+
+        Two rotated boxes with opposite-sign angles go through the letterbox; the angle must come back bit-exact
+        because a uniform scale plus translation cannot rotate anything.
+        """
         rboxes = torch.tensor([[100.0, 200.0, 40.0, 20.0, 0.5], [300.0, 150.0, 60.0, 30.0, -0.3]])
         targets = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64), rboxes=rboxes)
-        pad_top = (_TARGET - round(_ORIG_H * _EXPECTED_R)) // 2
 
         _, out_targets = Letterbox(_TARGET)(_image(), targets)
 
-        expected_centers = apply_affine_to_points(rboxes[:, :2], _forward_matrix(_EXPECTED_R, pad_top))
+        expected_centers = apply_affine_to_points(rboxes[:, :2], _forward_matrix(_EXPECTED_R, _PAD_TOP))
         assert torch.allclose(out_targets.rboxes[:, :2], expected_centers, atol=1e-4)
         assert torch.allclose(out_targets.rboxes[:, 2:4], rboxes[:, 2:4] * _EXPECTED_R, atol=1e-4)
         assert torch.equal(out_targets.rboxes[:, 4], rboxes[:, 4])
@@ -197,15 +219,14 @@ class TestRotatedBoxes:
 class TestKeypoints:
     """Keypoints ride the same affine as the box corners, and cost nothing when absent."""
 
-    def test_keypoint_lands_where_box_corner_it_sits_on_lands(self) -> None:
+    def test_keypoint_on_box_corner_lands_on_warped_corner(self) -> None:
         """Points placed on a box's own corners warp onto that box's warped corners.
 
-        The decisive statement that the two modalities share one geometry rather than two
-        that happen to agree on this fixture: the keypoints are *defined* as the box's
-        corners on the source canvas, so any difference in scale, in pad offset, or in the
-        order the axes are read shows up as a mismatch after the warp. A separate
-        keypoint path that applied ``r`` without the padding translation — the obvious way
-        to get this wrong — passes every shape and dtype check and fails here.
+        The decisive statement that the two modalities share one geometry rather than two that happen to agree on
+        this fixture: the keypoints are *defined* as the box's corners on the source canvas, so any difference in
+        scale, in pad offset, or in the order the axes are read shows up as a mismatch after the warp. A separate
+        keypoint path that applied ``r`` without the padding translation — the obvious way to get this wrong —
+        passes every shape and dtype check and fails here.
         """
         box = torch.tensor([[100.0, 200.0, 340.0, 460.0]])
         corners = torch.tensor([[[100.0, 200.0], [340.0, 460.0]]])
@@ -224,10 +245,10 @@ class TestKeypoints:
     def test_visibility_carries_over_row_for_row(self) -> None:
         """The visibility values survive the warp unchanged, in their original order.
 
-        A letterbox resizes and pads; it never crops, so no annotated point can stop being
-        annotated. Re-deriving visibility here — or dropping it, which is what a fresh
-        ``Targets`` without the channel would do — would silently demote real annotations
-        to A66's "no annotation exists" and delete supervision the loss then never sees.
+        A letterbox resizes and pads; it never crops, so no annotated point can stop being annotated. Re-deriving
+        visibility here — or dropping it, which is what a fresh ``Targets`` without the channel would do — would
+        silently demote real annotations to A66's "no annotation exists" and delete supervision the loss then never
+        sees.
         """
         visibility = torch.tensor([[2, 0, 1]])
         targets = Targets(
@@ -244,12 +265,10 @@ class TestKeypoints:
     def test_keypoint_free_targets_come_back_keypoint_free(self) -> None:
         """A ``Targets`` with no points warps to the canonical empty point channels.
 
-        The no-op guard for every task that has no keypoints — detection, segmentation and
-        the oriented path all run this same transform, and this is the one geometric
-        transform on the *evaluation* path. Anything that materialised a ``(0, K, 2)``
-        placeholder here, or changed a dtype, would move ``goldens/data_checksums.json``
-        and break checkpoints and frozen metrics for three tasks that never asked for
-        points.
+        The no-op guard for every task that has no keypoints — detection, segmentation and the oriented path all run
+        this same transform, and this is the one geometric transform on the *evaluation* path. Anything that
+        materialised a ``(0, K, 2)`` placeholder here, or changed a dtype, would move ``goldens/data_checksums.json``
+        and break checkpoints and frozen metrics for three tasks that never asked for points.
         """
         targets = _targets_with_polygons()
         reference = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64))
@@ -264,9 +283,9 @@ class TestKeypoints:
     def test_warp_targets_without_image_maps_points_identically(self) -> None:
         """``warp_targets`` moves keypoints exactly as ``__call__`` does.
 
-        The fused-warp entry point shares ``_warp_targets`` with the imaged call, and the
-        pose pipeline reaches the letterbox through it. A modality wired into only one of
-        the two would work in the val loader and silently vanish in the fused path.
+        The fused-warp entry point shares ``_warp_targets`` with the imaged call, and the pose pipeline reaches the
+        letterbox through it. A modality wired into only one of the two would work in the val loader and silently
+        vanish in the fused path.
         """
         targets = Targets(
             boxes=torch.tensor([[10.0, 20.0, 200.0, 300.0]]),
@@ -287,13 +306,15 @@ class TestForwardAffine:
     """The exposed forward affine matches the mapping applied by ``__call__``."""
 
     def test_forward_affine_reports_matrix_and_output_size(self) -> None:
-        """forward_affine returns the source->canvas matrix and the target size."""
+        """forward_affine returns the source->canvas matrix and the target size.
+
+        The matrix is compared with a hand-built scale-plus-top-pad affine for the 500x800 source.
+        """
         letterbox = Letterbox(_TARGET)
 
         matrix, out_h, out_w = letterbox.forward_affine(_ORIG_H, _ORIG_W)
 
-        pad_top = (_TARGET - round(_ORIG_H * _EXPECTED_R)) // 2
-        expected = _forward_matrix(_EXPECTED_R, pad_top).to(torch.float64)
+        expected = _forward_matrix(_EXPECTED_R, _PAD_TOP).to(torch.float64)
         assert (out_h, out_w) == (_TARGET, _TARGET)
         assert torch.allclose(matrix, expected, atol=1e-6)
 
@@ -302,7 +323,10 @@ class TestWarpTargetsWithoutImage:
     """warp_targets reproduces the target half of ``__call__`` from a source size."""
 
     def test_warp_targets_matches_call(self) -> None:
-        """Warping targets by source size equals the targets ``__call__`` produces."""
+        """Warping targets by source size equals the targets ``__call__`` produces.
+
+        Used by the fused path, which warps the image elsewhere and only needs the target half of the transform.
+        """
         targets = _targets_with_polygons()
         letterbox = Letterbox(_TARGET)
 
@@ -318,7 +342,11 @@ class TestDeterminism:
     """Identical inputs produce byte-identical outputs."""
 
     def test_same_input_identical_output(self) -> None:
-        """Two calls on the same image and targets return equal tensors."""
+        """Two calls on the same image and targets return equal tensors.
+
+        The letterbox draws no random numbers, so repeated calls on clones must agree exactly on image, boxes and
+        every polygon ring.
+        """
         image = _image()
         targets = _targets_with_polygons()
         letterbox = Letterbox(_TARGET)

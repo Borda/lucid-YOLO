@@ -4,12 +4,10 @@
 This module hosts the :class:`~pytorch_lightning.callbacks.Callback` s that shape
 the training *schedule* rather than the model or the data:
 
-- :class:`CloseMosaicCallback` disables mosaic augmentation for the final
-  ``close_mosaic`` epochs (blueprint sec. 5.9; [R1] Table S3 recipe context),
-  letting the network settle on un-composited images before training ends.
-- :class:`EMACallback` maintains an exponential-moving-average shadow of the
-  model weights and evaluates with it (blueprint D4: "EMA is a callback";
-  "used for eval"), the standard YOLO-lineage evaluation convention.
+- :class:`CloseMosaicCallback` disables mosaic augmentation for the final ``close_mosaic`` epochs (blueprint sec. 5.9;
+  [R1] Table S3 recipe context), letting the network settle on un-composited images before training ends.
+- :class:`EMACallback` maintains an exponential-moving-average shadow of the model weights and evaluates with it
+  (blueprint D4: "EMA is a callback"; "used for eval"), the standard YOLO-lineage evaluation convention.
 
 Both share the same rank-zero-safe, side-effect-scoped conventions.
 """
@@ -44,9 +42,8 @@ _MOSAIC_DISABLED = 0.0
 class _SupportsMosaicProb(Protocol):
     """Duck-typed datamodule seam the callback drives to disable mosaic.
 
-    Any datamodule exposing :meth:`set_mosaic_prob` (notably
-    :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule`, but also a test stub)
-    satisfies this protocol, so the callback works without importing a concrete type.
+    Any datamodule exposing :meth:`set_mosaic_prob` (notably :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule`,
+    but also a test stub) satisfies this protocol, so the callback works without importing a concrete type.
     """
 
     def set_mosaic_prob(self, prob: float) -> None:
@@ -57,15 +54,14 @@ class _SupportsMosaicProb(Protocol):
 class CloseMosaicCallback(Callback):
     """Disable mosaic augmentation for the final ``close_mosaic`` training epochs.
 
-    Mosaic (four-image compositing) runs at ``p=1.0`` for most of training but is
-    switched off for the last ``close_mosaic`` epochs so the network finishes on
-    natural, un-composited images (blueprint sec. 5.9; [R1] Tables S3/S6). At the
-    start of every training epoch this callback checks whether the current epoch has
-    reached the close-mosaic window (``current_epoch >= max_epochs - close_mosaic``)
-    and, if so, sets the training pipeline's mosaic probability to ``0`` via the
-    datamodule's :meth:`~lucid_yolo.ptl.datamodule.DetectionDataModule.set_mosaic_prob`
-    seam. The flip is idempotent — re-setting ``0`` each subsequent epoch is harmless
-    — and is logged exactly once, on the epoch it first takes effect (rank zero only).
+    Mosaic (four-image compositing) runs at ``p=1.0`` for most of training but is switched off for the last
+    ``close_mosaic`` epochs so the network finishes on natural, un-composited images (blueprint sec. 5.9; [R1] Tables
+    S3/S6). At the start of every training epoch this callback checks whether the current epoch has reached the
+    close-mosaic window (``current_epoch >= max_epochs - close_mosaic``) and, if so, sets the training pipeline's
+    mosaic probability to ``0`` via the datamodule's
+    :meth:`~lucid_yolo.ptl.datamodule.DetectionDataModule.set_mosaic_prob` seam. The flip is idempotent — re-setting
+    ``0`` each subsequent epoch is harmless — and is logged exactly once, on the epoch it first takes effect (rank
+    zero only).
 
     Args:
         close_mosaic: Number of final epochs to train with mosaic disabled. ``0``
@@ -96,8 +92,7 @@ class CloseMosaicCallback(Callback):
         """Disable mosaic once the close-mosaic window is reached (idempotent).
 
         Args:
-            trainer: The active trainer, read for ``current_epoch``, ``max_epochs``,
-                and the attached ``datamodule``.
+            trainer: The active trainer, read for ``current_epoch``, ``max_epochs``, and the attached ``datamodule``.
             pl_module: The module being trained (unused; part of the hook signature).
         """
         if self._closed or not self._window_reached(trainer):
@@ -115,9 +110,8 @@ class CloseMosaicCallback(Callback):
     def _window_reached(self, trainer: Trainer) -> bool:
         """Return whether the current epoch has entered the close-mosaic window.
 
-        ``close_mosaic=0`` yields a threshold of ``max_epochs``, which the last
-        training epoch (``max_epochs - 1``) never reaches, so mosaic is never
-        disabled; a ``close_mosaic`` at least ``max_epochs`` yields a non-positive
+        ``close_mosaic=0`` yields a threshold of ``max_epochs``, which the last training epoch (``max_epochs - 1``)
+        never reaches, so mosaic is never disabled; a ``close_mosaic`` at least ``max_epochs`` yields a non-positive
         threshold, so the window is entered at epoch ``0``.
         """
         if self.close_mosaic == 0:
@@ -155,59 +149,49 @@ _DEFAULT_UPDATE_EVERY = 1
 class EMACallback(Callback):
     """Track an exponential-moving-average shadow of the weights and eval with it.
 
-    A shadow copy of the module's floating-point parameters **and** buffers (batch-norm
-    running statistics included; integer buffers such as ``num_batches_tracked`` are left
-    out — they carry no meaningful average) is created on :meth:`on_fit_start` on the
-    module's device. After each *optimizer step* (:meth:`on_train_batch_end`, honoring
-    ``update_every``) the shadow is blended toward the live weights under
-    :func:`torch.no_grad` with a *warmup-ramped* decay
+    A shadow copy of the module's floating-point parameters **and** buffers (batch-norm running statistics included;
+    integer buffers such as ``num_batches_tracked`` are left out — they carry no meaningful average) is created on
+    :meth:`on_fit_start` on the module's device. After each *optimizer step* (:meth:`on_train_batch_end`, honoring
+    ``update_every``) the shadow is blended toward the live weights under :func:`torch.no_grad` with a
+    *warmup-ramped* decay
 
     ``d_t = decay * (1 - exp(-t / tau))``     ``shadow <- d_t * shadow + (1 - d_t) * live``
 
-    where ``t`` is the number of updates performed so far. Tensors sharing a device and
-    dtype are submitted to one foreach interpolation: the same recurrence with fewer
-    accelerator launches, but not bit-identical to the per-tensor form in any dtype. It
-    agrees within the test tolerance for fp32 and fp64, and a half-precision shadow rounds
-    once per step instead of twice (a difference of about 1 ulp). A tensor whose shadow and
-    live dtypes differ keeps the per-tensor recurrence. The ramp starts the effective
-    decay near zero so the early shadow tracks the fast-moving weights closely, then
-    relaxes toward the nominal ``decay`` as training settles (blueprint D4). Around the
-    validation loop the callback swaps the shadow in (:meth:`on_validation_start`) and the
-    live weights back out (:meth:`on_validation_end`), so validation metrics are EMA
-    metrics — the "used for eval" contract of D4. The shadow and update counters are
-    checkpointed via :meth:`state_dict`/:meth:`load_state_dict`, so a save/resume round
+    where ``t`` is the number of updates performed so far. Tensors sharing a device and dtype are submitted to one
+    foreach interpolation: the same recurrence with fewer accelerator launches, but not bit-identical to the
+    per-tensor form in any dtype. It agrees within the test tolerance for fp32 and fp64, and a half-precision shadow
+    rounds once per step instead of twice (a difference of about 1 ulp). A tensor whose shadow and live dtypes differ
+    keeps the per-tensor recurrence. The ramp starts the effective decay near zero so the early shadow tracks the
+    fast-moving weights closely, then relaxes toward the nominal ``decay`` as training settles (blueprint D4). Around
+    the validation loop the callback swaps the shadow in (:meth:`on_validation_start`) and the live weights back out
+    (:meth:`on_validation_end`), so validation metrics are EMA metrics — the "used for eval" contract of D4. The
+    shadow and update counters are checkpointed via :meth:`state_dict`/:meth:`load_state_dict`, so a save/resume round
     trip continues the same average rather than restarting it.
 
-    **Cadence is optimizer steps, not batches.** ``update_every`` and ``tau`` are both
-    counted in optimizer steps, so ``accumulate_grad_batches > 1`` does not multiply the
-    number of blends: :meth:`on_train_batch_end` blends only on a batch that actually
-    advanced ``trainer.global_step``, which under accumulation is the last batch of each
-    accumulation window. That hook rather than ``on_before_zero_grad`` because Lightning
-    calls the latter at the *start* of an accumulation window, before that window's
-    ``training_step`` — it would blend pre-step weights and never see the state left by the
-    final optimizer step of a run.
+    **Cadence is optimizer steps, not batches.** ``update_every`` and ``tau`` are both counted in optimizer steps, so
+    ``accumulate_grad_batches > 1`` does not multiply the number of blends: :meth:`on_train_batch_end` blends only on
+    a batch that actually advanced ``trainer.global_step``, which under accumulation is the last batch of each
+    accumulation window. That hook rather than ``on_before_zero_grad`` because Lightning calls the latter at the
+    *start* of an accumulation window, before that window's ``training_step`` — it would blend pre-step weights and
+    never see the state left by the final optimizer step of a run.
 
-    **Callback ordering.** The weight swap is deliberately hook-scoped, not run-scoped, so
-    it does not depend on how Lightning happens to order the callback list: the shadow is
-    installed in :meth:`on_validation_start` and taken out again in
-    :meth:`on_validation_end` (and in :meth:`on_exception`, so a failed validation cannot
-    leave EMA weights wearing the live model's identity). Checkpoints written by
-    :class:`~pytorch_lightning.callbacks.ModelCheckpoint` therefore hold the *raw* trained
-    weights in ``state_dict``, with the EMA available separately under this callback's
-    ``state_dict`` — the split :func:`~lucid_yolo.eval.checkpoint.load_eval_module`
-    relies on when it overlays the shadow on request. ``ModelCheckpoint`` saves from
-    ``on_validation_end`` too, and Lightning moves it to the end of the callback list, so
-    within a single validation the restore runs first; the two facts are recorded together
-    because only the second is Lightning's to change.
+    **Callback ordering.** The weight swap is deliberately hook-scoped, not run-scoped, so it does not depend on how
+    Lightning happens to order the callback list: the shadow is installed in :meth:`on_validation_start` and taken
+    out again in :meth:`on_validation_end` (and in :meth:`on_exception`, so a failed validation cannot leave EMA
+    weights wearing the live model's identity). Checkpoints written by
+    :class:`~pytorch_lightning.callbacks.ModelCheckpoint` therefore hold the *raw* trained weights in ``state_dict``,
+    with the EMA available separately under this callback's ``state_dict`` — the split
+    :func:`~lucid_yolo.eval.checkpoint.load_eval_module` relies on when it overlays the shadow on request.
+    ``ModelCheckpoint`` saves from ``on_validation_end`` too, and Lightning moves it to the end of the callback list,
+    so within a single validation the restore runs first; the two facts are recorded together because only the second
+    is Lightning's to change.
 
-    The exact ``decay``/``tau`` constants are unpublished in the source papers; the
-    defaults are the conventional YOLO-lineage values and are documented here as a small,
-    self-contained assumption (D4 names EMA explicitly, so no ``ASSUMPTIONS.md`` row is
-    warranted).
+    The exact ``decay``/``tau`` constants are unpublished in the source papers; the defaults are the conventional
+    YOLO-lineage values and are documented here as a small, self-contained assumption (D4 names EMA explicitly, so no
+    ``ASSUMPTIONS.md`` row is warranted).
 
     Args:
-        decay: Nominal per-update decay the warmup ramp relaxes toward. Must be in
-            ``[0, 1)``. Defaults to ``0.9999``.
+        decay: Nominal per-update decay the warmup ramp relaxes toward. Must be in ``[0, 1)``. Defaults to ``0.9999``.
         tau: Warmup time constant (in updates, and so in optimizer steps) of the decay
             ramp; larger values ramp in more slowly. Must be positive. Defaults to ``2000``.
         update_every: Refresh the shadow every ``update_every`` optimizer steps — not every
@@ -249,11 +233,10 @@ class EMACallback(Callback):
         self._backup: dict[str, Tensor] | None = None
         self._num_updates = 0
         self._steps_seen = 0
-        #: ``trainer.global_step`` as of the last batch this callback looked at, so a batch
-        #: that did not advance the optimizer (an accumulation window's non-final batch) is
-        #: told apart from one that did. Re-seeded from the trainer at every
-        #: :meth:`on_train_start`, which on resume already carries the restored step count,
-        #: so it is derived rather than checkpointed.
+        #: ``trainer.global_step`` as of the last batch this callback looked at, so a batch that did not advance the
+        #: optimizer (an accumulation window's non-final batch) is told apart from one that did. Re-seeded from the
+        #: trainer at every :meth:`on_train_start`, which on resume already carries the restored step count, so it is
+        #: derived rather than checkpointed.
         self._last_global_step = 0
 
     def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
@@ -293,11 +276,10 @@ class EMACallback(Callback):
     ) -> None:
         """Blend the shadow toward the live weights once per optimizer step.
 
-        A batch that did not advance ``trainer.global_step`` — every batch of an
-        ``accumulate_grad_batches`` window but its last — leaves the shadow untouched, so
-        ``update_every`` and the ``tau`` ramp are counted in optimizer steps as documented
-        rather than in batches. By this hook the step has already been applied, so the
-        blend reads post-step weights.
+        A batch that did not advance ``trainer.global_step`` — every batch of an ``accumulate_grad_batches`` window
+        but its last — leaves the shadow untouched, so ``update_every`` and the ``tau`` ramp are counted in optimizer
+        steps as documented rather than in batches. By this hook the step has already been applied, so the blend reads
+        post-step weights.
 
         Args:
             trainer: The active trainer, read for its ``global_step``.
@@ -372,12 +354,11 @@ class EMACallback(Callback):
     def on_exception(self, trainer: Trainer, pl_module: LightningModule, exception: BaseException) -> None:
         """Take the shadow back out of the module when a run dies mid-validation.
 
-        Without this the swap of :meth:`on_validation_start` is undone only by the normal
-        completion path, so an exception raised inside the validation loop propagates with
-        the EMA weights still installed under the raw model's identity — anything the
-        failure handler then inspects, saves or resumes from would be the shadow rather
-        than the trained weights. Restoration is idempotent, so the ordinary path running
-        first (or this hook firing outside validation) is harmless.
+        Without this the swap of :meth:`on_validation_start` is undone only by the normal completion path, so an
+        exception raised inside the validation loop propagates with the EMA weights still installed under the raw
+        model's identity — anything the failure handler then inspects, saves or resumes from would be the shadow
+        rather than the trained weights. Restoration is idempotent, so the ordinary path running first (or this hook
+        firing outside validation) is harmless.
 
         Args:
             trainer: The active trainer (unused; part of the hook signature).
@@ -419,10 +400,9 @@ class EMACallback(Callback):
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Restore the shadow and update counters from a checkpoint.
 
-        A checkpoint written before the cadence was fixed to optimizer steps carries the
-        counter under ``batches_seen``; it is read as the ``update_every`` phase it in fact
-        was, so resuming such a run continues rather than restarts. The two counts differ
-        only when that run used ``accumulate_grad_batches > 1``.
+        A checkpoint written before the cadence was fixed to optimizer steps carries the counter under
+        ``batches_seen``; it is read as the ``update_every`` phase it in fact was, so resuming such a run continues
+        rather than restarts. The two counts differ only when that run used ``accumulate_grad_batches > 1``.
 
         Args:
             state_dict: A mapping produced by :meth:`state_dict`.

@@ -2,12 +2,11 @@
 """Unit gate for the per-task decode compositions in :mod:`lucid_yolo.decode.per_task`.
 
 :func:`~lucid_yolo.decode.per_task.decode_with_coefficients` and
-:func:`~lucid_yolo.decode.per_task.decode_with_keypoints` are what prediction, export and
-evaluation decode a segmentation or keypoint branch through. Each is pinned against the
-composition it replaced — the decoder's own ``decode_with_indices`` plus a bare gather by
-the reported indices — on the real rows, bit for bit, and on the padding rows, which the
-shared gather zeroes rather than reading the last anchor's values. Both decoders are
-exercised, since predict reads the dense path through the same function.
+:func:`~lucid_yolo.decode.per_task.decode_with_keypoints` are what prediction, export and evaluation decode a
+segmentation or keypoint branch through. Each is pinned against the composition it replaced — the decoder's own
+``decode_with_indices`` plus a bare gather by the reported indices — on the real rows, bit for bit, and on the padding
+rows, which the shared gather zeroes rather than reading the last anchor's values. Both decoders are exercised, since
+predict reads the dense path through the same function.
 """
 
 from __future__ import annotations
@@ -29,8 +28,7 @@ _ANCHORS = 6
 def _branch() -> tuple[Tensor, Tensor, Tensor, Tensor]:
     """Return one branch's class logits, ltrb, coefficients and raw points over six anchors.
 
-    Each anchor's coefficients and point offsets are distinct, so a row gathered from
-    the wrong anchor is visible.
+    Each anchor's coefficients and point offsets are distinct, so a row gathered from the wrong anchor is visible.
 
     Examples:
         >>> cls_logits, raw_ltrb, coefficients, raw_points = _branch()

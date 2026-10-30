@@ -1,93 +1,76 @@
 # SPDX-License-Identifier: Apache-2.0
 """Validate a provisioned COCO, DOTA-v1.0 or YOLO dataset root before a run (WP-014, WP-056, WP-099c).
 
-Datasets are never committed and never auto-downloaded (AGENTS.md sec. 3); this is the
-``lucid-data check`` gate that confirms a provisioned root actually matches the layout of
-blueprint sec. 14.3 before any ``[DATA]`` work runs against it. For each COCO split it
-checks that
+Datasets are never committed and never auto-downloaded (AGENTS.md sec. 3); this is the ``lucid-data check`` gate that
+confirms a provisioned root actually matches the layout of blueprint sec. 14.3 before any ``[DATA]`` work runs against
+it. For each COCO split it checks that
 
     * the images directory exists and holds the expected number of image files
       (118,287 for ``train2017``, 5,000 for ``val2017``);
     * the ``annotations/instances_*.json`` file exists and parses;
-    * the image count declared inside the annotation JSON matches the number of
-      image files on disk.
+    * the image count declared inside the annotation JSON matches the number of image files on disk.
 
-Those names and counts are COCO 2017's own published fact (WP-099e), so they apply where
-the root is written in COCO 2017's spelling. Each split is resolved through
-:func:`~lucid_yolo.data.layout.resolve_split`, as the reader resolves it; a split that
-resolves to any other spelling the layout table accepts — the plain ``train/`` +
-``annotations/instances_train.json`` a ``lucid-data build-tiles`` run writes, among them —
-is checked for presence and parseability only, under its own split name, since COCO 2017's
-totals (and the annotation-vs-disk parity checked against them) describe a different image
-set. ``keypoints=True`` additionally requires each split's ``person_keypoints_*.json``
-beside its ``instances_*.json`` to exist and parse: the keypoint tier's annotation files,
+Those names and counts are COCO 2017's own published fact (WP-099e), so they apply where the root is written in COCO
+2017's spelling. Each split is resolved through :func:`~lucid_yolo.data.layout.resolve_split`, as the reader resolves
+it; a split that resolves to any other spelling the layout table accepts — the plain ``train/`` +
+``annotations/instances_train.json`` a ``lucid-data build-tiles`` run writes, among them — is checked for presence
+and parseability only, under its own split name, since COCO 2017's totals (and the annotation-vs-disk parity checked
+against them) describe a different image set. ``keypoints=True`` additionally requires each split's
+``person_keypoints_*.json`` beside its ``instances_*.json`` to exist and parse: the keypoint tier's annotation files,
 which the layout table never resolves on its own.
 
-For DOTA-v1.0 (``--dataset dota``) each split directory must hold ``images/`` and
-``labelTxt/``, every image must have a label file of the same stem and vice
-versa, and every object line must parse (:mod:`lucid_yolo.data.dota`). The totals
-across the checked splits are **reported**, and required only when the caller
-states them (``--expected_images`` and its two siblings).
+For DOTA-v1.0 (``--dataset dota``) each split directory must hold ``images/`` and ``labelTxt/``, every image must have
+a label file of the same stem and vice versa, and every object line must parse (:mod:`lucid_yolo.data.dota`). The
+totals across the checked splits are **reported**, and required only when the caller states them
+(``--expected_images`` and its two siblings).
 
-    The published 2,806 images / 188,282 instances / 15 classes of AGENTS.md
-    sec. 3 describe the dataset **whole**, and are not the defaults: R18 sec. 4
-    splits DOTA into half training, one sixth validation and one third testing,
-    and releases ground truth for the first two only, so the annotated root this
-    check is pointed at holds about two thirds of that and can never sum to it.
-    Requiring them by default failed every correct download (WP-097). Instances
-    are counted from the label files directly, *every* object line including the
-    ones flagged ``difficult``, because the published total does not break those
-    out (A39 governs what a *loader* does with the flag, which is a different
-    question from what is on disk).
+    The published 2,806 images / 188,282 instances / 15 classes of AGENTS.md sec. 3 describe the dataset **whole**,
+    and are not the defaults: R18 sec. 4 splits DOTA into half training, one sixth validation and one third testing,
+    and releases ground truth for the first two only, so the annotated root this check is pointed at holds about two
+    thirds of that and can never sum to it. Requiring them by default failed every correct download (WP-097).
+    Instances are counted from the label files directly, *every* object line including the ones flagged ``difficult``,
+    because the published total does not break those out (A39 governs what a *loader* does with the flag, which is a
+    different question from what is on disk).
 
-For a YOLO root (WP-099c) the root's own ``data.yaml`` is read first — it carries the
-class list, so a labels tree without one is not a dataset this project can read — and
-each split's images and labels directories are resolved by
-:func:`~lucid_yolo.data.yolo.resolve_split_dirs`, the function
-:meth:`~lucid_yolo.data.yolo.YoloDetectionDataset.from_root` resolves them with. Images
-and label files must then pair by stem in **both** directions, and every row must parse
-(:func:`~lucid_yolo.data.yolo.scan_yolo_label_file`), each rejection naming the file and
-the 1-based line exactly as the reader's own does — a row's class index being inside the
-declared ``names`` is part of that grammar, which is how the class count and the rows are
-held to agree. Totals are reported and required only when stated, as for DOTA.
+For a YOLO root (WP-099c) the root's own ``data.yaml`` is read first — it carries the class list, so a labels tree
+without one is not a dataset this project can read — and each split's images and labels directories are resolved
+by :func:`~lucid_yolo.data.yolo.resolve_split_dirs`, the function
+:meth:`~lucid_yolo.data.yolo.YoloDetectionDataset.from_root` resolves them with. Images and label files must then pair
+by stem in **both** directions, and every row must parse (:func:`~lucid_yolo.data.yolo.scan_yolo_label_file`), each
+rejection naming the file and the 1-based line exactly as the reader's own does — a row's class index being inside
+the declared ``names`` is part of that grammar, which is how the class count and the rows are held to agree. Totals
+are reported and required only when stated, as for DOTA.
 
 Which layout, and who decides:
-    ``dataset`` left unstated means **infer**, through
-    :func:`~lucid_yolo.data.layout.detect_layout` — the WP-099b probe (A63). This command
-    is the pre-flight for ``lucid-yolo fit``, and a ``fit`` given no ``--data.layout``
-    dispatches on that same probe: a check that defaulted to COCO would validate a question
-    the run never asks, and the two would disagree about what the root is precisely when it
-    matters. There is therefore one statement of what a COCO root and a YOLO root are, and
-    this module holds neither of them.
+    ``dataset`` left unstated means **infer**, through :func:`~lucid_yolo.data.layout.detect_layout` — the WP-099b probe
+    (A63). This command is the pre-flight for ``lucid-yolo fit``, and a ``fit`` given no ``--data.layout`` dispatches
+    on that same probe: a check that defaulted to COCO would validate a question the run never asks, and the two
+    would disagree about what the root is precisely when it matters. There is therefore one statement of what a COCO
+    root and a YOLO root are, and this module holds neither of them.
 
-    DOTA is stated, never inferred, and sits outside the probe by design rather than by
-    omission: no training run reads a DOTA root at all. Its ``labelTxt`` tree is tiled into
-    a COCO container first (``lucid-data build-tiles``, WP-094), so what the OBB tier trains
-    on is a COCO layout. A root satisfying no convention says so *and* names
+    DOTA is stated, never inferred, and sits outside the probe by design rather than by omission: no training run
+    reads a DOTA root at all. Its ``labelTxt`` tree is tiled into a COCO container first (``lucid-data build-tiles``,
+    WP-094), so what the OBB tier trains on is a COCO layout. A root satisfying no convention says so *and* names
     ``--dataset dota``, because that operator is the only one inference cannot serve.
 
-    The raise-versus-report line is the datamodule's (WP-099b): an argument the caller got
-    wrong raises — an unknown layout name, a flag belonging to another layout — while every
-    verdict about the disk, the probe's included, becomes a FAIL line in the report and exit
-    1. This is the first command an operator runs against a fresh provisioning, and WP-097
-    is the record of what a spurious failure costs there; a traceback would cost the same.
+    The raise-versus-report line is the datamodule's (WP-099b): an argument the caller got wrong raises — an unknown
+    layout name, a flag belonging to another layout — while every verdict about the disk, the probe's included,
+    becomes a FAIL line in the report and exit 1. This is the first command an operator runs against a fresh
+    provisioning, and WP-097 is the record of what a spurious failure costs there; a traceback would cost the same.
 
-The check core is importable (:func:`check_coco_root`, :func:`check_dota_root` and
-:func:`check_yolo_root` return a :class:`DataCheck` whose ``ok`` flag drives the exit
-status); :func:`check_dataset` is the dispatch over them, and is what ``lucid-data check``
-calls. Every expected count is a parameter, so the logic is unit-testable against a
-tiny fake layout: COCO's per-split counts default to the published ones because a
-COCO split either is that split or is not, while DOTA's and YOLO's totals default to
-unstated — neither publishes a total this project can hold every root to.
+The check core is importable (:func:`check_coco_root`, :func:`check_dota_root` and :func:`check_yolo_root` return
+a :class:`DataCheck` whose ``ok`` flag drives the exit status); :func:`check_dataset` is the dispatch over them, and
+is what ``lucid-data check`` calls. Every expected count is a parameter, so the logic is unit-testable against a
+tiny fake layout: COCO's per-split counts default to the published ones because a COCO split either is that split
+or is not, while DOTA's and YOLO's totals default to unstated — neither publishes a total this project can hold
+every root to.
 
 Relationship to :mod:`lucid_yolo.data.verify`:
-    This module validates the layout by **counts** — fixed per-split totals plus
-    annotation-vs-disk count parity — and answers "is this the dataset as published".
-    :mod:`lucid_yolo.data.verify` performs the complementary **per-file existence**
-    check and answers "which annotated images are missing", which is what a download
-    wants to know. The two stay separate because their logic differs materially, not
-    because one of them was developer-only: both ship, as ``lucid-data check`` and
-    ``lucid-data download --verify`` (WP-096).
+    This module validates the layout by **counts** — fixed per-split totals plus annotation-vs-disk count parity —
+    and answers "is this the dataset as published". :mod:`lucid_yolo.data.verify` performs the complementary
+    **per-file existence** check and answers "which annotated images are missing", which is what a download wants to
+    know. The two stay separate because their logic differs materially, not because one of them was developer-only:
+    both ship, as ``lucid-data check`` and ``lucid-data download --verify`` (WP-096).
 
     Neither runs inside ``fit``. A counts gate asserts the *published* totals, so
     coupling it to training would refuse a legitimate subset or smoke run at startup.
@@ -105,9 +88,8 @@ Examples:
         lucid-data check --data_root /data/dota --dataset dota \
             --expected_images 1869 --expected_instances 127843
 
-    Check a root that ships only a training split — a third-party export whose validation
-    split was never cut is a correct export, and failing it on a missing ``val`` would be
-    the pre-flight refusing a dataset that trains::
+    Check a root that ships only a training split — a third-party export whose validation split was never cut is a
+    correct export, and failing it on a missing ``val`` would be the pre-flight refusing a dataset that trains::
 
         lucid-data check --data_root /data/roboflow_export --splits '[train]'
 """
@@ -134,20 +116,17 @@ if TYPE_CHECKING:
 #: Expected image counts for the two COCO 2017 splits (blueprint sec. 14.3).
 COCO_TRAIN_COUNT = 118287
 COCO_VAL_COUNT = 5000
-#: Published DOTA-v1.0 totals (AGENTS.md sec. 3; R18). These cover all three splits,
-#: testing included, and R18 releases no testing ground truth — so they are what a
-#: caller asserting the *whole* dataset passes, never a default (see
-#: :func:`check_dota_root`).
+#: Published DOTA-v1.0 totals (AGENTS.md sec. 3; R18). These cover all three splits, testing included, and R18
+#: releases no testing ground truth — so they are what a caller asserting the *whole* dataset passes, never a default
+#: (see :func:`check_dota_root`).
 DOTA_IMAGE_COUNT = 2806
 DOTA_INSTANCE_COUNT = 188282
-#: Totals of the two annotated splits, **measured** on a complete DOTA-v1.0
-#: train-plus-val provisioning from the official distribution (2026-08-13): 1,411 plus
-#: 458 images, 98,990 plus 28,853 object lines with difficult instances included. Not a
-#: published figure — R18 states only the whole-dataset totals above, and 2,806 minus
-#: 1,869 is exactly the 937 images of the withheld testing third. Offered so a caller
-#: has something to pass to ``--expected_images``, which is how a truncated download or
-#: a half-unpacked archive gets caught; still not a default, because a root provisioned
-#: with one split is a legitimate thing to check.
+#: Totals of the two annotated splits, **measured** on a complete DOTA-v1.0 train-plus-val provisioning from the
+#: official distribution (2026-08-13): 1,411 plus 458 images, 98,990 plus 28,853 object lines with difficult instances
+#: included. Not a published figure — R18 states only the whole-dataset totals above, and 2,806 minus 1,869 is exactly
+#: the 937 images of the withheld testing third. Offered so a caller has something to pass to ``--expected_images``,
+#: which is how a truncated download or a half-unpacked archive gets caught; still not a default, because a root
+#: provisioned with one split is a legitimate thing to check.
 DOTA_ANNOTATED_IMAGE_COUNT = 1869
 DOTA_ANNOTATED_INSTANCE_COUNT = 127843
 DOTA_CLASS_COUNT = len(DOTA_CLASSES)
@@ -163,10 +142,9 @@ _COCO_SPLITS = ("train", "val")
 #: 2017's pose annotations carry in its place beside it (R12).
 _INSTANCES_PREFIX = "instances_"
 _KEYPOINTS_PREFIX = "person_keypoints_"
-#: Top-level sections of a COCO annotation file that the readers iterate as lists. This check
-#: promises presence and parseability, so a section left out is not malformed -- an absent
-#: ``images`` counts as zero -- but one present in any other form is: counting or reading it
-#: would raise or miscount rather than report.
+#: Top-level sections of a COCO annotation file that the readers iterate as lists. This check promises presence
+#: and parseability, so a section left out is not malformed -- an absent ``images`` counts as zero -- but one
+#: present in any other form is: counting or reading it would raise or miscount rather than report.
 _COCO_LIST_SECTIONS = ("images", "annotations", "categories")
 #: Image file suffixes counted on disk (COCO 2017 ships ``.jpg``).
 _IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")
@@ -187,8 +165,7 @@ class SplitCheck:
         name: Split name (e.g. ``"train2017"``).
         expected_images: Expected on-disk image count for this split, or ``None`` when the
             split's spelling publishes none and only presence and parseability are checked.
-        found_images: Image files actually found on disk (``-1`` if the directory
-            is missing).
+        found_images: Image files actually found on disk (``-1`` if the directory is missing).
         annotation_images: Image entries declared in the annotation JSON (``-1``
             if the file is missing or failed to parse).
         problems: Human-readable problem descriptions; empty when the split is OK.
@@ -258,11 +235,10 @@ class DataCheck:
         splits: The per-split results.
         problems: Root-level problems that belong to no single split (the
             cross-split totals); empty when there are none.
-        notes: Root-level observations that are **not** problems — the summed
-            counts a caller may want to read off, printed but never failing the
-            check. A count nobody stated an expectation for is information, and
-            information reported as a problem trains an operator to skim past
-            the report, which is how the unreachable totals clause survived.
+        notes: Root-level observations that are **not** problems — the summed counts a caller may want to read off,
+            printed but never failing the check. A count nobody stated an expectation for is information, and
+            information reported as a problem trains an operator to skim past the report, which is how the unreachable
+            totals clause survived.
     """
 
     splits: list[SplitCheck] | list[PairedSplitCheck]
@@ -327,9 +303,8 @@ def check_split(name: str, images_dir: Path, annotation_file: Path, expected_ima
         name: Split name for messages.
         images_dir: The split's image directory.
         annotation_file: The split's annotation JSON.
-        expected_images: The image count this split must have, which the annotation file's
-            own count must then match too; ``None`` checks only that both exist and the file
-            parses.
+        expected_images: The image count this split must have, which the annotation file's own count must then match
+            too; ``None`` checks only that both exist and the file parses.
 
     Returns:
         A :class:`SplitCheck` capturing the counts and any problems found.
@@ -372,21 +347,18 @@ def check_coco_root(
 ) -> DataCheck:
     """Validate a COCO-format root: COCO 2017's names and counts where it is spelled so.
 
-    Each split is resolved through :func:`~lucid_yolo.data.layout.resolve_split`. A split that
-    resolves to COCO 2017's own ``{split}2017`` pair — or to nothing, where the resolver falls
-    back to that pair and the check reports it missing — is checked against the blueprint
-    section 14.3 layout, published count included. A split resolving to another spelling is
-    checked for presence and parseability alone, under its own split name.
+    Each split is resolved through :func:`~lucid_yolo.data.layout.resolve_split`. A split that resolves to COCO
+    2017's own ``{split}2017`` pair — or to nothing, where the resolver falls back to that pair and the check reports
+    it missing — is checked against the blueprint section 14.3 layout, published count included. A split resolving to
+    another spelling is checked for presence and parseability alone, under its own split name.
 
     Args:
         data_root: Directory holding the split directories and ``annotations``.
-        expected_train: Expected ``train2017`` image count (defaults to the real
-            COCO total, overridable so the logic is testable on a fake layout). Applies
-            only to a split in COCO 2017's spelling.
+        expected_train: Expected ``train2017`` image count (defaults to the real COCO total, overridable so the logic
+            is testable on a fake layout). Applies only to a split in COCO 2017's spelling.
         expected_val: Expected ``val2017`` image count, on the same terms.
-        keypoints: Also require each split's ``person_keypoints_*.json``, beside its
-            ``instances_*.json``, to exist and parse. A missing or unparsable file is a
-            root-level problem; each one that parses is a note.
+        keypoints: Also require each split's ``person_keypoints_*.json``, beside its ``instances_*.json``, to exist
+            and parse. A missing or unparsable file is a root-level problem; each one that parses is a note.
 
     Returns:
         A :class:`DataCheck` aggregating both splits' outcomes.
@@ -421,9 +393,8 @@ def _check_keypoint_files(annotation_files: Iterable[Path]) -> tuple[list[str], 
         annotation_files: Each split's resolved instances annotation file, in split order.
 
     Returns:
-        The problems — a keypoint file missing or failing to parse, or an annotation file with
-        no ``instances_`` spelling to name its keypoint counterpart from — and one note per
-        keypoint file that parsed.
+        The problems — a keypoint file missing or failing to parse, or an annotation file with no ``instances_``
+        spelling to name its keypoint counterpart from — and one note per keypoint file that parsed.
 
     Examples:
         ```pycon
@@ -514,10 +485,9 @@ def _scan_labels(labels_dir: Path) -> tuple[int, frozenset[int], list[str]]:
         labels_dir: The split's ``labelTxt`` directory.
 
     Returns:
-        A ``(instances, classes, problems)`` triple. ``instances`` counts every
-        object line, difficult ones included; ``problems`` holds one entry per
-        label file that failed to parse, so a malformed file is reported rather
-        than raised.
+        A ``(instances, classes, problems)`` triple. ``instances`` counts every object line, difficult ones included;
+        ``problems`` holds one entry per label file that failed to parse, so a malformed file is reported rather than
+        raised.
 
     Examples:
         ```pycon
@@ -631,21 +601,17 @@ def check_dota_root(
 ) -> DataCheck:
     """Validate a DOTA-v1.0 root: per-split layout, and any totals the caller states.
 
-    Each split is checked by :func:`check_dota_split`. The totals across the
-    checked splits are then **reported**, and compared only against an
-    expectation the caller actually supplied — an ``expected_*`` left at
-    ``None`` produces a note, never a problem.
+    Each split is checked by :func:`check_dota_split`. The totals across the checked splits are then **reported**, and
+    compared only against an expectation the caller actually supplied — an ``expected_*`` left at ``None`` produces a
+    note, never a problem.
 
-    The published counts (:data:`DOTA_IMAGE_COUNT`, :data:`DOTA_INSTANCE_COUNT`,
-    :data:`DOTA_CLASS_COUNT`) are not defaults here, because they are not
-    reachable by the roots this function is pointed at. They describe DOTA-v1.0
-    whole, and R18 sec. 4 splits it into half training, one sixth validation and
-    one third testing, releasing ground truth for the first two only: a
-    correctly provisioned ``train``/``val`` root therefore holds about two
-    thirds of 2,806 images and can never sum to it. Asserting them by default
-    made the one command an operator runs first fail on a correct download,
-    twice over, with the layout and pairing verdicts that *are* meaningful
-    printed just above the noise (WP-097). Pass them explicitly to assert them.
+    The published counts (:data:`DOTA_IMAGE_COUNT`, :data:`DOTA_INSTANCE_COUNT`, :data:`DOTA_CLASS_COUNT`) are not
+    defaults here, because they are not reachable by the roots this function is pointed at. They describe DOTA-v1.0
+    whole, and R18 sec. 4 splits it into half training, one sixth validation and one third testing, releasing ground
+    truth for the first two only: a correctly provisioned ``train``/``val`` root therefore holds about two thirds of
+    2,806 images and can never sum to it. Asserting them by default made the one command an operator runs first fail
+    on a correct download, twice over, with the layout and pairing verdicts that *are* meaningful printed just above
+    the noise (WP-097). Pass them explicitly to assert them.
 
     Args:
         data_root: Directory holding the split directories.
@@ -679,13 +645,11 @@ def check_dota_root(
 def _require_splits(splits: tuple[str, ...]) -> None:
     """Raise :class:`ValueError` unless ``splits`` names at least one split.
 
-    Every other bad argument in this module fails loudly; an empty ``splits`` fails
-    *quietly*, which is worse here than anywhere else in it. No split checked means no
-    problem found means ``PASS: dataset layout valid`` printed over a root nothing
-    looked at — a clean green from the one command whose whole purpose is to be believed.
-    Both root checkers guard rather than only :func:`check_dataset`, because they are
-    documented as the importable core and a library caller reaches them without passing
-    the entry point at all.
+    Every other bad argument in this module fails loudly; an empty ``splits`` fails *quietly*, which is worse here
+    than anywhere else in it. No split checked means no problem found means ``PASS: dataset layout valid`` printed
+    over a root nothing looked at — a clean green from the one command whose whole purpose is to be believed. Both
+    root checkers guard rather than only :func:`check_dataset`, because they are documented as the importable core
+    and a library caller reaches them without passing the entry point at all.
 
     Args:
         splits: The split names about to be checked.
@@ -716,10 +680,9 @@ def _totals(
 ) -> tuple[list[str], list[str]]:
     """Sum a paired layout's per-split counts, and compare them with the totals stated.
 
-    Shared by the DOTA and the YOLO root check, which reach the same question from
-    different label grammars: neither layout publishes a per-root total this project can
-    hold every provisioning to, so an ``expected_*`` left at ``None`` is reported and never
-    required (WP-097).
+    Shared by the DOTA and the YOLO root check, which reach the same question from different label grammars: neither
+    layout publishes a per-root total this project can hold every provisioning to, so an ``expected_*`` left at
+    ``None`` is reported and never required (WP-097).
 
     Args:
         checks: The per-split outcomes, in the order the splits were checked.
@@ -729,8 +692,7 @@ def _totals(
         expected_classes: Number of distinct classes to require, or ``None``.
 
     Returns:
-        The problems raised by a stated total that was not met, and the one note carrying
-        the observed totals.
+        The problems raised by a stated total that was not met, and the one note carrying the observed totals.
 
     Examples:
         ```pycon
@@ -793,11 +755,10 @@ def _scan_yolo_labels(labels_dir: Path, num_classes: int, oriented: bool) -> tup
 def check_yolo_split(name: str, data_root: Path, config: YoloDataConfig, oriented: bool = False) -> PairedSplitCheck:
     """Validate one split of a YOLO root: its two directories, their pairing and every row.
 
-    The split's directories come from :func:`~lucid_yolo.data.yolo.resolve_split_dirs`, so a
-    split the ``data.yaml`` points somewhere its own way is checked where the reader will
-    look for it rather than where a convention says it should be (A58). A split entry that
-    resolves nowhere is that split's problem, not an exception: the report is the product
-    here, and one unbuilt split should not hide a second one's verdict.
+    The split's directories come from :func:`~lucid_yolo.data.yolo.resolve_split_dirs`, so a split the ``data.yaml``
+    points somewhere its own way is checked where the reader will look for it rather than where a convention says it
+    should be (A58). A split entry that resolves nowhere is that split's problem, not an exception: the report is the
+    product here, and one unbuilt split should not hide a second one's verdict.
 
     Args:
         name: Split name as keyed in the ``data.yaml``, e.g. ``"train"``.
@@ -849,23 +810,20 @@ def check_yolo_root(
 ) -> DataCheck:
     """Validate a YOLO root: its ``data.yaml``, each split's pairing, and every label row.
 
-    The ``data.yaml`` is read first and is the whole of the class space, so a root without
-    one — or with one that contradicts itself, an ``nc`` disagreeing with its ``names``
-    (A57) — has no split worth checking and is reported as that one problem. Otherwise each
-    split in ``splits`` is checked by :func:`check_yolo_split`, and the totals are reported
-    and required only where stated, as for DOTA.
+    The ``data.yaml`` is read first and is the whole of the class space, so a root without one — or with one that
+    contradicts itself, an ``nc`` disagreeing with its ``names`` (A57) — has no split worth checking and is reported
+    as that one problem. Otherwise each split in ``splits`` is checked by :func:`check_yolo_split`, and the totals
+    are reported and required only where stated, as for DOTA.
 
-    What this deliberately does **not** check: that an image decodes, that a box is
-    plausible, or that a class the ``data.yaml`` declares is used by any row. The first two
-    are the reader's job at the moment it reads (and would cost an epoch's decoding here);
-    the third is not a fault at all — an export whose validation split happens to use six of
-    its eight classes is a correct export, and failing it would be WP-097's mistake again.
+    What this deliberately does **not** check: that an image decodes, that a box is plausible, or that a class the
+    ``data.yaml`` declares is used by any row. The first two are the reader's job at the moment it reads (and would
+    cost an epoch's decoding here); the third is not a fault at all — an export whose validation split happens to use
+    six of its eight classes is a correct export, and failing it would be WP-097's mistake again.
 
     Args:
         data_root: Directory holding ``data.yaml`` and the split trees.
-        splits: Split names to check; the two a training run builds by default, since this
-            validates what ``fit`` will read. A ``test:`` entry is checked only when asked
-            for by name, because no run of this project opens it.
+        splits: Split names to check; the two a training run builds by default, since this validates what ``fit`` will
+            read. A ``test:`` entry is checked only when asked for by name, because no run of this project opens it.
         oriented: Read the nine-field oriented rows on every split (see
             :func:`check_yolo_split`).
         expected_images: Image count to require summed over ``splits``, or ``None`` to
@@ -979,25 +937,20 @@ def check_dataset(
 
     Args:
         data_root: Dataset root directory.
-        dataset: Which layout to validate — ``coco``, ``dota`` or ``yolo``. Left unstated
-            (the default) the root is **probed** by
-            :func:`~lucid_yolo.data.layout.detect_layout`, which is the same dispatch a
-            ``fit`` without ``--data.layout`` makes: this command is that run's pre-flight,
-            so inferring differently would validate a question the run never asks. A DOTA
-            root is outside the probe and must be named.
-        oriented: ``yolo`` only — read the nine-field oriented label rows rather than
-            five-field boxes. The variant is a property of the dataset and is declared,
-            never sniffed (WP-099).
-        splits: ``dota`` and ``yolo`` — the split names to check. Left unstated (the
-            default) each layout keeps its own — :data:`DOTA_SPLITS`, :data:`YOLO_SPLITS` —
-            which is a property of the layout and not of this call, so the default is never
-            restated here. Naming a subset is how a root shipping only ``train`` passes: a
-            third-party export whose validation split was never cut is a correct export, and
-            failing it on a ``val`` nobody provisioned is WP-097's mistake in a new place.
-            COCO refuses the flag rather than defaulting it, because its two splits *are*
-            that layout — the names and the published per-split counts checked against them
-            are one fact (:func:`check_coco_root`), so a subset of them is not a question
-            the COCO branch can be asked.
+        dataset: Which layout to validate — ``coco``, ``dota`` or ``yolo``. Left unstated (the default) the root is
+            **probed** by :func:`~lucid_yolo.data.layout.detect_layout`, which is the same dispatch a ``fit`` without
+            ``--data.layout`` makes: this command is that run's pre-flight, so inferring differently would validate a
+            question the run never asks. A DOTA root is outside the probe and must be named.
+        oriented: ``yolo`` only — read the nine-field oriented label rows rather than five-field boxes. The variant
+            is a property of the dataset and is declared, never sniffed (WP-099).
+        splits: ``dota`` and ``yolo`` — the split names to check. Left unstated (the default) each layout keeps its
+            own — :data:`DOTA_SPLITS`, :data:`YOLO_SPLITS` — which is a property of the layout and not of this call,
+            so the default is never restated here. Naming a subset is how a root shipping only ``train`` passes: a
+            third-party export whose validation split was never cut is a correct export, and failing it on a ``val``
+            nobody provisioned is WP-097's mistake in a new place. COCO refuses the flag rather than defaulting it,
+            because its two splits *are* that layout — the names and the published per-split counts checked against
+            them are one fact (:func:`check_coco_root`), so a subset of them is not a question the COCO branch can
+            be asked.
         expected_images: ``dota`` and ``yolo`` — image count to require across the
             checked splits; omitted, the count is reported and not required.
         expected_instances: ``dota`` and ``yolo`` — object-line count to require,
@@ -1009,16 +962,14 @@ def check_dataset(
             config left pointing elsewhere is caught here rather than after the run queued.
 
     Returns:
-        ``0`` when the layout is valid, ``1`` otherwise — including when the root satisfies
-        no convention, which is a verdict about the disk and so is reported rather than
-        raised.
+        ``0`` when the layout is valid, ``1`` otherwise — including when the root satisfies no convention, which
+        is a verdict about the disk and so is reported rather than raised.
 
     Raises:
-        ValueError: If ``dataset`` is not a known layout, if ``splits`` names nothing at all,
-            or if a flag is supplied for a layout it does not apply to. A flag silently
-            ignored is worse than a rejected one: the report then reads as though it had been
-            enforced — and an empty ``splits`` is the sharpest case of that, since checking
-            no split at all yields a clean PASS about nothing.
+        ValueError: If ``dataset`` is not a known layout, if ``splits`` names nothing at all, or if a flag is supplied
+            for a layout it does not apply to. A flag silently ignored is worse than a rejected one: the report then
+            reads as though it had been enforced — and an empty ``splits`` is the sharpest case of that, since
+            checking no split at all yields a clean PASS about nothing.
 
     Examples:
         ```pycon
@@ -1031,8 +982,7 @@ def check_dataset(
 
         ```
 
-        Naming a subset narrows what is checked, and the totals note says which splits it
-        summed:
+        Naming a subset narrows what is checked, and the totals note says which splits it summed:
 
         ```pycon
         >>> code = check_dataset(Path("/nonexistent"), dataset="dota", splits=("train",))
@@ -1071,11 +1021,10 @@ def check_dataset(
 def _infer_dataset(data_root: Path) -> tuple[str | None, list[str]]:
     """Ask the layout probe which convention ``data_root`` is written in.
 
-    The probe raises on both of its undecidable states — a root satisfying neither
-    convention, and one satisfying both (A63) — and both are verdicts about the disk, so
-    they come back as report problems here. ``lucid-data check`` is the first command run
-    against a fresh provisioning; a traceback where a report belongs is what WP-097 already
-    paid for once.
+    The probe raises on both of its undecidable states — a root satisfying neither convention, and one satisfying
+    both (A63) — and both are verdicts about the disk, so they come back as report problems here.
+    ``lucid-data check`` is the first command run against a fresh provisioning; a traceback where a report belongs
+    is what WP-097 already paid for once.
 
     Args:
         data_root: Dataset root to probe.
@@ -1118,10 +1067,9 @@ def _check_flags_apply(
         keypoints: The keypoint-annotation flag, which names COCO's own pose files.
 
     Raises:
-        ValueError: If a flag applies to no layout in play. The counts are meaningless for
-            COCO, whose per-split totals are published and are the check's own defaults; the
-            oriented reading is a property of the YOLO row grammar alone; and COCO's splits
-            are fixed by the same publication the counts come from, so
+        ValueError: If a flag applies to no layout in play. The counts are meaningless for COCO, whose per-split
+            totals are published and are the check's own defaults; the oriented reading is a property of the YOLO row
+            grammar alone; and COCO's splits are fixed by the same publication the counts come from, so
             :func:`check_coco_root` has no ``splits`` to narrow.
 
     Examples:
@@ -1171,9 +1119,8 @@ def _check_root(
         dataset: The layout to check, already validated and resolved.
         oriented: Whether YOLO rows are read as the oriented variant.
         keypoints: Whether COCO's ``person_keypoints_*.json`` files are checked too.
-        splits: Split names to check, or ``None`` to keep the layout's own — which each
-            branch names for itself here, since which splits a layout has by default is a
-            fact about that layout rather than about this dispatch.
+        splits: Split names to check, or ``None`` to keep the layout's own — which each branch names for itself here,
+            since which splits a layout has by default is a fact about that layout rather than about this dispatch.
         expected_images: Image count to require, or ``None``.
         expected_instances: Object-line count to require, or ``None``.
         expected_classes: Distinct class count to require, or ``None``.

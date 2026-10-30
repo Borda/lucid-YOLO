@@ -1,24 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 """Flat-test-group audit: a mechanical enumeration outside a class (WP-128, split off 117).
 
-WP-117's "8 groups across 6 files" was a one-off human read; a first-shared-word ``ast``
-scan over every ``test_`` name returned ~90 candidate groups, because this suite's house
-style already writes full descriptive sentences (``test_the_boundary_sits_at_the_midpoint``)
-that share a topic noun -- indistinguishable from genuinely flat, mechanical enumeration
-(``test_<subject>_<case>``) by name alone.
+WP-117's "8 groups across 6 files" was a one-off human read; a first-shared-word ``ast`` scan over every ``test_``
+name returned ~90 candidate groups, because this suite's house style already writes full descriptive sentences
+(``test_the_boundary_sits_at_the_midpoint``) that share a topic noun -- indistinguishable from genuinely flat,
+mechanical enumeration (``test_<subject>_<case>``) by name alone.
 
-The discriminator this module commits to: a candidate group of ``test_`` functions is
-flat rather than merely topic-sharing only when its shared name prefix's tokens also
-appear, contiguously and in order, inside the tokens of something the file actually
-*calls* -- a bare function, a ``module.function``/``obj.method`` attribute call, with any
-single leading underscore stripped. ``test_check_data_passes_on_matching_counts`` and
-``test_check_data_fails_on_count_mismatch`` share the prefix ``check_data``, which is
-exactly the imported ``check_data`` alias both bodies call through; ``test_a_named_worker_
-count_reaches_the_val_loader`` and its four siblings share only ``a_named``/``an_auto``/
-``the_val``, prose fragments no callable in the file is named after, so they are left
-alone. A confirmed group of three or more still sitting at module level -- not yet grouped
-under a ``class Test<Subject>:``, :func:`tests/eval/test_tile_merge.py`'s own established
-pattern -- fails the audit.
+The discriminator this module commits to: a candidate group of ``test_`` functions is flat rather than merely
+topic-sharing only when its shared name prefix's tokens also appear, contiguously and in order, inside the tokens
+of something the file actually *calls* -- a bare function, a ``module.function``/``obj.method`` attribute call,
+with any single leading underscore stripped. ``test_check_data_passes_on_matching_counts`` and
+``test_check_data_fails_on_count_mismatch`` share the prefix ``check_data``, which is exactly the imported
+``check_data`` alias both bodies call through; ``test_a_named_worker_
+count_reaches_the_val_loader`` and its four siblings share only ``a_named``/``an_auto``/ ``the_val``, prose
+fragments no callable in the file is named after, so they are left alone. A confirmed group of three or more still
+sitting at module level -- not yet grouped under a ``class Test<Subject>:``, :func:`tests/eval/test_tile_merge.py`'s
+own established pattern -- fails the audit.
 
 Examples:
     Command-line usage (exit status is the process return code)::
@@ -40,30 +37,27 @@ from scripts.lint._common import REPO_ROOT, print_failure, sorted_rglob
 DEFAULT_TESTS_DIR = REPO_ROOT / "tests"
 DEFAULT_SCRIPTS_TESTS_DIR = REPO_ROOT / "scripts" / "_tests"
 
-#: Minimum group size a mechanical enumeration must reach before it is enforced -- a
-#: two-member group is common even among genuinely descriptive, unrelated test names.
+#: Minimum group size a mechanical enumeration must reach before it is enforced -- a two-member group is common
+#: even among genuinely descriptive, unrelated test names.
 _MIN_GROUP_SIZE = 3
 #: Token-prefix length used as the grouping key, e.g. ``("check", "data")``.
 #:
-#: Two rather than one, and the difference is measured rather than assumed. At length
-#: one the contiguous-subsequence confirmation below matches any callee merely
-#: *containing* the token, which over the live tree returns 16 groups keyed on prose
-#: fragments -- ``the``, ``every``, ``load`` -- exactly the false-positive class this
-#: module's discriminator exists to exclude. Length three finds nothing length two
-#: does not, and provably cannot: a three-token prefix that is a contiguous
-#: subsequence of a callee has a two-token prefix that is one too, so its group is
-#: always a subset of the shorter key's. Length one remains reachable through
-#: ``--prefix-tokens``, where the stricter whole-callee rule applies to it.
+#: Two rather than one, and the difference is measured rather than assumed. At length one the contiguous-subsequence
+#: confirmation below matches any callee merely *containing* the token, which over the live tree returns 16 groups
+#: keyed on prose fragments -- ``the``, ``every``, ``load`` -- exactly the false-positive class this module's
+#: discriminator exists to exclude. Length three finds nothing length two does not, and provably cannot: a
+#: three-token prefix that is a contiguous subsequence of a callee has a two-token prefix that is one too, so
+#: its group is always a subset of the shorter key's. Length one remains reachable through ``--prefix-tokens``,
+#: where the stricter whole-callee rule applies to it.
 DEFAULT_PREFIX_TOKENS = 2
 
 
 def _name_tokens(identifier: str) -> tuple[str, ...]:
     """Split a snake_case identifier into its lowercased, non-empty tokens.
 
-    Case-folded because the two sides being compared are spelled by different
-    conventions: a test name is snake_case by pytest's collection rule, while the
-    thing it calls may be a class (``C3k2``) or any other CapWords callee. Comparing
-    them as written means a class-named subject can never confirm its own group.
+    Case-folded because the two sides being compared are spelled by different conventions: a test name is snake_case
+    by pytest's collection rule, while the thing it calls may be a class (``C3k2``) or any other CapWords callee.
+    Comparing them as written means a class-named subject can never confirm its own group.
 
     Examples:
         >>> _name_tokens("_plan_archives")
@@ -112,10 +106,9 @@ def _is_contiguous_subsequence(candidate: tuple[str, ...], target: tuple[str, ..
 def _confirms(prefix: tuple[str, ...], target: tuple[str, ...]) -> bool:
     """True if ``target`` is a callee the ``prefix`` can be said to name.
 
-    A single-token prefix must name the **whole** callee rather than appear inside
-    one. Containment is a usable signal at two tokens and noise at one: ``the`` is
-    contained in ``check_the_gfm_table_extension_is_declared``, which would confirm
-    every ``test_the_*`` sentence this suite's house style writes.
+    A single-token prefix must name the **whole** callee rather than appear inside one. Containment is a usable
+    signal at two tokens and noise at one: ``the`` is contained in ``check_the_gfm_table_extension_is_declared``,
+    which would confirm every ``test_the_*`` sentence this suite's house style writes.
 
     Examples:
         >>> _confirms(("fusion",), ("fusion",))
@@ -148,9 +141,9 @@ def module_level_test_names(tree: ast.Module) -> list[str]:
 def find_flat_groups(path: Path, prefix_tokens: int = DEFAULT_PREFIX_TOKENS) -> dict[str, list[str]]:
     """Confirmed flat groups in ``path``: ``{"prefix_tokens": [test names]}``, size >= 3.
 
-    A group is confirmed only when its shared prefix also names something the file calls
-    (see the module docstring); an unconfirmed shared prefix -- house-style prose sharing a
-    topic noun -- is not reported, however many names share it.
+    A group is confirmed only when its shared prefix also names something the file calls (see the module docstring);
+    an unconfirmed shared prefix -- house-style prose sharing a topic noun -- is not reported, however many names
+    share it.
 
     Args:
         path: Test file to parse.

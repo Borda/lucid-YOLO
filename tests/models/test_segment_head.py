@@ -1,21 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-047 mask-coefficient branch.
 
-Covers opt-in coefficient shapes, tanh activation, anchor flattening, disabled
-detection-head identity, and the separation of the two branches' coefficient
-parameters. Prototype construction and mask assembly are intentionally outside
-this module's scope.
+Covers opt-in coefficient shapes, tanh activation, anchor flattening, disabled detection-head identity, and the
+separation of the two branches' coefficient parameters. Prototype construction and mask assembly are intentionally
+outside this module's scope.
 """
 
 from __future__ import annotations
 
 import torch
+from head_pyramid_helpers import STRIDES, feature_sizes, neck_features, square_anchor_grid
 
-from lucid_yolo.assign.grid import make_anchor_points
 from lucid_yolo.models import DualDetectionHead
 from lucid_yolo.models.heads.detect import _flatten_level
 
-_STRIDES = [8, 16, 32]
 _CHANNELS = (16, 32, 64)
 _PRECHANGE_PARAMETER_COUNT = 205600
 _PRECHANGE_STEM_SUFFIXES = (
@@ -48,24 +46,6 @@ _PRECHANGE_STEM_SUFFIXES = (
 )
 
 
-def _features(
-    input_size: int,
-    channels: tuple[int, int, int] = _CHANNELS,
-    batch: int = 2,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Build stride-8/16/32 neck features for an ``input_size`` square image.
-
-    Examples:
-        >>> features = _features(128)
-        >>> [f.shape for f in features]
-        [torch.Size([2, 16, 16, 16]), torch.Size([2, 32, 8, 8]), torch.Size([2, 64, 4, 4])]
-    """
-    return tuple(
-        torch.randn(batch, level_channels, input_size // stride, input_size // stride)
-        for level_channels, stride in zip(channels, _STRIDES, strict=True)
-    )
-
-
 def _prechange_state_dict_keys() -> tuple[str, ...]:
     """Return the fixed WP-046 state-dict key sequence for the n-scale head.
 
@@ -85,7 +65,7 @@ def _prechange_state_dict_keys() -> tuple[str, ...]:
 
 def _prechange_branch_output(
     branch: torch.nn.Module,
-    features: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    features: tuple[torch.Tensor, ...],
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Run the exact WP-046 box/class prediction loop for one branch.
 
@@ -117,7 +97,7 @@ def test_coeff_shapes() -> None:
             output.bias.data.fill_(2.0)
 
     with torch.no_grad():
-        out = head(_features(128))
+        out = head(neck_features(128, _CHANNELS))
 
     assert out.o2m_coeff is not None
     assert out.o2o_coeff is not None
@@ -131,12 +111,10 @@ def test_coeff_shapes() -> None:
 def test_coeff_anchor_order_agreement() -> None:
     """The head concatenates coefficient levels in the anchor-grid's own order.
 
-    Drives the real head rather than the flattening helper: each level's
-    coefficient stem is collapsed to a constant output (zero weights, a distinct
-    bias per level), so the dense coefficient tensor must carry those constants
-    over exactly the index ranges ``make_anchor_points`` assigns to each level.
-    A branch that concatenated levels in another order would still produce the
-    right shape and so pass every other test in this file.
+    Drives the real head rather than the flattening helper: each level's coefficient stem is collapsed to a constant
+    output (zero weights, a distinct bias per level), so the dense coefficient tensor must carry those constants over
+    exactly the index ranges ``make_anchor_points`` assigns to each level. A branch that concatenated levels in another
+    order would still produce the right shape and so pass every other test in this file.
     """
     torch.manual_seed(0)
     input_size = 128
@@ -148,14 +126,13 @@ def test_coeff_anchor_order_agreement() -> None:
             stem[-1].bias.data.fill_(bias)
 
     with torch.no_grad():
-        coefficients = head(_features(input_size)).o2o_coeff
+        coefficients = head(neck_features(input_size, _CHANNELS)).o2o_coeff
 
-    feature_sizes = [(input_size // stride, input_size // stride) for stride in _STRIDES]
-    anchor_points, strides = make_anchor_points(feature_sizes, _STRIDES)
+    anchor_points, strides = square_anchor_grid(input_size)
     assert coefficients.shape[1] == anchor_points.shape[0]
 
     start = 0
-    for (height, width), stride, bias in zip(feature_sizes, _STRIDES, biases, strict=True):
+    for (height, width), stride, bias in zip(feature_sizes(input_size), STRIDES, biases, strict=True):
         stop = start + height * width
         assert torch.all(strides[start:stop] == stride), f"level at stride {stride} occupies another index range"
         assert torch.allclose(coefficients[:, start:stop, :], torch.tanh(torch.tensor(bias)))
@@ -167,7 +144,7 @@ def test_coeffs_off_by_default_without_detection_head_changes() -> None:
     """The default head retains the exact WP-046 module/state/parameter contract."""
     torch.manual_seed(0)
     head = DualDetectionHead(in_channels=(64, 128, 256), num_classes=80).eval()
-    features = _features(128, channels=(64, 128, 256))
+    features = neck_features(128, (64, 128, 256))
 
     with torch.no_grad():
         expected_o2m_cls, expected_o2m_box = _prechange_branch_output(head.o2m, features)
@@ -186,7 +163,11 @@ def test_coeffs_off_by_default_without_detection_head_changes() -> None:
 
 
 def test_coefficient_stems_disjoint_between_branches() -> None:
-    """One-to-one and one-to-many coefficient stems own separate parameters."""
+    """One-to-one and one-to-many coefficient stems own separate parameters.
+
+    A coefficient stem shared across the branches would let the training-only one-to-many mask supervision write into
+    the one-to-one coefficients that ship.
+    """
     head = DualDetectionHead(in_channels=_CHANNELS, num_classes=4, num_coeffs=32)
     o2m_ids = {id(parameter) for parameter in head.o2m.coeff_stems.parameters()}
     o2o_ids = {id(parameter) for parameter in head.o2o.coeff_stems.parameters()}

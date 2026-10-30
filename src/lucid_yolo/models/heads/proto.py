@@ -1,13 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Prototype-feature fusion, generation, and assembly from Equation 7-9 (WP-048-051).
 
-The fusion preserves the highest-resolution P3 feature ``X_1`` directly, then
-adds each coarser P4/P5 feature after a learned 1x1 projection into P3's channel
-space and nearest-neighbour upsampling to P3's exact spatial resolution. It
-returns the fused feature. :class:`ProtoNet` then maps that feature to raw
-per-image prototype maps, and :func:`assemble_masks` linearly combines those
-prototypes with per-instance coefficients (Eq. 7); semantic supervision
-intentionally lands in a later work package.
+The fusion preserves the highest-resolution P3 feature ``X_1`` directly, then adds each coarser P4/P5 feature after
+a learned 1x1 projection into P3's channel space and nearest-neighbour upsampling to P3's exact spatial resolution.
+It returns the fused feature. :class:`ProtoNet` then maps that feature to raw per-image prototype maps, and
+:func:`assemble_masks` linearly combines those prototypes with per-instance coefficients (Eq. 7); semantic
+supervision intentionally lands in a later work package.
 
 Provenance: R1 Eq. 7-9. Assumptions: A16, A18, A35.
 """
@@ -29,15 +27,12 @@ __all__ = ["ProtoFusion", "ProtoNet", "assemble_masks"]
 class ProtoFusion(nn.Module):
     """Fuse stride-8/16/32 features into the Equation 8 prototype input ``F_proto``.
 
-    The finest feature ``X_1`` (P3) is deliberately not projected: its identity
-    path is the first term of Eq. 8. P4 and P5 each receive their own bare 1x1
-    convolution into P3's channel space before nearest-neighbour interpolation
-    to P3's exact size, which keeps the sum well-formed for odd and non-square
-    feature maps.
+    The finest feature ``X_1`` (P3) is deliberately not projected: its identity path is the first term of Eq. 8. P4 and
+    P5 each receive their own bare 1x1 convolution into P3's channel space before nearest-neighbour interpolation to
+    P3's exact size, which keeps the sum well-formed for odd and non-square feature maps.
 
     Args:
-        in_channels: Per-level neck channel counts ``(N3, N4, N5)`` in stride
-            order (8, 16, 32).
+        in_channels: Per-level neck channel counts ``(N3, N4, N5)`` in stride order (8, 16, 32).
 
     Attributes:
         out_channels: Channel count of the fused P3-resolution output.
@@ -62,8 +57,7 @@ class ProtoFusion(nn.Module):
         """Initialize the two coarse-level projections required by Equation 8.
 
         Args:
-            in_channels: Per-level neck channel counts ``(N3, N4, N5)`` in
-                stride order (8, 16, 32).
+            in_channels: Per-level neck channel counts ``(N3, N4, N5)`` in stride order (8, 16, 32).
         """
         super().__init__()
         n3_channels, n4_channels, n5_channels = in_channels
@@ -79,8 +73,8 @@ class ProtoFusion(nn.Module):
         """Return ``X_1 + U(phi_2(X_2)) + U(phi_3(X_3))`` at P3 resolution.
 
         Args:
-            features: Neck features ``(X_1, X_2, X_3)`` at strides 8, 16, and
-                32, with channel counts matching ``in_channels``.
+            features: Neck features ``(X_1, X_2, X_3)`` at strides 8, 16, and 32, with channel counts matching
+                ``in_channels``.
 
         Returns:
             The fused feature map with shape ``(B, N3, H1, W1)``.
@@ -95,18 +89,14 @@ class ProtoFusion(nn.Module):
 class ProtoNet(nn.Module):
     """Generate raw Equation 9 prototype maps from the fused P3-resolution feature.
 
-    Four 3x3 :class:`ConvBNAct` units refine the fused feature around a 2x
-    nearest-neighbour upsample, then a 1x1 convolution produces one map per
-    mask coefficient. The output deliberately has no activation: coefficients
-    already use tanh (A16), and activating prototypes too would double-squash
-    their linear mask combination.
+    Four 3x3 :class:`ConvBNAct` units refine the fused feature around a 2x nearest-neighbour upsample, then a 1x1
+    convolution produces one map per mask coefficient. The output deliberately has no activation: coefficients already
+    use tanh (A16), and activating prototypes too would double-squash their linear mask combination.
 
     Args:
         in_channels: Channel count of :attr:`ProtoFusion.out_channels`.
-        num_prototypes: Number of raw prototype maps ``K``. Defaults to
-            :data:`DEFAULT_NUM_COEFFS`.
-        hidden_channels: Shared width of the convolutional stack. Defaults to
-            ``in_channels``.
+        num_prototypes: Number of raw prototype maps ``K``. Defaults to :data:`DEFAULT_NUM_COEFFS`.
+        hidden_channels: Shared width of the convolutional stack. Defaults to ``in_channels``.
 
     Attributes:
         num_prototypes: Number of output prototype maps ``K``.
@@ -163,22 +153,18 @@ class ProtoNet(nn.Module):
 def assemble_masks(prototypes: Tensor, coefficients: Tensor) -> Tensor:
     """Combine prototypes into per-instance mask logits, ``M_i = sum_k c_ik * P_k`` (Equation 7).
 
-    The contraction is the whole of Eq. 7: a linear combination and nothing
-    else. No activation is applied — the coefficients already carry tanh (A16)
-    and the prototypes are deliberately raw (Eq. 9) — and no box cropping is
-    applied either, because cropping belongs to the consumer: the training loss
-    crops to the ground-truth box (:func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`)
-    while decode crops to the predicted box, and baking one of the two in here
-    would be wrong for the other.
+    The contraction is the whole of Eq. 7: a linear combination and nothing else. No activation is applied — the
+    coefficients already carry tanh (A16) and the prototypes are deliberately raw (Eq. 9) — and no box cropping is
+    applied either, because cropping belongs to the consumer: the training loss crops to the ground-truth box
+    (:func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`) while decode crops to the predicted box, and baking one
+    of the two in here would be wrong for the other.
 
-    It lives beside the prototype producer rather than in the loss package
-    because the segmentation decode assembles masks from exactly this
-    expression; a second copy of the contraction would be free to drift.
+    It lives beside the prototype producer rather than in the loss package because the segmentation decode assembles
+    masks from exactly this expression; a second copy of the contraction would be free to drift.
 
     Args:
         prototypes: Raw prototype maps ``(B, K, H, W)`` from :class:`ProtoNet`.
-        coefficients: Per-instance mask coefficients ``(B, N, K)`` for ``N``
-            instances, tanh-activated per A16.
+        coefficients: Per-instance mask coefficients ``(B, N, K)`` for ``N`` instances, tanh-activated per A16.
 
     Returns:
         Raw per-instance mask logits with shape ``(B, N, H, W)``.

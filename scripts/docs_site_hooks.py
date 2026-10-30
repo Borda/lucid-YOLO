@@ -5,25 +5,22 @@ Everything here is derived at build time from text the repository already holds,
 nothing it produces can drift from its source -- the same reason D28 includes findings
 rather than copying them. Three things are added to the built site:
 
-* **A title and description per page.** The sidebar keeps its short nav labels, but a
-  browser tab, a search result or a link preview needs a page to name itself: thirteen
-  pages were titled "Engineering" and every page carried the site's one description.
-  ``page.meta`` takes a ``title`` and a ``description`` (front matter wins when a page
-  sets one): work-package pages from their roadmap row, phase pages from their phase and
-  log, every other page from its H1 and its first paragraph. ``overrides/main.html``
-  renders them, with Open Graph tags and, on the home page, JSON-LD.
+* **A title and description per page.** The sidebar keeps its short nav labels, but a browser tab, a search result
+  or a link preview needs a page to name itself: thirteen pages were titled "Engineering" and every page carried the
+  site's one description. ``page.meta`` takes a ``title`` and a ``description`` (front matter wins when a page sets
+  one): work-package pages from their roadmap row, phase pages from their phase and log, every other page from its
+  H1 and its first paragraph. ``overrides/main.html`` renders them, with Open Graph tags and,
+  on the home page, JSON-LD.
 * **A markdown copy of every page**, at ``<page>/index.md``, with snippet includes
   resolved and relative links made absolute: an agent reading the page gets the text
   without the theme, and gets the assembled page rather than a bare ``--8<--`` line.
-* **``llms.txt`` and ``llms-full.txt`` at the site root**: the first an index of every
-  page by nav section with its description and markdown URL, the second the guide,
-  method, results and model-card pages in full.
+* **``llms.txt`` and ``llms-full.txt`` at the site root**: the first an index of every page by nav section with its
+  description and markdown URL, the second the guide, method, results and model-card pages in full.
 
-One thing is taken away: autorefs' warning for a roadmap tag pair such as
-``[GPU][PRINCIPAL]``, which Markdown parses as a reference link to a target named
-``PRINCIPAL``. Unresolved, it renders as the literal text it was, so the page is right;
-the warning alone is wrong, and under ``--strict`` it fails the build. It is dropped for
-the tags in :data:`_ROADMAP_TAGS` only -- any other missing target still warns.
+One thing is taken away: autorefs' warning for a roadmap tag pair such as ``[GPU][PRINCIPAL]``, which Markdown
+parses as a reference link to a target named ``PRINCIPAL``. Unresolved, it renders as the literal text it was, so
+the page is right; the warning alone is wrong, and under ``--strict`` it fails the build. It is dropped for the
+tags in :data:`_ROADMAP_TAGS` only -- any other missing target still warns.
 
 Registered under ``hooks:`` in ``mkdocs.yml``; ``make docs`` exercises it on every build.
 """
@@ -223,8 +220,7 @@ def resolve_includes(markdown: str, docs_dir: Path) -> str:
 def absolute_links(markdown: str, src: str, urls: dict[str, str], site_url: str) -> str:
     """``markdown`` with links relative to page ``src`` rewritten to absolute site URLs.
 
-    ``urls`` maps a docs-relative source path to its site path; a target it does not
-    know is left as written.
+    ``urls`` maps a docs-relative source path to its site path; a target it does not know is left as written.
 
     Examples:
         >>> absolute_links("[r](../ROADMAP.md#x)", "report/a.md", {"ROADMAP.md": "ROADMAP/"}, "https://s/")
@@ -337,10 +333,9 @@ def toc_entries(items: list[Any]) -> int:
 def on_page_context(context: Any, page: Any, config: Any, nav: Any) -> Any:
     """Hide a near-empty table of contents, and describe a notebook page.
 
-    A right sidebar with one entry or none holds no navigation and takes the width a
-    table-heavy register such as ``ASSUMPTIONS.md`` needs, so it is hidden there. The
-    count is read off the rendered TOC, so included sections count. A notebook has no
-    markdown source for the hooks above to read, so its description is set here.
+    A right sidebar with one entry or none holds no navigation and takes the width a table-heavy register such as
+    ``ASSUMPTIONS.md`` needs, so it is hidden there. The count is read off the rendered TOC, so included sections
+    count. A notebook has no markdown source for the hooks above to read, so its description is set here.
     """
     if toc_entries(list(page.toc)) < 2:
         hide = page.meta.get("hide") or []

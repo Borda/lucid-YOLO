@@ -20,8 +20,8 @@ from lucid_yolo.ptl.network_capture import _members
 def test_norm_clear_keeps_resources_alive_during_drain(drain_fails: bool) -> None:
     """Reset precedes draining, but graph-pool resources survive until the drain finishes."""
     owner = _GradientNormCapture()
-    # Only ownership is exercised here; an ordinary weak-referenceable object
-    # stands in for the opaque graph without constructing a CUDA resource.
+    # Only ownership is exercised here; an ordinary weak-referenceable object stands in for the opaque graph without
+    # constructing a CUDA resource.
     owner._graph = nn.Module()
     owner._inputs = [torch.ones(3)]
     owner._norm = torch.ones(())

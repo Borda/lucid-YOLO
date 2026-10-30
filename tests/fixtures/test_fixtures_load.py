@@ -1,20 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 """DoD test for WP-007: the synthetic micro-fixtures load and are deterministic.
 
-Validates the A26 contract end to end: the detection/segmentation set carries
-boxes *and* polygons, the oriented set carries four-corner rotated boxes, and
-regeneration under a fixed seed is byte-identical.
+Validates the A26 contract end to end: the detection/segmentation set carries boxes *and* polygons, the oriented set
+carries four-corner rotated boxes, and regeneration under a fixed seed is byte-identical.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import pytest
 import synthetic
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 _SPLIT = "train"
@@ -27,17 +28,14 @@ _ANIMAL_KEYPOINT_COUNT = 16  # fuse-augmentations' fixed animal landmark schema 
 def _assert_category_ids_resolve(doc: dict[str, object]) -> None:
     """Assert every annotation's ``category_id`` is declared in the document's own ``categories``.
 
-    A COCO document whose annotations reference undeclared category ids is not a
-    weaker dataset, it is an unreadable one -- ``CocoDetectionDataset`` builds a
-    ``category_id -> label`` map from ``categories`` and raises ``KeyError`` on the
-    first annotation that misses it. This is checked on **every** fixture set rather
-    than only the ones that have broken, because the two that pass do so by
-    coincidence: the geometric shapes are first in fuse-augmentations' shape
-    vocabulary, so their narrowed category ids happen to equal their global ones,
-    and any shape family that is not a prefix of that vocabulary breaks the tie.
-    WP-131 shipped an animals fixture with exactly this defect (declared ids
-    ``1, 2``, annotations carrying ``5, 6``) because its own check counted distinct
-    ids without resolving them -- a count is satisfied by any two numbers.
+    A COCO document whose annotations reference undeclared category ids is not a weaker dataset, it is an unreadable one
+    -- ``CocoDetectionDataset`` builds a ``category_id -> label`` map from ``categories`` and raises ``KeyError`` on the
+    first annotation that misses it. This is checked on **every** fixture set rather than only the ones that have
+    broken, because the two that pass do so by coincidence: the geometric shapes are first in fuse-augmentations' shape
+    vocabulary, so their narrowed category ids happen to equal their global ones, and any shape family that is not a
+    prefix of that vocabulary breaks the tie. WP-131 shipped an animals fixture with exactly this defect (declared ids
+    ``1, 2``, annotations carrying ``5, 6``) because its own check counted distinct ids without resolving them -- a
+    count is satisfied by any two numbers.
 
     Args:
         doc: The parsed COCO annotation document.
@@ -74,15 +72,42 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_detseg_set_loads(detseg_fixture_dir: Path) -> None:
-    """16 images exist, COCO parses, every annotation has a box and a polygon, >= 2 categories."""
-    split_dir = detseg_fixture_dir / _SPLIT
+def _load_split(dataset_dir: Path, declared_count: int, num_images: int) -> dict[str, Any]:
+    """Count a set's images, parse its COCO document and require at least one annotation.
+
+    Args:
+        dataset_dir: A directory returned by one of the ``generate_*_fixtures`` helpers.
+        declared_count: The image count the ``synthetic`` module declares for the set.
+        num_images: The image count the work package prescribes, pinned independently of the module.
+
+    Returns:
+        The parsed ``train`` split annotation document.
+
+    Raises:
+        AssertionError: If the image files or the document's image list differ from ``num_images``, or the
+            document has no annotation.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     doc = _load_split(synthetic.generate_obb_fixtures(Path(tmp)), synthetic.OBB_NUM_IMAGES, 8)
+        >>> len(doc["images"])
+        8
+    """
+    split_dir = dataset_dir / _SPLIT
     images = sorted(split_dir.glob("*.jpg"))
-    assert len(images) == synthetic.DETSEG_NUM_IMAGES == 16
+    assert len(images) == declared_count == num_images
 
     doc = json.loads((split_dir / _ANNOTATION).read_text(encoding="utf-8"))
-    assert len(doc["images"]) == 16
+    assert len(doc["images"]) == num_images
     assert doc["annotations"], "expected at least one annotation"
+    return doc
+
+
+def test_detseg_set_loads(detseg_fixture_dir: Path) -> None:
+    """16 images exist, COCO parses, every annotation has a box and a polygon, >= 2 categories."""
+    doc = _load_split(detseg_fixture_dir, synthetic.DETSEG_NUM_IMAGES, 16)
     _assert_category_ids_resolve(doc)
 
     for ann in doc["annotations"]:
@@ -96,13 +121,7 @@ def test_detseg_set_loads(detseg_fixture_dir: Path) -> None:
 
 def test_obb_set_loads(obb_fixture_dir: Path) -> None:
     """8 images exist and every annotation carries a four-point rotated box."""
-    split_dir = obb_fixture_dir / _SPLIT
-    images = sorted(split_dir.glob("*.jpg"))
-    assert len(images) == synthetic.OBB_NUM_IMAGES == 8
-
-    doc = json.loads((split_dir / _ANNOTATION).read_text(encoding="utf-8"))
-    assert len(doc["images"]) == 8
-    assert doc["annotations"], "expected at least one annotation"
+    doc = _load_split(obb_fixture_dir, synthetic.OBB_NUM_IMAGES, 8)
     _assert_category_ids_resolve(doc)
 
     for ann in doc["annotations"]:
@@ -114,18 +133,12 @@ def test_obb_set_loads(obb_fixture_dir: Path) -> None:
 def test_keypoints_set_loads(keypoints_fixture_dir: Path) -> None:
     """12 images exist, every annotation carries a fixed 16-point landmark table, low category count.
 
-    WP-121b's own fix (the reader no longer requires a segmentation ring for a
-    keypoints reading) is what makes this fixture usable at all; this pins the
-    small, overfit-friendly animal subset (:data:`synthetic.KEYPOINTS_ANIMAL_COUNT`)
-    the milestone run needs rather than fuse-augmentations' full animal vocabulary.
+    WP-121b's own fix (the reader no longer requires a segmentation ring for a keypoints reading) is what makes this
+    fixture usable at all; this pins the small, overfit-friendly animal subset
+    (:data:`synthetic.KEYPOINTS_ANIMAL_COUNT`) the milestone run needs rather than fuse-augmentations' full animal
+    vocabulary.
     """
-    split_dir = keypoints_fixture_dir / _SPLIT
-    images = sorted(split_dir.glob("*.jpg"))
-    assert len(images) == synthetic.KEYPOINTS_NUM_IMAGES == 12
-
-    doc = json.loads((split_dir / _ANNOTATION).read_text(encoding="utf-8"))
-    assert len(doc["images"]) == 12
-    assert doc["annotations"], "expected at least one annotation"
+    doc = _load_split(keypoints_fixture_dir, synthetic.KEYPOINTS_NUM_IMAGES, 12)
 
     for ann in doc["annotations"]:
         keypoints = ann.get("keypoints")
@@ -135,33 +148,22 @@ def test_keypoints_set_loads(keypoints_fixture_dir: Path) -> None:
     assert len(category_ids) <= synthetic.KEYPOINTS_ANIMAL_COUNT, (
         f"expected at most {synthetic.KEYPOINTS_ANIMAL_COUNT} distinct animal categories, got {sorted(category_ids)}"
     )
-    # The count above is necessary and nowhere near sufficient: it is satisfied by any two
-    # numbers, which is exactly how WP-131 shipped a fixture whose annotations named
-    # categories the document never declared.
+    # The count above is necessary and nowhere near sufficient: it is satisfied by any two numbers, which is exactly how
+    # WP-131 shipped a fixture whose annotations named categories the document never declared.
     _assert_category_ids_resolve(doc)
 
 
-def test_keypoints_generation_deterministic(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "generate",
+    [
+        pytest.param(synthetic.generate_keypoints_fixtures, id="keypoints"),
+        pytest.param(synthetic.generate_detseg_fixtures, id="detseg"),
+    ],
+)
+def test_generation_deterministic(generate: Callable[[Path], Path], tmp_path: Path) -> None:
     """Same seed -> byte-identical annotation JSON and identical image SHA-256 hashes (A26)."""
-    first = synthetic.generate_keypoints_fixtures(tmp_path / "run_a")
-    second = synthetic.generate_keypoints_fixtures(tmp_path / "run_b")
-
-    ann_first = (first / _SPLIT / _ANNOTATION).read_bytes()
-    ann_second = (second / _SPLIT / _ANNOTATION).read_bytes()
-    assert ann_first == ann_second, "annotation JSON is not byte-identical across seeded runs"
-
-    images_first = sorted((first / _SPLIT).glob("*.jpg"))
-    images_second = sorted((second / _SPLIT).glob("*.jpg"))
-    assert [p.name for p in images_first] == [p.name for p in images_second]
-    assert images_first, "expected generated images to compare"
-    for a, b in zip(images_first, images_second, strict=True):
-        assert _sha256(a) == _sha256(b), f"image bytes differ across seeded runs: {a.name}"
-
-
-def test_detseg_generation_deterministic(tmp_path: Path) -> None:
-    """Same seed -> byte-identical annotation JSON and identical image SHA-256 hashes (A26)."""
-    first = synthetic.generate_detseg_fixtures(tmp_path / "run_a")
-    second = synthetic.generate_detseg_fixtures(tmp_path / "run_b")
+    first = generate(tmp_path / "run_a")
+    second = generate(tmp_path / "run_b")
 
     ann_first = (first / _SPLIT / _ANNOTATION).read_bytes()
     ann_second = (second / _SPLIT / _ANNOTATION).read_bytes()

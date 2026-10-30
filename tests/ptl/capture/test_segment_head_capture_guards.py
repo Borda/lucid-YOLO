@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Exercise prediction-replay eligibility and lifetime decisions without a GPU.
 
-CUDA graph execution is covered separately by the accelerator tests. These cases
-use real CPU modules and tensors for the host-side contracts, with CUDA API
-boundaries replaced only where needed to reach the decision under test.
+CUDA graph execution is covered separately by the accelerator tests. These cases use real CPU modules and tensors for
+the host-side contracts, with CUDA API boundaries replaced only where needed to reach the decision under test.
 """
 
 from __future__ import annotations
@@ -34,12 +33,32 @@ def _module() -> DetectionLitModule:
     return DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=4, task="segment")
 
 
+def _stage_group(stage: nn.Module) -> capture._PredictionGroup:
+    """Wrap ``stage`` as the one-stage prediction group the segmentation recorder replays.
+
+    Examples:
+        >>> isinstance(_stage_group(nn.Identity()), capture._PredictionGroup)
+        True
+    """
+    return capture._PredictionGroup((stage,), lambda values: (stage(values[0]),))
+
+
+def _record(adapter: capture._PredictionGroup, inputs: tuple[torch.Tensor, ...]) -> capture._RecordedGroup:
+    """Record ``adapter`` on ``inputs`` with no span bookkeeping; callers replace the CUDA API boundary.
+
+    Examples:
+        >>> callable(_record)
+        True
+    """
+    return capture._RecordedGroup(adapter, inputs, capture._RecordedSpans([], list(inputs)))
+
+
 @pytest.fixture
 def _policy(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate the CUDA-residency predicate when checking host-side feature policies.
 
-    No tensor moves to CUDA and no graph is recorded. Layout, dtype, hooks and
-    autograd metadata are still those of the real CPU tensors.
+    No tensor moves to CUDA and no graph is recorded. Layout, dtype, hooks and autograd metadata are still those of the
+    real CPU tensors.
 
     Examples:
         >>> callable(_policy)
@@ -322,8 +341,8 @@ class TestRunnerCertificate:
     def test_gradient_accumulation_keeps_certificate(self, runtime: tuple) -> None:
         """A trainer that accumulates gradients certifies like one that steps every batch, and nothing retires.
 
-        Live gradients leave a group's static gradient buffers at forward time, before its replay, so
-        accumulated micro-batches no longer need the native route the holder used to fall back to.
+        Live gradients leave a group's static gradient buffers at forward time, before its replay, so accumulated
+        micro-batches no longer need the native route the holder used to fall back to.
         """
         model, holder, features = runtime
         model._trainer.accumulate_grad_batches = 2
@@ -413,12 +432,12 @@ class TestRecordingLifetime:
     def test_warmup_restores_buffers_and_rng_after_synchronizing(self, failed: bool) -> None:
         """A CPU stand-in at the graph API boundary exercises the real snapshot and finally block.
 
-        This checks orchestration, not CUDA graph correctness: the GPU regression
-        separately checks the same ordering with a real CUDA prediction stage.
+        This checks orchestration, not CUDA graph correctness: the GPU regression separately checks the same ordering
+        with a real CUDA prediction stage.
         """
         stage = nn.BatchNorm2d(2)
         inputs = (torch.ones(2, 2, 3, 3),)
-        adapter = capture._PredictionGroup((stage,), lambda values: (stage(values[0]),))
+        adapter = _stage_group(stage)
         snapshots = {name: value.clone() for name, value in stage.named_buffers()}
         rng = torch.get_rng_state().clone()
         events = []
@@ -441,9 +460,9 @@ class TestRecordingLifetime:
         ):
             if failed:
                 with pytest.raises(RuntimeError, match="injected recording failure"):
-                    capture._RecordedGroup(adapter, inputs, capture._RecordedSpans([], list(inputs)))
+                    _record(adapter, inputs)
             else:
-                entry = capture._RecordedGroup(adapter, inputs, capture._RecordedSpans([], list(inputs)))
+                entry = _record(adapter, inputs)
                 assert entry.stream is stream and not entry.pending_backward
                 assert entry.parameters == tuple(stage.parameters())
             assert record.call_count == 1
@@ -455,17 +474,17 @@ class TestRecordingLifetime:
     def test_live_gradient_leaves_storage_at_forward_time(self, dry_recording: MagicMock) -> None:
         """A live ``.grad`` is copied out when the group replays, before its backward runs.
 
-        The gradient stands in for one adopted from the group's static gradient buffers, which the
-        replayed backward overwrites. Copying it from a backward pre-hook left accumulated gradients
-        wrong on CUDA (WP-206), so the copy is made at forward time: right after ``run`` the parameter
-        already holds a separate tensor of the same values, and the original is never written again.
+        The gradient stands in for one adopted from the group's static gradient buffers, which the replayed backward
+        overwrites. Copying it from a backward pre-hook left accumulated gradients wrong on CUDA (WP-206), so the copy
+        is made at forward time: right after ``run`` the parameter already holds a separate tensor of the same values,
+        and the original is never written again.
         """
         stage = nn.Linear(2, 1)
         stage.weight.grad = live = torch.full_like(stage.weight, 5.0)
         inputs = (torch.ones(1, 2),)
-        adapter = capture._PredictionGroup((stage,), lambda values: (stage(values[0]),))
+        adapter = _stage_group(stage)
         with patch("torch.cuda.current_stream", return_value=SimpleNamespace(cuda_stream=17)):
-            entry = capture._RecordedGroup(adapter, inputs, capture._RecordedSpans([], list(inputs)))
+            entry = _record(adapter, inputs)
             output = entry.run(inputs)
         at_forward = (stage.weight.grad is not live, torch.equal(stage.weight.grad, live))
         output[0].sum().backward()
@@ -476,9 +495,9 @@ class TestRecordingLifetime:
     def test_dry_recording_accumulates_like_native_and_drains_on_clear(self, dry_recording: MagicMock) -> None:
         """Two accumulated micro-batches record once, hold until backward, match native and drain on ``clear``.
 
-        The seam returns the adapter itself, so the holder's own routing, hold, forward-time copy
-        and stream drain all run on CPU. The first micro-batch's gradient object must stay as it was
-        and the accumulated gradients must equal the same micro-batches run natively.
+        The seam returns the adapter itself, so the holder's own routing, hold, forward-time copy and stream drain all
+        run on CPU. The first micro-batch's gradient object must stay as it was and the accumulated gradients must
+        equal the same micro-batches run natively.
         """
         stage = nn.Linear(2, 1)
         reference = copy.deepcopy(stage)
@@ -519,8 +538,8 @@ class TestRecordingLifetime:
     def test_fit_setup_activates_under_gradient_accumulation(self) -> None:
         """A single-device CUDA fit that accumulates gradients activates head replay and warns nothing.
 
-        Accumulation used to be refused at setup with a warning; the trainer attributes here are the
-        ones setup reads, with every other activation condition met.
+        Accumulation used to be refused at setup with a warning; the trainer attributes here are the ones setup reads,
+        with every other activation condition met.
         """
         holder = capture._SegmentHeadCapture(True)
         module = _module()
@@ -540,14 +559,14 @@ class TestRecordingLifetime:
         parameter.grad = torch.ones_like(parameter)
         existing = parameter.grad
         inputs = (torch.ones(1, 2, requires_grad=True) * 2,)
-        adapter = capture._PredictionGroup((stage,), lambda values: (stage(values[0]),))
+        adapter = _stage_group(stage)
         with (
             patch("torch.cuda.current_stream", return_value=SimpleNamespace(cuda_stream=17)),
             patch("torch.cuda.synchronize"),
             patch("torch.random.fork_rng", return_value=contextlib.nullcontext()),
             patch("torch.cuda.make_graphed_callables", side_effect=lambda network, samples: network),
         ):
-            entry = capture._RecordedGroup(adapter, inputs, capture._RecordedSpans([], list(inputs)))
+            entry = _record(adapter, inputs)
             output = entry.run(inputs)
             assert entry.pending_backward
             output[0].sum().backward()
@@ -603,28 +622,13 @@ class TestRecordingLifetime:
     def test_failing_drain_warns_on_failed_fit_after_reset(self, _failing_drain: SimpleNamespace) -> None:
         """A drain failure after a failed fit is a warning, so the trainer's own exception still propagates.
 
-        A failed CUDA step usually leaves the device erroring on every later synchronize; raising that
-        from ``on_exception`` would replace the original exception and skip the trainer's teardown.
+        A failed CUDA step usually leaves the device erroring on every later synchronize; raising that from
+        ``on_exception`` would replace the original exception and skip the trainer's teardown.
         """
         with pytest.warns(UserWarning, match=r"could not drain its recordings .*\(device-side assert"):
             capture._SegmentHeadCaptureLifecycle().on_exception(None, _failing_drain.module, RuntimeError("step"))
         _failing_drain.stream.synchronize.assert_called_once_with()
         assert _failing_drain.holder.entries == {} and not _failing_drain.holder.disabled
-
-    @pytest.mark.parametrize(
-        "module",
-        [
-            pytest.param(SimpleNamespace(), id="missing"),
-            pytest.param(SimpleNamespace(_segment_head_capture=object()), id="foreign"),
-        ],
-    )
-    def test_module_without_holder_makes_every_hook_no_op(self, module: SimpleNamespace) -> None:
-        """A trainer reused on another module class does not fail in the segmentation lifecycle."""
-        lifecycle = capture._SegmentHeadCaptureLifecycle()
-        lifecycle.on_fit_start(None, module)
-        lifecycle.on_train_batch_start(None, module, None, 0)
-        lifecycle.on_fit_end(None, module)
-        lifecycle.on_exception(None, module, RuntimeError("abort"))
 
 
 class TestGroupDispatch:

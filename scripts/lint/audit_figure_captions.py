@@ -1,19 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Figure-caption audit: committed SVGs draw what their own markup claims (WP-080).
 
-Matplotlib writes a text element twice. The characters become glyph outlines,
-and the source string is repeated beside them as an XML comment that nothing
-renders. A search-and-replace over a committed SVG therefore edits the comment
-and leaves the drawing untouched, and the file then reports one caption and
-displays another -- which is exactly what a repository-wide tier rename did to
-``det_smoke_training.svg``, undetected, with every gate green: no checker read
-a figure.
+Matplotlib writes a text element twice. The characters become glyph outlines, and the source string is repeated
+beside them as an XML comment that nothing renders. A search-and-replace over a committed SVG therefore edits
+the comment and leaves the drawing untouched, and the file then reports one caption and displays another --
+which is exactly what a repository-wide tier rename did to ``det_smoke_training.svg``, undetected, with every
+gate green: no checker read a figure.
 
-This re-renders one text element's own comment and compares its glyphs against
-the glyphs already drawn in the file, so both sides come from the figure and
-no caption is pinned in this script -- a legitimately retitled figure passes
-as soon as it is regenerated. It also confirms every figure the reproduction
-report links actually exists on disk.
+This re-renders one text element's own comment and compares its glyphs against the glyphs already drawn in the
+file, so both sides come from the figure and no caption is pinned in this script -- a legitimately retitled figure
+passes as soon as it is regenerated. It also confirms every figure the reproduction report links actually exists
+on disk.
 
 Examples:
     Command-line usage (exit status is the process return code)::
@@ -46,10 +43,9 @@ _TEXT_GROUP = re.compile(r"<!-- (.*?) -->\s*<g [^>]*>(.*?)</g>", re.DOTALL)
 #: One drawn glyph: the font it comes from and its index within that font.
 _GLYPH = re.compile(r'xlink:href="#([A-Za-z]+)-([0-9a-f]+)"')
 
-#: Below this many text elements, a figure is assumed to have been parsed wrongly
-#: rather than to be sparse. Both committed figures carry 40+ (axis ticks alone
-#: account for most of them), and a parser that silently matched nothing would
-#: otherwise make every assertion below vacuously true.
+#: Below this many text elements, a figure is assumed to have been parsed wrongly rather than to be sparse. Both
+#: committed figures carry 40+ (axis ticks alone account for most of them), and a parser that silently matched
+#: nothing would otherwise make every assertion below vacuously true.
 _MIN_TEXT_ELEMENTS = 10
 
 Glyphs = tuple[tuple[str, int], ...]
@@ -58,8 +54,8 @@ Glyphs = tuple[tuple[str, int], ...]
 def _text_elements(svg: str) -> list[tuple[str, Glyphs]]:
     """Return each text element's source string paired with the glyphs drawn for it.
 
-    Glyph indices are per-font and hex-encoded in the id, which is why the font
-    name travels with each one: two fonts number their glyphs independently.
+    Glyph indices are per-font and hex-encoded in the id, which is why the font name travels with each one: two fonts
+    number their glyphs independently.
 
     Examples:
         >>> svg = '<!-- hi -->\\n<g transform="x"><use xlink:href="#DejaVuSans-4b"/></g>'
@@ -75,9 +71,8 @@ def _text_elements(svg: str) -> list[tuple[str, Glyphs]]:
 def _render(labels: list[str]) -> dict[str, Glyphs]:
     """Draw each label with matplotlib and return the glyphs it produced.
 
-    One figure carries every label, so a whole SVG is checked against a single
-    render. Glyph indices do not depend on position or size, and the reference
-    goes to a string buffer, so nothing here touches the committed files.
+    One figure carries every label, so a whole SVG is checked against a single render. Glyph indices do not depend
+    on position or size, and the reference goes to a string buffer, so nothing here touches the committed files.
 
     Examples:
         >>> glyphs = _render(["hi"])
@@ -130,8 +125,8 @@ def check_figures_present(repo_root: Path) -> list[str]:
 def check_captions_match(repo_root: Path) -> list[str]:
     """Every label in a committed figure must draw the string its own markup claims.
 
-    Fails on a figure that was edited as text instead of regenerated, whatever
-    the edit was for: a rename, a typo fix, a units correction.
+    Fails on a figure that was edited as text instead of regenerated, whatever the edit was for: a rename, a typo fix,
+    a units correction.
 
     Args:
         repo_root: Repository root; figures are found under ``docs/figures/*.svg`` within it.

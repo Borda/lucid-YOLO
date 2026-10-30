@@ -1,27 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the square-object angle loss (WP-060, A22, A42).
 
-R1 Eq. 14-15 is short enough that a transcription oracle would only restate the
-implementation, so this file gates the three things the equations leave to whoever writes
-them down.
+R1 Eq. 14-15 is short enough that a transcription oracle would only restate the implementation, so this file gates the
+three things the equations leave to whoever writes them down.
 
-The **wrap range** is the first. Eq. 14 says ``round`` and stops; :func:`torch.round`
-breaks halves to even, which would make the residual of ``pi/2`` and of ``3*pi/2`` — the
-same rotation — land on opposite ends of a *closed* interval. The tests here pin the
-half-open ``[-pi/2, pi/2)`` the module settles on, at the boundary and at both ulps
-around it, the way ``tests/data/test_rotated_geom.py`` pins the long-edge range.
+The **wrap range** is the first. Eq. 14 says ``round`` and stops; :func:`torch.round` breaks halves to even, which would
+make the residual of ``pi/2`` and of ``3*pi/2`` — the same rotation — land on opposite ends of a *closed* interval. The
+tests here pin the half-open ``[-pi/2, pi/2)`` the module settles on, at the boundary and at both ulps around it, the
+way ``tests/data/test_rotated_geom.py`` pins the long-edge range.
 
-The **square tie-break** is the second, and the reason the module folds by a quarter turn
-before taking the sine. :func:`~lucid_yolo.data.rotated_geom.canonicalize` folds an exact
-square towards zero, so a square target reaches the loss as one of two representatives
-``pi/2`` apart. ``sin^2(2x)`` cannot tell them apart mathematically, but two *floats*
-``pi/2`` apart do not give bit-equal sines — so the invariance is asserted with
-:func:`torch.equal` on exactly representable inputs rather than assumed.
+The **square tie-break** is the second, and the reason the module folds by a quarter turn before taking the sine.
+:func:`~lucid_yolo.data.rotated_geom.canonicalize` folds an exact square towards zero, so a square target reaches the
+loss as one of two representatives ``pi/2`` apart. ``sin^2(2x)`` cannot tell them apart mathematically, but two *floats*
+``pi/2`` apart do not give bit-equal sines — so the invariance is asserted with :func:`torch.equal` on exactly
+representable inputs rather than assumed.
 
-The **profile of omega** is the third: it is the only place a hyper-parameter enters, and
-R1 Table 11 shows ``lambda`` is not a free knob (50.2 mAP at 3, 47.1 at 5, against 49.0
-with no angle loss at all). The measured values are pinned against the paper's quoted
-table so a change to the formula, the log base or the default cannot pass silently.
+The **profile of omega** is the third: it is the only place a hyper-parameter enters, and R1 Table 11 shows ``lambda``
+is not a free knob (50.2 mAP at 3, 47.1 at 5, against 49.0 with no angle loss at all). The measured values are pinned
+against the paper's quoted table so a change to the formula, the log base or the default cannot pass silently.
 """
 
 import math
@@ -46,8 +42,8 @@ _OMEGA_TABLE = [
     pytest.param(20.0, 0.3689, id="20-to-1"),
 ]
 
-#: ``sin^2(2 d)`` is zero at a quarter turn and maximal halfway between: the double-angle
-#: penalty ignores the 90deg ambiguity of a square and punishes the diagonal error.
+#: ``sin^2(2 d)`` is zero at a quarter turn and maximal halfway between: the double-angle penalty ignores the 90deg
+#: ambiguity of a square and punishes the diagonal error.
 _EXTREMA = [
     pytest.param(0.0, 0.0, id="exact"),
     pytest.param(_HALF_PI, 0.0, id="quarter-turn"),
@@ -93,9 +89,9 @@ def _wrap_inputs() -> list[float]:
 def _loss_curve(pred: Tensor, target: float = 0.0, side: float = 8.0) -> Tensor:
     """Loss at each swept prediction, every point evaluated as its own single-anchor batch.
 
-    A single anchor of weight one normalizes by ``S = 1`` and, for the square target used
-    here, carries ``omega = 1`` — so each entry is the bare penalty the loss puts on that
-    angular error, read through the public function rather than reimplemented.
+    A single anchor of weight one normalizes by ``S = 1`` and, for the square target used here, carries ``omega = 1`` —
+    so each entry is the bare penalty the loss puts on that angular error, read through the public function rather than
+    reimplemented.
 
     Examples:
         >>> curve = _loss_curve(torch.tensor([0.0, _QUARTER_PI]))
@@ -130,10 +126,9 @@ def _single(pred: float, target: float, width: float = 8.0, height: float = 8.0,
 def test_wrap_range(delta: float) -> None:
     """Every residual lands in the half-open ``[-pi/2, pi/2)``, boundary ulps included.
 
-    Half-open with no gap and no overlap is the property Eq. 14's unstated ``round`` tie
-    rule decides: an interval closed at both ends would admit ``+pi/2`` and ``-pi/2`` as
-    two answers to the same rotation. Idempotence is asserted alongside because the
-    remainder path is not exact near its own boundary — an already-wrapped value must
+    Half-open with no gap and no overlap is the property Eq. 14's unstated ``round`` tie rule decides: an interval
+    closed at both ends would admit ``+pi/2`` and ``-pi/2`` as two answers to the same rotation. Idempotence is asserted
+    alongside because the remainder path is not exact near its own boundary — an already-wrapped value must
     short-circuit rather than be recomputed.
     """
     wrapped = wrap_angle_delta(torch.tensor([delta], dtype=torch.float32))
@@ -147,14 +142,13 @@ def test_wrap_range(delta: float) -> None:
 def test_wrap_ties_take_low_end(dtype: torch.dtype) -> None:
     """Both ``+-pi/2`` ties wrap to ``-pi/2``, in either working precision.
 
-    This is the "no overlap" half of the range guarantee, and where the module parts
-    company with :func:`torch.round`: half-to-even would send ``+pi/2`` to ``+pi/2`` and
-    the equivalent ``+3*pi/2`` to ``-pi/2``, two representatives of one rotation.
+    This is the "no overlap" half of the range guarantee, and where the module parts company with :func:`torch.round`:
+    half-to-even would send ``+pi/2`` to ``+pi/2`` and the equivalent ``+3*pi/2`` to ``-pi/2``, two representatives of
+    one rotation.
 
-    Bit-exact only at ``+-pi/2``, and to rounding three half-turns out: ``-3*pi/2`` is not
-    representable in float32, and the stored value sits 1.2e-8 off the true tie, which the
-    remainder magnifies to 2 ulps (measured ``-1.5707961`` against ``-1.5707964``). The
-    tie rule is a statement about the tie, not about floats that are merely near one.
+    Bit-exact only at ``+-pi/2``, and to rounding three half-turns out: ``-3*pi/2`` is not representable in float32, and
+    the stored value sits 1.2e-8 off the true tie, which the remainder magnifies to 2 ulps (measured ``-1.5707961``
+    against ``-1.5707964``). The tie rule is a statement about the tie, not about floats that are merely near one.
     """
     ties = torch.tensor([_HALF_PI, -_HALF_PI], dtype=dtype)
 
@@ -182,10 +176,9 @@ def test_wrap_invariant_to_whole_half_turns() -> None:
 def test_omega_profile(ratio: float, expected: float) -> None:
     """``omega`` follows R1's log-Gaussian in the aspect ratio at ``lambda = 3``.
 
-    The paper quotes this table to three significant figures (0.750 at 5:1, 0.369 at
-    20:1); the four-decimal values asserted here are the measured ones. The tolerance is
-    tight enough that a switch to base-10 logs (0.9472 at 5:1) or to ``lambda = 5``
-    (0.9016 there) fails it.
+    The paper quotes this table to three significant figures (0.750 at 5:1, 0.369 at 20:1); the four-decimal values
+    asserted here are the measured ones. The tolerance is tight enough that a switch to base-10 logs (0.9472 at 5:1) or
+    to ``lambda = 5`` (0.9016 there) fails it.
     """
     omega = aspect_ratio_weight(torch.tensor([3.0 * ratio]), torch.tensor([3.0]))
 
@@ -195,8 +188,8 @@ def test_omega_profile(ratio: float, expected: float) -> None:
 def test_omega_symmetric_under_swapping_sides() -> None:
     """A box and its transpose share one ``omega``: only the log-ratio's sign changes.
 
-    Load-bearing because :func:`~lucid_yolo.data.rotated_geom.canonicalize` may have
-    swapped ``w`` and ``h`` (with ``theta += pi/2``) before the target reached the loss.
+    Load-bearing because :func:`~lucid_yolo.data.rotated_geom.canonicalize` may have swapped ``w`` and ``h`` (with
+    ``theta += pi/2``) before the target reached the loss.
     """
     width, height = torch.tensor([9.0, 2.0, 40.0]), torch.tensor([3.0, 7.0, 1.0])
 
@@ -208,8 +201,8 @@ def test_omega_symmetric_under_swapping_sides() -> None:
 def test_omega_decays_strictly_as_target_elongates() -> None:
     """Elongated targets are down-weighted, squares are not — R1's stated intent.
 
-    "Elongated boxes receive smaller ``omega_i`` and remain primarily constrained by the
-    rotated IoU loss": the square is the unique maximum and the decay is monotone.
+    "Elongated boxes receive smaller ``omega_i`` and remain primarily constrained by the rotated IoU loss": the square
+    is the unique maximum and the decay is monotone.
     """
     ratios = torch.tensor([1.0, 1.2, 2.0, 3.0, 5.0, 10.0, 50.0, 500.0])
 
@@ -222,8 +215,8 @@ def test_omega_decays_strictly_as_target_elongates() -> None:
 def test_omega_widens_with_lambda() -> None:
     """A larger ``lambda`` spends the square-object penalty on more elongated boxes.
 
-    The mechanism behind R1 Table 11's regression at ``lambda = 5`` (47.1 mAP, below the
-    49.0 of no angle loss at all): a 10:1 box goes from 0.55 of the penalty to 0.81.
+    The mechanism behind R1 Table 11's regression at ``lambda = 5`` (47.1 mAP, below the 49.0 of no angle loss at all):
+    a 10:1 box goes from 0.55 of the penalty to 0.81.
     """
     sides = torch.tensor([10.0])
 
@@ -243,9 +236,9 @@ def test_omega_rejects_non_positive_lambda() -> None:
 def test_sin2_extrema(error: float, expected: float) -> None:
     """The double-angle penalty is zero at every quarter turn and maximal between them.
 
-    A single square anchor of weight one, so ``S`` and ``omega`` are both 1 and the loss
-    *is* ``sin^2(2 d_theta_tilde)``. The zeros at ``+-pi/2`` are the point of the term:
-    for a square those rotations are the same box, so a 90deg "error" is not one.
+    A single square anchor of weight one, so ``S`` and ``omega`` are both 1 and the loss *is*
+    ``sin^2(2 d_theta_tilde)``. The zeros at ``+-pi/2`` are the point of the term: for a square those rotations are the
+    same box, so a 90deg "error" is not one.
     """
     loss = _single(pred=error, target=0.0)
 
@@ -255,13 +248,11 @@ def test_sin2_extrema(error: float, expected: float) -> None:
 def test_boundary_continuity() -> None:
     """The loss crosses the wrap boundary without a step, over a sweep that spans ``[0, 1]``.
 
-    A prediction swept from ``pi/4`` to ``3*pi/4`` against a target at zero takes the
-    residual through the ``pi/2`` wrap boundary at the midpoint, and the penalty falls
-    from 1 to 0 and back — so the sweep exercises the full range of the term rather than
-    only its neighbourhood of zero. Continuity is asserted as a Lipschitz bound: the
-    penalty's derivative ``2 sin(4x)`` is bounded by 2, so no adjacent pair may differ by
-    more than twice the sweep step. A wrap that jumped would break that by ~1.0, not by a
-    rounding margin.
+    A prediction swept from ``pi/4`` to ``3*pi/4`` against a target at zero takes the residual through the ``pi/2`` wrap
+    boundary at the midpoint, and the penalty falls from 1 to 0 and back — so the sweep exercises the full range of the
+    term rather than only its neighbourhood of zero. Continuity is asserted as a Lipschitz bound: the penalty's
+    derivative ``2 sin(4x)`` is bounded by 2, so no adjacent pair may differ by more than twice the sweep step. A wrap
+    that jumped would break that by ~1.0, not by a rounding margin.
     """
     swept = torch.linspace(_QUARTER_PI, 3 * _QUARTER_PI, 2001)
     step = float(swept[1] - swept[0])
@@ -276,9 +267,8 @@ def test_boundary_continuity() -> None:
 def test_boundary_ulps_agree_with_boundary_itself() -> None:
     """One ulp either side of the wrap boundary scores what the boundary scores.
 
-    The residual is exactly ``pi/2`` there, which wraps to ``-pi/2`` and folds to an exact
-    zero — so the loss is bit-exactly zero at the boundary, and within an ulp's worth of
-    it on both sides rather than merely finite.
+    The residual is exactly ``pi/2`` there, which wraps to ``-pi/2`` and folds to an exact zero — so the loss is
+    bit-exactly zero at the boundary, and within an ulp's worth of it on both sides rather than merely finite.
     """
     boundary = _single(pred=_HALF_PI, target=0.0)
 
@@ -290,12 +280,10 @@ def test_boundary_ulps_agree_with_boundary_itself() -> None:
 def test_both_representatives_of_square_target_score_identically() -> None:
     """A square's two canonical representatives give a bit-identical loss.
 
-    :func:`~lucid_yolo.data.rotated_geom.canonicalize` folds an exact square towards zero,
-    so which of the two angles ``pi/2`` apart the loss receives is an accident of the
-    target's provenance. The inputs are chosen dyadic so ``target + pi/2`` is exact in
-    float32 and the comparison tests the loss rather than the test's own arithmetic; the
-    tolerance-free version of this invariance is what the module's quarter-turn fold
-    exists for.
+    :func:`~lucid_yolo.data.rotated_geom.canonicalize` folds an exact square towards zero, so which of the two angles
+    ``pi/2`` apart the loss receives is an accident of the target's provenance. The inputs are chosen dyadic so
+    ``target + pi/2`` is exact in float32 and the comparison tests the loss rather than the test's own arithmetic; the
+    tolerance-free version of this invariance is what the module's quarter-turn fold exists for.
     """
     low = torch.tensor([0.25])
     high = low + _HALF_PI
@@ -310,10 +298,9 @@ def test_both_representatives_of_square_target_score_identically() -> None:
 def test_square_representative_invariance_holds_across_random_sweep() -> None:
     """The same invariance at arbitrary angles, where the shift by ``pi/2`` itself rounds.
 
-    Bit-equality is a property of exactly representable inputs; away from those, the two
-    representatives differ by a rounded ``pi/2`` before the loss sees them, so the
-    agreement is to float32 round-off. Asserted separately so a regression in the fold
-    cannot hide behind a loose tolerance in the exact case.
+    Bit-equality is a property of exactly representable inputs; away from those, the two representatives differ by a
+    rounded ``pi/2`` before the loss sees them, so the agreement is to float32 round-off. Asserted separately so a
+    regression in the fold cannot hide behind a loose tolerance in the exact case.
     """
     pred = torch.rand(256) * _PI - _HALF_PI
     target = torch.rand(256) * _PI - _HALF_PI
@@ -329,8 +316,8 @@ def test_square_representative_invariance_holds_across_random_sweep() -> None:
 def test_loss_invariant_to_half_turns_of_either_angle() -> None:
     """``theta`` and ``theta + pi`` are one rectangle, so they are one loss (Equation 14).
 
-    The premise the whole term is built on, checked on the loss rather than on the wrap:
-    an implementation that measured the residual on the real line would fail here.
+    The premise the whole term is built on, checked on the loss rather than on the wrap: an implementation that measured
+    the residual on the real line would fail here.
     """
     pred, target = torch.rand(64) * 4 - 2, torch.rand(64) * 4 - 2
     width, height, weights = torch.rand(64) * 20 + 1, torch.rand(64) * 5 + 1, torch.rand(64)
@@ -355,8 +342,8 @@ def test_normalizer_weight_sum_floored_at_one() -> None:
 def test_background_anchors_of_zero_weight_change_nothing() -> None:
     """A whole branch may be passed: ``q_i = 0`` rows leave both the sum and ``S`` alone.
 
-    The arrangement :class:`~lucid_yolo.losses.detection_loss.DetectionBranchLoss` already
-    relies on, so the oriented head (WP-088) need not mask before calling.
+    The arrangement :class:`~lucid_yolo.losses.detection_loss.DetectionBranchLoss` already relies on, so the oriented
+    head (WP-088) need not mask before calling.
     """
     pred, target = torch.tensor([0.4, 1.9]), torch.tensor([0.1, 0.2])
     sides, weights = torch.tensor([6.0, 6.0]), torch.tensor([0.7, 0.3])
@@ -411,8 +398,8 @@ def test_gradient_reaches_prediction_and_stays_finite() -> None:
 def test_degenerate_targets_stay_finite_forwards_and_backwards(width: float, height: float) -> None:
     """A collapsed target gives a finite loss and a finite gradient (A42).
 
-    Without the side floor ``ln(w/h)`` reaches ``+-inf`` and its square poisons the whole
-    batch's gradient through the sum.
+    Without the side floor ``ln(w/h)`` reaches ``+-inf`` and its square poisons the whole batch's gradient through the
+    sum.
     """
     pred = torch.tensor([0.7, 0.2], requires_grad=True)
     sides = (torch.tensor([width, 5.0]), torch.tensor([height, 2.0]))
@@ -437,11 +424,9 @@ def test_loss_bounded_by_one_over_random_sweep() -> None:
 class TestSideFloorValidation:
     """``min_side`` is rejected at the values that disable the A42 floor (M-23).
 
-    The floor is what keeps the backward pass finite: an unfloored zero height
-    sends ``ln(w/h)`` to ``inf`` and its gradient to ``NaN``. ``min_side = 0`` and
-    any negative value never bind, because ``clamp`` leaves a zero side alone, so
-    they reinstate exactly the failure the parameter exists to prevent — and both
-    constructed silently.
+    The floor is what keeps the backward pass finite: an unfloored zero height sends ``ln(w/h)`` to ``inf`` and its
+    gradient to ``NaN``. ``min_side = 0`` and any negative value never bind, because ``clamp`` leaves a zero side alone,
+    so they reinstate exactly the failure the parameter exists to prevent — and both constructed silently.
     """
 
     @pytest.mark.parametrize("bad", [0.0, -1e-4, math.nan, math.inf, -math.inf])
@@ -473,34 +458,34 @@ class TestSideFloorValidation:
 class TestWrapAngleDeltaRange:
     """The documented magnitude bound, pinned on both sides (L-03).
 
-    The docstring used to promise "any real magnitude". It cannot: past
-    ``2**23 * pi`` in float32 the spacing between neighbouring floats is comparable
-    to ``pi``, so the argument no longer represents the angle it names and the
-    residual returned is some other angle's. That is a property of the input, not
-    of the wrapping rule, which is why it is documented rather than repaired.
+    The docstring used to promise "any real magnitude". It cannot: past ``2**23 * pi`` in float32 the spacing between
+    neighbouring floats is comparable to ``pi``, so the argument no longer represents the angle it names and the
+    residual returned is some other angle's. That is a property of the input, not of the wrapping rule, which is why it
+    is documented rather than repaired.
     """
 
-    def test_inside_documented_bound_residual_survives_to_inputs_own_spacing(self) -> None:
+    @pytest.mark.parametrize("turns", [1, 10, 1000])
+    def test_inside_documented_bound_residual_survives_to_inputs_own_spacing(self, turns: int) -> None:
         """Offsetting by whole multiples of pi returns the same residual, to within ulp.
 
-        The tolerance is the input's own float32 spacing rather than a constant:
-        that spacing is the whole subject of the bound, and it grows with the
-        magnitude long before the stated ceiling is reached.
+        The tolerance is the input's own float32 spacing rather than a constant: that spacing is the whole subject of
+        the bound, and it grows with the magnitude long before the stated ceiling is reached.
         """
         base = torch.tensor([0.3, -0.4, 1.2])
         spacing = float(torch.finfo(torch.float32).eps)
-        for turns in (1, 10, 1000):
-            shifted = wrap_angle_delta(base + turns * _PI)
-            tolerance = max(4.0 * spacing * turns * _PI, 1e-6)
-            assert torch.allclose(shifted, wrap_angle_delta(base), atol=tolerance)
+        tolerance = max(4.0 * spacing * turns * _PI, 1e-6)
+
+        shifted = wrap_angle_delta(base + turns * _PI)
+
+        assert torch.allclose(shifted, wrap_angle_delta(base), atol=tolerance)
 
     @pytest.mark.parametrize(("magnitude", "expected"), [(1e8, 0.7307), (1e30, -1.2563)])
     def test_past_documented_bound_angle_already_lost(self, magnitude: float, expected: float) -> None:
         """The measured values the narrowed docstring cites, pinned so the claim stays true.
 
-        Neither answer is the residual of its argument — ``1e8`` is a multiple of
-        ``pi`` to well within float32's spacing there — and both are still in range,
-        which is exactly why the bound has to be stated rather than detected.
+        Neither answer is the residual of its argument — ``1e8`` is a multiple of ``pi`` to well within float32's
+        spacing there — and both are still in range, which is exactly why the bound has to be stated rather than
+        detected.
         """
         got = wrap_angle_delta(torch.tensor(magnitude))
 

@@ -21,6 +21,9 @@ from torch.utils.data import DataLoader, Dataset, RandomSampler, SequentialSampl
 from lucid_yolo.ptl._epoch_loader import _EpochPrefetchLoader
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 
+#: Loader settings shared by every test that needs a persistent two-worker shuffled pool of batches of three.
+_POOL: dict[str, Any] = {"batch_size": 3, "num_workers": 2, "persistent_workers": True, "shuffle": True}
+
 
 class _TrainerStub(SimpleNamespace):
     """Keep selector metadata weakly referenceable without pretending to execute CUDA."""
@@ -61,6 +64,24 @@ def _pool(prefetch: bool, *, length: int = 11, **kwargs: Any) -> Iterator[DataLo
             loader._iterator = None
 
 
+def _native_epochs(seed: int, epochs: int = 2) -> list[torch.Tensor]:
+    """Draw ``epochs`` full epochs from the ordinary ``DataLoader`` over the shared persistent pool.
+
+    Args:
+        seed: Seed of the loader's shuffle generator.
+        epochs: How many consecutive epochs to collect.
+
+    Returns:
+        One concatenated tensor of samples per epoch, the reference a prefetching loader must reproduce.
+
+    Examples:
+        >>> [epoch.shape[0] for epoch in _native_epochs(1)]
+        [11, 11]
+    """
+    with _pool(False, generator=torch.Generator().manual_seed(seed), **_POOL) as baseline:
+        return [torch.cat(list(baseline)) for _ in range(epochs)]
+
+
 @pytest.mark.parametrize("epochs", [1, 3])
 @pytest.mark.parametrize("workers", [0, 2])
 @pytest.mark.parametrize("drop_last", [False, True])
@@ -77,10 +98,9 @@ def test_epoch_order_and_worker_randomness_match_native(
 ) -> None:
     """Full and partial final batches preserve both random owners and finite exhaustion.
 
-    Only three epochs over two workers ever reach the early reset; the other cells pin the
-    unchanged native path. Two datasets stress that reset: one batch per epoch, where the
-    successor is prepared on the very first batch, and four samples, fewer batches than
-    the workers' queue is deep.
+    Only three epochs over two workers ever reach the early reset; the other cells pin the unchanged native path. Two
+    datasets stress that reset: one batch per epoch, where the successor is prepared on the very first batch, and four
+    samples, fewer batches than the workers' queue is deep.
     """
     all_rows: list[list[torch.Tensor]] = []
     states: list[torch.Tensor] = []
@@ -120,15 +140,7 @@ def test_shutdown_discards_prepared_work_without_skipping_shuffle() -> None:
     outputs = []
     for prefetch in (False, True):
         generator = torch.Generator().manual_seed(23)
-        with _pool(
-            prefetch,
-            batch_size=3,
-            num_workers=2,
-            persistent_workers=True,
-            generator=generator,
-            shuffle=True,
-            prepare_next=lambda: True,
-        ) as loader:
+        with _pool(prefetch, generator=generator, prepare_next=lambda: True, **_POOL) as loader:
             first = torch.cat(list(loader))
             assert loader._iterator is not None
             loader._iterator._shutdown_workers()
@@ -142,15 +154,7 @@ def test_partial_epoch_keeps_native_restart_order() -> None:
     """Stopping before the final batch leaves the ordinary DataLoader reset in charge."""
     outputs = []
     for prefetch in (False, True):
-        with _pool(
-            prefetch,
-            batch_size=3,
-            num_workers=2,
-            persistent_workers=True,
-            generator=torch.Generator().manual_seed(29),
-            shuffle=True,
-            prepare_next=lambda: True,
-        ) as loader:
+        with _pool(prefetch, generator=torch.Generator().manual_seed(29), prepare_next=lambda: True, **_POOL) as loader:
             iterator = iter(loader)
             first = next(iterator)
             second = torch.cat(list(loader))
@@ -162,8 +166,8 @@ def test_partial_epoch_keeps_native_restart_order() -> None:
 def test_other_sampler_or_generator_keeps_ordinary_epochs(sequential: bool) -> None:
     """Only the module's own random sampler may be prepared early.
 
-    A sequential sampler and a random one drawing from a generator the loader does not
-    hold are both foreign: neither epoch order is the loader's to advance ahead of time.
+    A sequential sampler and a random one drawing from a generator the loader does not hold are both foreign: neither
+    epoch order is the loader's to advance ahead of time.
     """
     dataset = _Samples()
     generator = torch.Generator().manual_seed(31)
@@ -200,22 +204,15 @@ def _resize(loader: DataLoader[torch.Tensor], length: int) -> None:
 def test_prepared_epoch_of_other_length_raises_then_resets_natively() -> None:
     """A dataset that grows after the early reset is refused, never served a truncated epoch.
 
-    The prepared iterator queued its index lists for 11 samples; replaying it under the
-    consumer's longer count would end the epoch on a bare ``StopIteration``. The refusal
-    names both lengths and rewinds the shuffle, so a retried ``iter()`` draws the same
-    permutation the native loader draws for the grown dataset.
+    The prepared iterator queued its index lists for 11 samples; replaying it under the consumer's longer count would
+    end the epoch on a bare ``StopIteration``. The refusal names both lengths and rewinds the shuffle, so a retried
+    ``iter()`` draws the same permutation the native loader draws for the grown dataset.
     """
-    settings: dict[str, Any] = {
-        "batch_size": 3,
-        "num_workers": 2,
-        "persistent_workers": True,
-        "shuffle": True,
-    }
-    with _pool(False, generator=torch.Generator().manual_seed(59), **settings) as baseline:
+    with _pool(False, generator=torch.Generator().manual_seed(59), **_POOL) as baseline:
         list(baseline)
         _resize(baseline, 14)
         expected = torch.cat(list(baseline))
-    with _pool(True, generator=torch.Generator().manual_seed(59), prepare_next=lambda: True, **settings) as loader:
+    with _pool(True, generator=torch.Generator().manual_seed(59), prepare_next=lambda: True, **_POOL) as loader:
         list(loader)
         _resize(loader, 14)
         with pytest.raises(RuntimeError, match=r"prepared for 4 batches, but the loader now has 5"):
@@ -241,19 +238,16 @@ class _CountingSamples(_Samples):
         return super().__getitem__(index)
 
 
-def test_workers_prepare_before_next_epoch_is_requested() -> None:
+def test_workers_prepare_before_next_epoch_requested() -> None:
     """An IPC signal from real reads pins overlap, rather than just wrapper metadata."""
     context = multiprocessing.get_context()
     count = context.Value("i", 0)
     prepared = context.Event()
     loader = _EpochPrefetchLoader(
         _CountingSamples(count, prepared),
-        batch_size=3,
-        num_workers=2,
-        persistent_workers=True,
-        shuffle=True,
         generator=torch.Generator().manual_seed(41),
         prepare_next=lambda: True,
+        **_POOL,
     )
     try:
         iterator = iter(loader)
@@ -345,8 +339,8 @@ def test_datamodule_uses_only_supported_epoch_owner(
 ) -> None:
     """Selector probes establish dispatch and name the first unmet gate; real CUDA fits establish device execution.
 
-    A request the run cannot honour falls back to the ordinary loader, which is
-    byte-identical by design, so the warning is the only sign the opt-in did nothing.
+    A request the run cannot honour falls back to the ordinary loader, which is byte-identical by design, so the
+    warning is the only sign the opt-in did nothing.
     """
     module = attached(trainer_options, **module_options)
     with warnings.catch_warnings(record=True) as caught:
@@ -359,9 +353,9 @@ def test_datamodule_uses_only_supported_epoch_owner(
 def test_module_built_loader_meets_early_reset_preconditions(attached: Callable[..., DetectionDataModule]) -> None:
     """The supported build hands its loader everything ``__iter__`` checks before it may reset early.
 
-    The prefetching path is byte-identical to the ordinary one by design, so a wiring
-    regression -- a dropped persistent pool, a separate sampler, a copied generator --
-    would silently turn the opt-in into a no-op that no equivalence test can see.
+    The prefetching path is byte-identical to the ordinary one by design, so a wiring regression -- a dropped
+    persistent pool, a separate sampler, a copied generator -- would silently turn the opt-in into a no-op that no
+    equivalence test can see.
     """
     loader = attached({}).train_dataloader()
     assert isinstance(loader, _EpochPrefetchLoader)
@@ -391,9 +385,8 @@ def test_prepare_next_stops_at_final_epoch_or_requested_stop(
 ) -> None:
     """The module's predicate prepares a successor only while another configured epoch will run.
 
-    The trainer's epoch and stop flag are read live, after the loader was built, as
-    Lightning advances them; preparing past the final epoch or an early stop would
-    queue a whole epoch of inputs nobody consumes.
+    The trainer's epoch and stop flag are read live, after the loader was built, as Lightning advances them; preparing
+    past the final epoch or an early stop would queue a whole epoch of inputs nobody consumes.
     """
     module = attached({"max_epochs": max_epochs})
     loader = module.train_dataloader()
@@ -415,8 +408,8 @@ def test_ignored_prefetch_warns_once_per_module(attached: Callable[..., Detectio
 def test_unattached_module_keeps_prefetch_warning_unspent(attached: Callable[..., DetectionDataModule]) -> None:
     """A loader built before any trainer is attached stays silent, so the attached build still names its gate.
 
-    Without a trainer the selector cannot judge the run, so the provisional build must
-    not spend the once-per-module warning a genuine fallback needs.
+    Without a trainer the selector cannot judge the run, so the provisional build must not spend the once-per-module
+    warning a genuine fallback needs.
     """
     module = attached({}, persistent_workers=False)
     trainer = module.trainer
@@ -435,15 +428,7 @@ def test_future_reset_failure_preserves_last_batch_and_shuffle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failed speculative reset belongs to the next epoch and must restore its RNG."""
-    with _pool(
-        False,
-        batch_size=3,
-        num_workers=2,
-        persistent_workers=True,
-        shuffle=True,
-        generator=torch.Generator().manual_seed(43),
-    ) as baseline:
-        expected = [torch.cat(list(baseline)) for _ in range(2)]
+    expected = _native_epochs(43)
     original = DataLoader.__iter__
     calls = 0
 
@@ -456,15 +441,7 @@ def test_future_reset_failure_preserves_last_batch_and_shuffle(
         return original(self)
 
     monkeypatch.setattr(DataLoader, "__iter__", fail_second)
-    with _pool(
-        True,
-        batch_size=3,
-        num_workers=2,
-        persistent_workers=True,
-        shuffle=True,
-        generator=torch.Generator().manual_seed(43),
-        prepare_next=lambda: True,
-    ) as loader:
+    with _pool(True, generator=torch.Generator().manual_seed(43), prepare_next=lambda: True, **_POOL) as loader:
         assert torch.equal(torch.cat(list(loader)), expected[0])
         with pytest.raises(RuntimeError, match="future reset failed"):
             iter(loader)
@@ -474,22 +451,13 @@ def test_future_reset_failure_preserves_last_batch_and_shuffle(
 def test_reset_failure_after_worker_resume_keeps_origin_and_shuffle(monkeypatch: pytest.MonkeyPatch) -> None:
     """A speculative reset failing after the persistent iterator restarted still restores the shuffle.
 
-    Here the original reset has already resumed the workers and drawn the next
-    permutation before the failure, the half-reset state a dying worker leaves. The
-    deferred error must still name the frame it came from, and a later iter() must
-    rebuild a complete next epoch in the native order from the restored generator.
-    Only the order is pinned: the resumed workers already spent their own random
-    streams on the discarded queue, and those live in other processes.
+    Here the original reset has already resumed the workers and drawn the next permutation before the failure, the
+    half-reset state a dying worker leaves. The deferred error must still name the frame it came from, and a later
+    iter() must rebuild a complete next epoch in the native order from the restored generator. Only the order is
+    pinned: the resumed workers already spent their own random streams on the discarded queue, and those live in other
+    processes.
     """
-    with _pool(
-        False,
-        batch_size=3,
-        num_workers=2,
-        persistent_workers=True,
-        shuffle=True,
-        generator=torch.Generator().manual_seed(43),
-    ) as baseline:
-        expected = [torch.cat(list(baseline)) for _ in range(2)]
+    expected = _native_epochs(43)
     original = DataLoader.__iter__
     calls = 0
     receipts: list[torch.Tensor] = []
@@ -504,15 +472,7 @@ def test_reset_failure_after_worker_resume_keeps_origin_and_shuffle(monkeypatch:
         return original(self)
 
     monkeypatch.setattr(DataLoader, "__iter__", fail_after_resume)
-    with _pool(
-        True,
-        batch_size=3,
-        num_workers=2,
-        persistent_workers=True,
-        shuffle=True,
-        generator=torch.Generator().manual_seed(43),
-        prepare_next=lambda: True,
-    ) as loader:
+    with _pool(True, generator=torch.Generator().manual_seed(43), prepare_next=lambda: True, **_POOL) as loader:
         first = torch.cat(list(loader))
         restored = loader.generator.get_state().clone()
         with pytest.raises(RuntimeError, match="worker died during resume") as excinfo:
@@ -527,19 +487,10 @@ def test_reset_failure_after_worker_resume_keeps_origin_and_shuffle(monkeypatch:
 def test_interrupted_reset_restores_shuffle_and_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
     """A KeyboardInterrupt during the speculative reset propagates at once, with the shuffle restored.
 
-    An interrupt is not deferred to the next epoch like an ordinary error, but the
-    generator must still be back at its pre-attempt state, so a resumed run rebuilds
-    the same next epoch the native loader would.
+    An interrupt is not deferred to the next epoch like an ordinary error, but the generator must still be back at its
+    pre-attempt state, so a resumed run rebuilds the same next epoch the native loader would.
     """
-    with _pool(
-        False,
-        batch_size=3,
-        num_workers=2,
-        persistent_workers=True,
-        shuffle=True,
-        generator=torch.Generator().manual_seed(53),
-    ) as baseline:
-        expected = [torch.cat(list(baseline)) for _ in range(2)]
+    expected = _native_epochs(53)
     original = DataLoader.__iter__
     calls = 0
     receipts: list[torch.Tensor] = []
@@ -554,15 +505,7 @@ def test_interrupted_reset_restores_shuffle_and_propagates(monkeypatch: pytest.M
         return original(self)
 
     monkeypatch.setattr(DataLoader, "__iter__", interrupt_second)
-    with _pool(
-        True,
-        batch_size=3,
-        num_workers=2,
-        persistent_workers=True,
-        shuffle=True,
-        generator=torch.Generator().manual_seed(53),
-        prepare_next=lambda: True,
-    ) as loader:
+    with _pool(True, generator=torch.Generator().manual_seed(53), prepare_next=lambda: True, **_POOL) as loader:
         with pytest.raises(KeyboardInterrupt):
             list(loader)
         restored = loader.generator.get_state().clone()
@@ -571,22 +514,9 @@ def test_interrupted_reset_restores_shuffle_and_propagates(monkeypatch: pytest.M
     assert torch.equal(second, expected[1])
 
 
-def test_loader_does_not_retain_trainer(tmp_path: Any) -> None:
+def test_loader_does_not_retain_trainer(attached: Callable[..., DetectionDataModule]) -> None:
     """Keeping the loader must not keep its training model alive through the predicate."""
-    module = DetectionDataModule(tmp_path, 3, 2, "n", persistent_workers=True, epoch_prefetch=True)
-    module._train = _Samples()
-    module.trainer = _TrainerStub(
-        accelerator=CUDAAccelerator(),
-        strategy=SingleDeviceStrategy(device="cpu"),
-        world_size=1,
-        limit_train_batches=1.0,
-        max_steps=-1,
-        overfit_batches=0,
-        reload_dataloaders_every_n_epochs=0,
-        max_epochs=3,
-        current_epoch=0,
-        should_stop=False,
-    )
+    module = attached({})
     owner = weakref.ref(module.trainer)
     loader = module.train_dataloader()
     module.trainer = None
@@ -597,15 +527,7 @@ def test_loader_does_not_retain_trainer(tmp_path: Any) -> None:
 
 def test_lightning_reset_releases_unused_prepared_iterator() -> None:
     """An early stop must not retain the old iterator after Lightning closes its pool."""
-    with _pool(
-        True,
-        batch_size=3,
-        num_workers=2,
-        persistent_workers=True,
-        shuffle=True,
-        generator=torch.Generator().manual_seed(47),
-        prepare_next=lambda: True,
-    ) as loader:
+    with _pool(True, generator=torch.Generator().manual_seed(47), prepare_next=lambda: True, **_POOL) as loader:
         combined = CombinedLoader(loader, "max_size_cycle")
         for batch in combined:
             del batch
@@ -619,9 +541,8 @@ def test_lightning_reset_releases_unused_prepared_iterator() -> None:
 def test_mosaic_change_under_prefetch_warns_once(tmp_path: Any) -> None:
     """A close-mosaic flip under persistent prefetch workers warns once, naming the callback it breaks.
 
-    The workers keep the pipeline copy they started with, so the new probability lands
-    only in the main process; the warning is the one signal a CloseMosaicCallback run
-    gets that its final epochs still train on mosaics.
+    The workers keep the pipeline copy they started with, so the new probability lands only in the main process; the
+    warning is the one signal a CloseMosaicCallback run gets that its final epochs still train on mosaics.
     """
     module = DetectionDataModule(tmp_path, 3, 2, "n", persistent_workers=True, epoch_prefetch=True)
     module._train = SimpleNamespace(mosaic_p=1.0)
@@ -647,8 +568,8 @@ def test_mosaic_change_reaching_workers_stays_silent(
 ) -> None:
     """Only a changed value under the persistent prefetch pair warns; every other route reaches the samples.
 
-    Fresh worker pools copy the pipeline after the change and in-process loading reads
-    it directly, so a warning there would be noise; an unchanged value moves nothing.
+    Fresh worker pools copy the pipeline after the change and in-process loading reads it directly, so a warning there
+    would be noise; an unchanged value moves nothing.
     """
     settings = {"num_workers": 2, "persistent_workers": True, "epoch_prefetch": True} | module_options
     module = DetectionDataModule(tmp_path, batch_size=3, variant="n", **settings)

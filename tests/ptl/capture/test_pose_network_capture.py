@@ -107,9 +107,9 @@ def test_pose_replay_keeps_outputs_gradients_buffers(
 ) -> None:
     """Changing images and repeated SGD updates follow the exact native trajectory.
 
-    The replayed arm runs through ``_training_network`` so the production eligibility,
-    breach and root-hook gates apply. A classification-only loss never reaches the point
-    stems, and their gradients must stay absent on both arms rather than become zeros.
+    The replayed arm runs through ``_training_network`` so the production eligibility, breach and root-hook gates
+    apply. A classification-only loss never reaches the point stems, and their gradients must stay absent on both arms
+    rather than become zeros.
     """
     torch.manual_seed(42)
     torch.cuda.manual_seed_all(42)
@@ -215,8 +215,8 @@ def _step_pair(
 def test_pose_replay_with_partial_freeze_matches_native(freeze: tuple[str, ...]) -> None:
     """Fine-tuning with only some shared stages frozen replays and keeps native gradient presence.
 
-    Frozen stages must stay without gradients on both arms, trainable ones must receive
-    identical bytes, and the recording must exist so the parity is not two native runs.
+    Frozen stages must stay without gradients on both arms, trainable ones must receive identical bytes, and the
+    recording must exist so the parity is not two native runs.
     """
     native, replayed = _frozen_pair(freeze)
     optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5) for model in (native, replayed)]
@@ -231,9 +231,9 @@ def test_pose_replay_with_partial_freeze_matches_native(freeze: tuple[str, ...])
 def test_pose_unfreeze_mid_fit_warns_once_and_stays_native() -> None:
     """Unfreezing a stage after recording retires the replay with one warning and keeps native results.
 
-    The frozen backbone is recorded for two steps, then trained: the recording would keep
-    producing frozen-stage gradients, so the signature change must send every later step
-    through the full native call without repeating the warning.
+    The frozen backbone is recorded for two steps, then trained: the recording would keep producing frozen-stage
+    gradients, so the signature change must send every later step through the full native call without repeating the
+    warning.
     """
     native, replayed = _frozen_pair(("backbone",))
     optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5) for model in (native, replayed)]
@@ -274,10 +274,10 @@ def _same_state(left: object, right: object) -> None:
 def _pose_batches(layout: str) -> list[tuple[torch.Tensor, list[Targets]]]:
     """Three loader batches of a realistic shape pattern for a five-point pose fit.
 
-    ``uniform`` repeats one ``(2, 3, 64, 64)`` batch; ``empty`` makes the middle batch
-    supervision-free; ``short-last`` ends on a one-image batch (``[2, 2, 1]``); ``mixed``
-    puts an image with a person and one without in the middle batch; ``invisible`` gives
-    the middle batch boxes whose points are all unlabelled (``keypoint_vis`` zero).
+    ``uniform`` repeats one ``(2, 3, 64, 64)`` batch; ``empty`` makes the middle batch supervision-free;
+    ``short-last`` ends on a one-image batch (``[2, 2, 1]``); ``mixed`` puts an image with a person and one without
+    in the middle batch; ``invisible`` gives the middle batch boxes whose points are all unlabelled
+    (``keypoint_vis`` zero).
 
     Examples:
         >>> [len(targets) for _, targets in _pose_batches("short-last")]
@@ -325,10 +325,10 @@ def test_pose_trainer_matches_native(
 ) -> None:
     """Public pose training keeps flow/optimizer/scaler state through clipped accumulation.
 
-    Both accumulation settings record shared features and eighteen independent stems once and
-    replay every later batch, the empty-supervision batch included, without a retirement
-    warning; accumulation 2 also carries live gradients into each second replay. The record
-    count pins that replay ran, so a lapse cannot pass as parity of two native runs.
+    Both accumulation settings record shared features and eighteen independent stems once and replay every later
+    batch, the empty-supervision batch included, without a retirement warning; accumulation 2 also carries live
+    gradients into each second replay. The record count pins that replay ran, so a lapse cannot pass as parity of
+    two native runs.
     """
     torch.manual_seed(42)
     batches = _pose_batches(layout)
@@ -380,9 +380,9 @@ def test_pose_trainer_matches_native(
 def test_pose_trainer_with_optimizer_captures_matches_native(graph_recordings: MagicMock) -> None:
     """The benchmarked combination of network replay, orthogonalization and update capture stays native-exact.
 
-    One FP32, accumulation-1 fit enables all three CUDA replay options together, the way the
-    WP-193d measurement did, and must end on the model weights and per-parameter optimizer
-    state of a fit with none of them. Group flags legitimately differ, so only ``state`` is compared.
+    One FP32, accumulation-1 fit enables all three CUDA replay options together, the way the WP-193d measurement
+    did, and must end on the model weights and per-parameter optimizer state of a fit with none of them. Group flags
+    legitimately differ, so only ``state`` is compared.
     """
     batches = _pose_batches("uniform")
     initial = _pose().state_dict()
@@ -435,25 +435,27 @@ def test_pose_cli_accepts_network_capture(capture: bool) -> None:
     assert len(cli.model.configure_callbacks()) == int(capture)
 
 
-def test_pose_head_certificate_survives_copy_and_rejects_overrides() -> None:
-    """A native head stays eligible through deepcopy; changed dispatch cannot detach shared features."""
+@pytest.mark.parametrize(
+    ("name", "replacement"),
+    [
+        pytest.param("forward", lambda self, values: values, id="forward"),
+        pytest.param("forward_branch", lambda self, features, branch: features, id="forward-branch"),
+    ],
+)
+def test_pose_head_certificate_survives_copy_and_rejects_dispatch_overrides(
+    name: str, replacement: Callable[..., object]
+) -> None:
+    """A native head stays eligible through deepcopy; changed dispatch cannot detach shared features.
+
+    ``forward`` only reaches submodules through ``forward_branch``, so both dispatch points count, whether the override
+    sits on the instance or on the class.
+    """
     model = copy.deepcopy(_pose())
     assert _pose_head_breach(model.head, head_topology(model)) is None
-    with patch.object(model.head, "forward", wraps=model.head.forward):
+    with patch.object(model.head, name, wraps=getattr(model.head, name)):
         assert _pose_head_breach(model.head, head_topology(model)) is not None
     assert _pose_head_breach(model.head, head_topology(model)) is None
-    with patch.object(type(model.head), "forward", lambda self, values: values):
-        assert _pose_head_breach(model.head, head_topology(model)) is not None
-
-
-def test_pose_head_certificate_rejects_forward_branch_overrides() -> None:
-    """``forward`` only reaches submodules through ``forward_branch``; both dispatch points count."""
-    model = copy.deepcopy(_pose())
-    assert _pose_head_breach(model.head, head_topology(model)) is None
-    with patch.object(model.head, "forward_branch", wraps=model.head.forward_branch):
-        assert _pose_head_breach(model.head, head_topology(model)) is not None
-    assert _pose_head_breach(model.head, head_topology(model)) is None
-    with patch.object(type(model.head), "forward_branch", lambda self, features, branch: features):
+    with patch.object(type(model.head), name, replacement):
         assert _pose_head_breach(model.head, head_topology(model)) is not None
 
 
@@ -509,8 +511,8 @@ def test_frozen_features_leave_full_native_call_to_owner() -> None:
 def test_pose_hook_retires_features_and_observes_native_root(location: str, reason: str) -> None:
     """After recording, hooks keep their full native call boundary and retire the graph.
 
-    The warning must name the hook that caused the retirement, so a retirement for an
-    unrelated reason cannot satisfy the test.
+    The warning must name the hook that caused the retirement, so a retirement for an unrelated reason cannot
+    satisfy the test.
     """
     model = _pose(capture_network=True).cuda()
     model._trainer = SimpleNamespace(training=True, accumulate_grad_batches=1)
@@ -595,8 +597,8 @@ def test_pose_routing_retires_then_runs_native(
 ) -> None:
     """A broken pose contract retires the recording once and trains through the full native call.
 
-    The CUDA-only route cannot execute on CPU runners, so images spoof ``is_cuda`` and the
-    real retirement logic runs; the native fallback shows as one backbone forward.
+    The CUDA-only route cannot execute on CPU runners, so images spoof ``is_cuda`` and the real retirement logic
+    runs; the native fallback shows as one backbone forward.
     """
     torch.manual_seed(42)
     model = _routed_pose(accumulation)
@@ -617,9 +619,8 @@ def test_pose_routing_retires_then_runs_native(
 def test_retired_holder_skips_pose_replay_predicates() -> None:
     """A retired recording sends later steps through the full native call without re-checking the head.
 
-    Once retired, the owner check and every later ``retire`` are no-ops, so the stem-owner
-    walk and the head certificate could change nothing; a step after retirement skips both
-    and never reaches the recorder.
+    Once retired, the owner check and every later ``retire`` are no-ops, so the stem-owner walk and the head
+    certificate could change nothing; a step after retirement skips both and never reaches the recorder.
     """
     torch.manual_seed(42)
     model = _routed_pose()
@@ -752,8 +753,8 @@ def test_pose_stems_replay_through_changing_supervision(
             loss.backward()
             optimizer.step()
         if iteration:
-            # Nineteen forwards; one feature backward, six class backwards,
-            # and three point backwards per supervised branch. Box outputs are unused.
+            # Nineteen forwards; one feature backward, six class backwards, and three point backwards per supervised
+            # branch. Box outputs are unused.
             assert len(launches) - previous_launches >= 19 + 1 + 6 + 3 * len(point_branches)
         _assert_same_gradients_and_state(native, replayed)
         _same_state(optimizers[0].state_dict(), optimizers[1].state_dict())
@@ -798,8 +799,8 @@ def test_stem_replay_preserves_input_gradients_and_accumulation() -> None:
 def test_stem_dispatch_override_before_construction_stays_observable(owner: type, name: str) -> None:
     """A class-level replacement of any native dispatch method is refused, even before construction.
 
-    Each dispatch-table entry is patched alone with a forwarding wrapper that cannot be
-    the native function object, so dropping one entry from the table fails exactly its case.
+    Each dispatch-table entry is patched alone with a forwarding wrapper that cannot be the native function
+    object, so dropping one entry from the table fails exactly its case.
     """
     native = getattr(owner, name)
 
@@ -861,9 +862,9 @@ def test_stem_bypass_runs_native_without_holder(
 ) -> None:
     """Each native-bypass clause of the stem route returns the native result and starts no recording.
 
-    Every case differs from a recordable call in one clause only: an eval-mode stage, a
-    retired parent, a CPU feature or disabled gradients. Dropping that clause would record
-    graphs during validation, under ``no_grad`` or for an eval-mode stem.
+    Every case differs from a recordable call in one clause only: an eval-mode stage, a retired parent, a CPU
+    feature or disabled gradients. Dropping that clause would record graphs during validation, under ``no_grad``
+    or for an eval-mode stem.
     """
     parent = _NetworkCapture()
     parent._disabled = disabled
@@ -879,8 +880,8 @@ def test_stem_bypass_runs_native_without_holder(
 def test_recorded_stem_switched_to_eval_reaches_drift_check() -> None:
     """A recorded stem switched to eval goes through its holder, whose drift check retires it.
 
-    The holder is marked recorded without CUDA and the patched replay path stands in for the
-    drift check that a CUDA run applies; only the routing decision is exercised here.
+    The holder is marked recorded without CUDA and the patched replay path stands in for the drift check that
+    a CUDA run applies; only the routing decision is exercised here.
     """
     parent = _NetworkCapture()
     stage = torch.nn.Identity()
@@ -896,9 +897,9 @@ def test_recorded_stem_switched_to_eval_reaches_drift_check() -> None:
 def test_stem_retirement_warning_names_stem_and_caller() -> None:
     """A retired stem holder names its stem, says the rest keeps replaying, and points past internal frames.
 
-    The child is created through the parent's normal route after the owner check recorded
-    the head's module names; the warning must name this test as its caller, the first frame
-    outside the replay stack, never the head's dispatch code.
+    The child is created through the parent's normal route after the owner check recorded the head's module
+    names; the warning must name this test as its caller, the first frame outside the replay stack, never the head's
+    dispatch code.
     """
     model = _pose()
     parent = _NetworkCapture()
@@ -926,8 +927,8 @@ def test_stem_retirement_warning_names_stem_and_caller() -> None:
 def test_lifecycle_releases_stem_holders(finish: Callable[[_NetworkCaptureLifecycle, object], None]) -> None:
     """Fit completion and failure both release every stem holder together with the shared recording.
 
-    A child holder stands in for a recorded stem and the callback is driven directly, so the
-    clearing path is checked on CPU while recording numerics stay on the CUDA matrix.
+    A child holder stands in for a recorded stem and the callback is driven directly, so the clearing path is
+    checked on CPU while recording numerics stay on the CUDA matrix.
     """
     holder = _NetworkCapture()
     holder.check_stem_owners(_pose().head)
@@ -1002,8 +1003,8 @@ def test_changed_stem_trainability_retires_only_its_recording() -> None:
 def test_changed_stem_mode_retires_only_its_recording() -> None:
     """Switching one recorded point stem to eval retires that stem alone and keeps native parity.
 
-    The mode change reaches the stem holder's drift check, as a recorded feature stage's
-    would, so the stem runs eager while the shared features keep replaying.
+    The mode change reaches the stem holder's drift check, as a recorded feature stage's would, so the stem
+    runs eager while the shared features keep replaying.
     """
     native, replayed = _frozen_pair(())
     optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5, momentum=0.9) for model in (native, replayed)]

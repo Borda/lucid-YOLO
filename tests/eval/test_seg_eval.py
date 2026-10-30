@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gates for the WP-053b segm evaluation (bbox+segm, both decode paths).
 
-The instrument this file pins is a *pair* of numbers, and almost every way it can
-break leaves one of them looking perfectly healthy:
+The instrument this file pins is a *pair* of numbers, and almost every way it can break leaves one of them looking
+perfectly healthy:
 
 - :func:`test_bbox_and_segm` (the DoD) — perfect predictions score 1.0 on both
   metrics, and then perturbing **only** the masks moves the segm number while the
@@ -25,6 +25,7 @@ break leaves one of them looking perfectly healthy:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -49,6 +50,7 @@ from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from unittest.mock import MagicMock
 
     from torch import Tensor
 
@@ -114,12 +116,10 @@ def _target(box: list[float], mask: Tensor) -> dict[str, Tensor]:
 def test_bbox_and_segm() -> None:
     """Perfect predictions score 1.0 on both metrics, and perturbing only the masks moves only segm (DoD).
 
-    The pairing is the point. Half of it alone proves little: a segm column
-    aliased onto the bbox column, or recomputed from the box corners rather than
-    from the decoded masks, reports 1.0 for the perfect case exactly as a correct
-    implementation does. It is the second half — identical boxes, ruined masks —
-    that separates them, and it also catches the mirror defect of a bbox column
-    contaminated by mask overlap.
+    The pairing is the point. Half of it alone proves little: a segm column aliased onto the bbox column, or recomputed
+    from the box corners rather than from the decoded masks, reports 1.0 for the perfect case exactly as a correct
+    implementation does. It is the second half — identical boxes, ruined masks — that separates them, and it also
+    catches the mirror defect of a bbox column contaminated by mask overlap.
     """
     target = _target(_BOX, _filled_mask(_BOX))
     perfect = _prediction(_BOX, _filled_mask(_BOX))
@@ -139,10 +139,9 @@ def test_bbox_and_segm() -> None:
 def test_empty_predicted_mask_scores_zero_segm() -> None:
     """A detection whose mask is empty earns no segm credit and raises nothing.
 
-    The everyday output of a model whose mask probabilities never clear the A37
-    threshold inside the predicted box. An implementation that encodes an
-    all-``False`` mask by way of its bounding box (there is none) or that treats
-    an empty RLE as an error would crash here rather than score 0.
+    The everyday output of a model whose mask probabilities never clear the A37 threshold inside the predicted box. An
+    implementation that encodes an all-``False`` mask by way of its bounding box (there is none) or that treats an
+    empty RLE as an error would crash here rather than score 0.
     """
     target = _target(_BOX, _filled_mask(_BOX))
     empty = _prediction(_BOX, torch.zeros((1, *_IMAGE_SIZE), dtype=torch.bool))
@@ -155,11 +154,10 @@ def test_empty_predicted_mask_scores_zero_segm() -> None:
 def test_polygon_and_rle_targets_decode_to_same_mask() -> None:
     """One rectangle expressed as a polygon and as an RLE yields the identical target mask.
 
-    COCO stores ordinary instances as polygons and ``iscrowd`` regions as RLE, so
-    a decoder that handles only one encoding — or that transposes the ``(width,
-    height)`` argument order the RLE helper takes, which a square test image would
-    hide — puts the two kinds of ground truth on different grids while every
-    shape still looks plausible. The image here is deliberately non-square.
+    COCO stores ordinary instances as polygons and ``iscrowd`` regions as RLE, so a decoder that handles only one
+    encoding — or that transposes the ``(width, height)`` argument order the RLE helper takes, which a square test
+    image would hide — puts the two kinds of ground truth on different grids while every shape still looks plausible.
+    The image here is deliberately non-square.
     """
     height, width = 12, 20
     polygon = {"bbox": [2.0, 3.0, 6.0, 4.0], "category_id": _CATEGORY, "segmentation": [[2, 3, 8, 3, 8, 7, 2, 7]]}
@@ -178,11 +176,10 @@ def test_polygon_and_rle_targets_decode_to_same_mask() -> None:
 def test_padding_rows_drop_masks_and_boxes_by_same_filter() -> None:
     """The surviving mask is the surviving detection's own, not the first row of the stack.
 
-    The batch is built so a "keep the first N rows" filter — the shape an
-    off-by-one in the mask path naturally takes — survives with the wrong answer:
-    the single scored detection is row 1, and rows 0 and 2 are score-zero padding.
-    Boxes and masks are made distinguishable per row, so the assert below fails
-    for any mask filter that is not the *same* boolean mask the boxes take.
+    The batch is built so a "keep the first N rows" filter — the shape an off-by-one in the mask path naturally takes —
+    survives with the wrong answer: the single scored detection is row 1, and rows 0 and 2 are score-zero padding.
+    Boxes and masks are made distinguishable per row, so the assert below fails for any mask filter that is not the
+    *same* boolean mask the boxes take.
     """
     detections = torch.tensor(
         [
@@ -220,11 +217,9 @@ def _loader(fixture_dir: Path, letterbox: Letterbox) -> list[tuple[Tensor, list[
 def test_detection_only_model_reports_bbox_metrics_and_no_segm_key(detseg_fixture_dir: Path) -> None:
     """A checkpoint without a mask branch evaluates exactly as it did before WP-053b.
 
-    The regression gate on the whole change: the segmentation support must be
-    reachable only through a model that actually carries prototypes. A decoder
-    call rerouted through the index-returning path for everyone, or a report
-    padded with zeroed ``segm_`` entries "for consistency", would change what
-    every existing detection run reports.
+    The regression gate on the whole change: the segmentation support must be reachable only through a model that
+    actually carries prototypes. A decoder call rerouted through the index-returning path for everyone, or a report
+    padded with zeroed ``segm_`` entries "for consistency", would change what every existing detection run reports.
     """
     torch.manual_seed(0)
     letterbox = Letterbox(_CANVAS)
@@ -244,12 +239,10 @@ def test_detection_only_model_reports_bbox_metrics_and_no_segm_key(detseg_fixtur
 def _saturate_mask_branch(model: Segmenter) -> None:
     """Bias an untrained segmenter into emitting non-degenerate boxes and non-empty masks.
 
-    At initialization the mask logits are ~0, i.e. probability 0.5, which the
-    strictly-greater A37 threshold rounds to **empty everywhere**, and the raw
-    ltrb distances are ~0, i.e. zero-extent boxes whose crop is empty too. An
-    end-to-end test on that model would pass while gathering coefficients from
-    entirely the wrong anchors, because every mask is empty either way. Positive
-    output biases on the box stems, the coefficient stems and the prototype
+    At initialization the mask logits are ~0, i.e. probability 0.5, which the strictly-greater A37 threshold rounds to
+    **empty everywhere**, and the raw ltrb distances are ~0, i.e. zero-extent boxes whose crop is empty too. An
+    end-to-end test on that model would pass while gathering coefficients from entirely the wrong anchors, because
+    every mask is empty either way. Positive output biases on the box stems, the coefficient stems and the prototype
     convolution make the whole chain produce real geometry to compare.
 
     Examples:
@@ -283,12 +276,10 @@ def _segmentation_evaluator(label_map: dict[int, int], letterbox: Letterbox) -> 
 def test_segmentation_model_reports_both_metrics_on_both_paths(detseg_fixture_dir: Path) -> None:
     """A real segmenter reports finite bbox *and* segm statistics for the E2E and dense paths.
 
-    The end-to-end wiring gate, run on an untrained model where the numbers
-    themselves mean nothing: prototypes reach the decode, each path gathers its
-    own branch's coefficients by its own anchor indices, masks are assembled on
-    the letterboxed canvas and landed on each image's original grid, and the
-    ground-truth polygons decode onto that same grid. Any mismatch in that chain
-    surfaces here as a shape error or a non-finite statistic rather than as a
+    The end-to-end wiring gate, run on an untrained model where the numbers themselves mean nothing: prototypes reach
+    the decode, each path gathers its own branch's coefficients by its own anchor indices, masks are assembled on the
+    letterboxed canvas and landed on each image's original grid, and the ground-truth polygons decode onto that same
+    grid. Any mismatch in that chain surfaces here as a shape error or a non-finite statistic rather than as a
     plausible number nobody can check.
     """
     torch.manual_seed(0)
@@ -309,12 +300,10 @@ def test_segmentation_model_reports_both_metrics_on_both_paths(detseg_fixture_di
 def _mixed_batches() -> list[tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]]:
     """Return three single-image ``(preds, targets)`` batches that do not score alike.
 
-    Batch quality has to *differ* for a streaming test to mean anything. An
-    untrained model is useless here: it scores 0.0 on every statistic, so any
-    subset of the batches gives the same answer as all of them and every
-    accumulation bug is invisible. These three -- a perfect instance, a
-    mask-missed instance, another perfect one -- land the aggregate strictly
-    between 0 and 1, and each batch alone gives something else.
+    Batch quality has to *differ* for a streaming test to mean anything. An untrained model is useless here: it scores
+    0.0 on every statistic, so any subset of the batches gives the same answer as all of them and every accumulation
+    bug is invisible. These three -- a perfect instance, a mask-missed instance, another perfect one -- land the
+    aggregate strictly between 0 and 1, and each batch alone gives something else.
 
     Examples:
         >>> batches = _mixed_batches()
@@ -331,17 +320,14 @@ def _mixed_batches() -> list[tuple[list[dict[str, Tensor]], list[dict[str, Tenso
 def test_streaming_scoring_equals_scoring_everything_at_once() -> None:
     """Folding batches in one at a time reports what scoring them together reports.
 
-    The evaluator no longer holds every image's predictions until the end -- it
-    could not, for masks: a val2017 segmentation run would keep both paths'
-    predicted masks and the ground truth dense and simultaneously. Per-batch
-    updates bound that, and this pins the equivalence on all 24 statistics against
-    the functional one-shot entry point.
+    The evaluator no longer holds every image's predictions until the end -- it could not, for masks: a val2017
+    segmentation run would keep both paths' predicted masks and the ground truth dense and simultaneously. Per-batch
+    updates bound that, and this pins the equivalence on all 24 statistics against the functional one-shot entry point.
 
-    The non-vacuity assertion is the load-bearing part. With a metric reset on
-    every update -- scoring the last batch alone -- an equality against
-    zero-scoring predictions still passes, which is exactly how the first version
-    of this test failed to catch that mutation. Requiring the aggregate to sit
-    strictly between 0 and 1 makes "all the numbers are 0" unable to satisfy it.
+    The non-vacuity assertion is the load-bearing part. With a metric reset on every update -- scoring the last batch
+    alone -- an equality against zero-scoring predictions still passes, which is exactly how the first version of this
+    test failed to catch that mutation. Requiring the aggregate to sit strictly between 0 and 1 makes "all the numbers
+    are 0" unable to satisfy it.
     """
     batches = _mixed_batches()
     scorer = _StreamingScorer()
@@ -359,12 +345,12 @@ def test_streaming_scoring_equals_scoring_everything_at_once() -> None:
         assert streamed[key] == pytest.approx(value)
 
 
-def test_evaluate_feeds_every_batch_to_both_paths(detseg_fixture_dir: Path) -> None:
+@patch.object(coco_eval._StreamingScorer, "update", autospec=True, side_effect=coco_eval._StreamingScorer.update)
+def test_evaluate_feeds_every_batch_to_both_paths(update: MagicMock, detseg_fixture_dir: Path) -> None:
     """The evaluator's loop hands each batch to each path's scorer exactly once.
 
-    The equivalence above pins the scorer; this pins the loop that drives it. A
-    dropped final batch or a path updated from the other path's predictions leaves
-    a complete, finite report behind, and on a fixture where every prediction
+    The equivalence above pins the scorer; this pins the loop that drives it. A dropped final batch or a path updated
+    from the other path's predictions leaves a complete, finite report behind, and on a fixture where every prediction
     scores zero it leaves an *identical* one.
     """
     torch.manual_seed(0)
@@ -373,35 +359,21 @@ def test_evaluate_feeds_every_batch_to_both_paths(detseg_fixture_dir: Path) -> N
     images, targets, label_map = load_eval_annotations(split_dir / _ANNOTATION, with_masks=True)
     batches = list(letterboxed_batches(images[:_NUM_IMAGES], split_dir, letterbox, 1))
     assert len(batches) == _NUM_IMAGES
-
-    seen: list[int] = []
-    real_update = coco_eval._StreamingScorer.update
-
-    def _counting_update(
-        self: coco_eval._StreamingScorer,
-        preds: list[dict[str, Tensor]],
-        target: list[dict[str, Tensor]],
-    ) -> None:
-        seen.append(len(preds))
-        real_update(self, preds, target)
-
     evaluator = _segmentation_evaluator(label_map, letterbox)
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(coco_eval._StreamingScorer, "update", _counting_update)
-        evaluator.evaluate(batches, targets, torch.device("cpu"))
 
+    evaluator.evaluate(batches, targets, torch.device("cpu"))
+
+    seen = [len(call.args[1]) for call in update.call_args_list]
     assert seen == [1] * (2 * _NUM_IMAGES)  # both paths, every batch, one image each
 
 
 def test_predicted_masks_land_on_original_grid_with_content(detseg_fixture_dir: Path) -> None:
     """Every path's masks come back at the original image size, row-matched to its boxes, non-empty.
 
-    The gate on the geometry the report itself cannot show. A mask left on the
-    160px letterboxed canvas, or scored before the inverse letterbox, still
-    produces a full set of finite statistics — the segm numbers are simply wrong.
-    The non-emptiness assert is what stops this test from passing vacuously: an
-    all-``False`` stack has the right shape no matter which anchors its
-    coefficients came from.
+    The gate on the geometry the report itself cannot show. A mask left on the 160px letterboxed canvas, or scored
+    before the inverse letterbox, still produces a full set of finite statistics — the segm numbers are simply wrong.
+    The non-emptiness assert is what stops this test from passing vacuously: an all-``False`` stack has the right shape
+    no matter which anchors its coefficients came from.
     """
     torch.manual_seed(0)
     letterbox = Letterbox(_CANVAS)
@@ -424,20 +396,16 @@ def test_predicted_masks_land_on_original_grid_with_content(detseg_fixture_dir: 
 def test_masks_stay_paired_with_own_detections() -> None:
     """Each surviving mask stays attached to the box it was decoded for.
 
-    The score filter keeps masks and boxes in step, but keeping the right *count*
-    is not the same as keeping the right *order*. A stack permuted relative to the
-    detections still has one mask per box and still passes every shape and count
-    assertion, because each mask is a real mask of a real object — merely attached
-    to the wrong one.
+    The score filter keeps masks and boxes in step, but keeping the right *count* is not the same as keeping the right
+    *order*. A stack permuted relative to the detections still has one mask per box and still passes every shape and
+    count assertion, because each mask is a real mask of a real object — merely attached to the wrong one.
 
-    The two instances must carry **different labels** for this to be observable at
-    all. Segm mAP never looks at boxes: it matches predicted masks to ground-truth
-    masks by IoU within a class. Give two same-class detections each other's mask
-    and the predicted set is unchanged, so each mask simply matches the other's
-    ground truth and the score stays a perfect 1.0 — the permutation is invisible.
-    Distinct labels break that symmetry: the mask offered under label A is then
-    scored against label A's ground truth, misses it entirely, and segm collapses
-    while bbox, which never depended on the ordering, holds at 1.0.
+    The two instances must carry **different labels** for this to be observable at all. Segm mAP never looks at boxes:
+    it matches predicted masks to ground-truth masks by IoU within a class. Give two same-class detections each other's
+    mask and the predicted set is unchanged, so each mask simply matches the other's ground truth and the score stays a
+    perfect 1.0 — the permutation is invisible. Distinct labels break that symmetry: the mask offered under label A is
+    then scored against label A's ground truth, misses it entirely, and segm collapses while bbox, which never depended
+    on the ordering, holds at 1.0.
     """
     box_a, box_b = [4.0, 4.0, 20.0, 20.0], [40.0, 40.0, 60.0, 60.0]
     mask_a, mask_b = _filled_mask(box_a), _filled_mask(box_b)
@@ -500,14 +468,12 @@ class TestPaddedRowMaskDecode:
     def test_prefix_decode_matches_decoding_every_padded_row(self) -> None:
         """Slicing to the real detections returns exactly what decoding all 300 rows returned.
 
-        The padded block is the fixed ``max_det`` shape ``pad_detections`` emits, so an
-        image with a handful of objects still arrives with most of its rows carrying a
-        score-zero, all-zero box. Those rows are skipped now instead of decoded, which is
-        only sound if the full decode produced nothing for them: an all-zero box crops
-        every pixel away, so it should. Asserted against the full decode rather than
-        argued — the real rows bit-identical, the padding rows all ``False`` on both
-        sides, so a future change that makes an empty box decode to *something* fails
-        here rather than silently changing a score.
+        The padded block is the fixed ``max_det`` shape ``pad_detections`` emits, so an image with a handful of objects
+        still arrives with most of its rows carrying a score-zero, all-zero box. Those rows are skipped now instead of
+        decoded, which is only sound if the full decode produced nothing for them: an all-zero box crops every pixel
+        away, so it should. Asserted against the full decode rather than argued — the real rows bit-identical, the
+        padding rows all ``False`` on both sides, so a future change that makes an empty box decode to *something*
+        fails here rather than silently changing a score.
         """
         evaluator, detections, anchor_index, coefficients, geometry = self._scene(real=3, padded=16)
         every_row = torch.tensor([[[1.0, 1.0, float(_IMAGE_SIZE[1]), float(_IMAGE_SIZE[0]), 0.5, 0.0]] * 16])
@@ -523,10 +489,9 @@ class TestPaddedRowMaskDecode:
     def test_image_with_no_real_detections_yields_padded_shape(self) -> None:
         """An all-padding image returns ``max_det`` empty masks rather than an empty stack.
 
-        The stack is indexed downstream by a boolean mask over every padded row, so a
-        short stack mis-indexes rather than failing loudly. This is the degenerate case
-        of that contract: nothing scored, so nothing is decoded at all, and the shape has
-        to come from the block rather than from the decoder.
+        The stack is indexed downstream by a boolean mask over every padded row, so a short stack mis-indexes rather
+        than failing loudly. This is the degenerate case of that contract: nothing scored, so nothing is decoded at all,
+        and the shape has to come from the block rather than from the decoder.
         """
         evaluator, detections, anchor_index, coefficients, geometry = self._scene(real=0, padded=16)
 

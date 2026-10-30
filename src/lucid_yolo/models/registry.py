@@ -1,19 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """Compound-scaling registry for the YOLO26 model family (WP-023).
 
-The five published variants (``n``/``s``/``m``/``l``/``x``) differ only by three
-compound-scaling multipliers — depth ``d``, width ``w``, and the pre-width channel
-cap ``mc`` (blueprint sec. 5.1, sourced from R3 Fig. 1). This module pins those
-rows as a frozen :class:`ScaleSpec` dataclass registry and exposes a single
-:func:`scale_spec` lookup, the one place the multipliers live (ADR-001: the
-topology is typed Python, never a config DSL).
+The five published variants (``n``/``s``/``m``/``l``/``x``) differ only by three compound-scaling multipliers —
+depth ``d``, width ``w``, and the pre-width channel cap ``mc`` (blueprint sec. 5.1, sourced from R3 Fig. 1). This
+module pins those rows as a frozen :class:`ScaleSpec` dataclass registry and exposes a single :func:`scale_spec`
+lookup, the one place the multipliers live (ADR-001: the topology is typed Python, never a config DSL).
 
-The multipliers feed the backbone/neck scaling helpers
-(:func:`~lucid_yolo.models.backbone._scale_channels`,
-:func:`~lucid_yolo.models.backbone._scale_repeats`) unchanged: channel widths are
-``int(min(base, mc) * w)`` and per-stage repeats ``max(1, round(2 * d))``. The
-resulting parameter and FLOP counts are held to R1 Table 7 by the WP-023 fidelity
-gate (``tests/models/test_param_flops.py``).
+The multipliers feed the backbone/neck scaling helpers (:func:`~lucid_yolo.models.backbone._scale_channels`,
+:func:`~lucid_yolo.models.backbone._scale_repeats`) unchanged: channel widths are ``int(min(base, mc) * w)`` and
+per-stage repeats ``max(1, round(2 * d))``. The resulting parameter and FLOP counts are held to R1 Table 7 by the
+WP-023 fidelity gate (``tests/models/test_param_flops.py``).
 
 Provenance: R3 Fig. 1, R1 Table 7. Assumptions: A3.
 """
@@ -35,13 +31,10 @@ class ScaleSpec:
     """Compound-scaling multipliers for one YOLO26 variant.
 
     Attributes:
-        depth: Depth multiplier ``d`` scaling every CSP stage's inner-unit repeat
-            count (``max(1, round(2 * depth))``).
-        width: Width multiplier ``w`` scaling channel counts
-            (``int(min(base, max_channels) * width)``).
-        max_channels: Channel cap ``mc`` applied to the base channel count before
-            the width multiply; bites at the deepest (base-1024) stages for the
-            ``m``/``l``/``x`` variants (``mc=512``).
+        depth: Depth multiplier ``d`` scaling every CSP stage's inner-unit repeat count (``max(1, round(2 * depth))``).
+        width: Width multiplier ``w`` scaling channel counts (``int(min(base, max_channels) * width)``).
+        max_channels: Channel cap ``mc`` applied to the base channel count before the width multiply; bites at the
+            deepest (base-1024) stages for the ``m``/``l``/``x`` variants (``mc=512``).
     """
 
     depth: float
@@ -49,8 +42,8 @@ class ScaleSpec:
     max_channels: int
 
 
-#: The five published rows themselves, writable only from inside this module.
-#: :data:`VARIANTS` is the view every other module reads.
+#: The five published rows themselves, writable only from inside this module. :data:`VARIANTS` is the view every
+#: other module reads.
 _VARIANTS: dict[str, ScaleSpec] = {
     "n": ScaleSpec(depth=0.50, width=0.25, max_channels=1024),
     "s": ScaleSpec(depth=0.50, width=0.50, max_channels=1024),
@@ -61,13 +54,11 @@ _VARIANTS: dict[str, ScaleSpec] = {
 
 #: The five published variants keyed by name (blueprint sec. 5.1 / R3 Fig. 1).
 #:
-#: A read-only view, not the dict itself. This module's own claim is that it is "the one
-#: place the multipliers live", and a plain ``dict`` here made that a courtesy: any
-#: importer could rebind ``VARIANTS["n"]`` and every model built afterwards — in that
-#: process, including the ones the fidelity gate measures — would silently scale by the
-#: new row. ``MappingProxyType`` makes the claim structural; ``ScaleSpec`` is already
-#: frozen, so the rows behind the view cannot be edited in place either. Reading is
-#: unchanged: subscript, iteration, ``in`` and ``len`` all work as they did.
+#: A read-only view, not the dict itself. This module's own claim is that it is "the one place the multipliers live",
+#: and a plain ``dict`` here made that a courtesy: any importer could rebind ``VARIANTS["n"]`` and every model built
+#: afterwards — in that process, including the ones the fidelity gate measures — would silently scale by the new row.
+#: ``MappingProxyType`` makes the claim structural; ``ScaleSpec`` is already frozen, so the rows behind the view cannot
+#: be edited in place either. Reading is unchanged: subscript, iteration, ``in`` and ``len`` all work as they did.
 VARIANTS: Mapping[str, ScaleSpec] = MappingProxyType(_VARIANTS)
 
 
@@ -81,8 +72,7 @@ def scale_spec(variant: str) -> ScaleSpec:
         The frozen :class:`ScaleSpec` for ``variant``.
 
     Raises:
-        KeyError: If ``variant`` is not one of the five published names; the
-            message lists the valid names.
+        KeyError: If ``variant`` is not one of the five published names; the message lists the valid names.
 
     Examples:
         ```pycon

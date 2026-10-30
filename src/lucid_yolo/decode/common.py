@@ -1,28 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 """Path-agnostic decode building blocks shared by both detection paths.
 
-Both inference decoders emit the **same** fixed-size A9 detection tuple so a
-single evaluator can consume either interchangeably: the suppression-free
-score-based top-k path over the one-to-one branch (WP-041) and the
-confidence-threshold path over the dense one-to-many branch (WP-042). This module
-holds the pieces they share — the A9 tuple column layout, the detection cap and the
-default thresholds, the fixed-length zero-padding step, the one gather that pairs a
-detection with its anchor's per-anchor values, and the eval-time inverse-letterbox
-hooks for boxes, rotated boxes and bare points.
+Both inference decoders emit the **same** fixed-size A9 detection tuple so a single evaluator can consume either
+interchangeably: the suppression-free score-based top-k path over the one-to-one branch (WP-041) and the
+confidence-threshold path over the dense one-to-many branch (WP-042). This module holds the pieces they share — the A9
+tuple column layout, the detection cap and the default thresholds, the fixed-length zero-padding step, the one gather
+that pairs a detection with its anchor's per-anchor values, and the eval-time inverse-letterbox hooks for boxes,
+rotated boxes and bare points.
 
-The cap and the defaults are defined here once and imported by every decoder,
-evaluator and entry point that needs them, rather than spelled as a literal in each:
-a second ``300`` is free to drift from the first on the day one of them changes, and
-nothing in either copy's tests would notice.
+The cap and the defaults are defined here once and imported by every decoder, evaluator and entry point that needs
+them, rather than spelled as a literal in each: a second ``300`` is free to drift from the first on the day one of them
+changes, and nothing in either copy's tests would notice.
 
-The A9 detection tuple is ``[x1, y1, x2, y2, score, class]`` with ``score`` in
-``[0, 1]`` and ``class`` the integral class index stored as a float. Rows beyond
-the available detections carry ``score == 0`` and are ignored by an evaluation
-loop that filters on score.
+The A9 detection tuple is ``[x1, y1, x2, y2, score, class]`` with ``score`` in ``[0, 1]`` and ``class`` the integral
+class index stored as a float. Rows beyond the available detections carry ``score == 0`` and are ignored by an
+evaluation loop that filters on score.
 
-This module deliberately calls no path-specific operator. The structural pin on the
-one-to-one decoder's suppression-free property (the ``content-pins`` hook) reads only
-:mod:`lucid_yolo.decode.topk_e2e`'s own source, which imports from here.
+This module deliberately calls no path-specific operator. The structural pin on the one-to-one decoder's
+suppression-free property (the ``content-pins`` hook) reads only :mod:`lucid_yolo.decode.topk_e2e`'s own source, which
+imports from here.
 
 Provenance: R1 sec. 3.2.1, R1 sec. 4.4, R3 sec. 4. Assumptions: A9, A10, A47.
 """
@@ -69,44 +65,42 @@ RBOX_COLUMNS = 5
 #: Column index of the confidence score within the A9 detection tuple.
 SCORE_COLUMN = 4
 
-#: Column index of the integral class label within the A9 detection tuple. Stored as a
-#: float like every other column — the tuple is one tensor — and narrowed to ``int`` by
-#: whichever boundary reads it (a category-id lookup, a written report).
+#: Column index of the integral class label within the A9 detection tuple. Stored as a float like every other column —
+#: the tuple is one tensor — and narrowed to ``int`` by whichever boundary reads it (a category-id lookup, a written
+#: report).
 LABEL_COLUMN = 5
 
-#: Anchor index reported for a padding detection row, which has no source anchor.
-#: Negative so it can never be mistaken for a real row and cannot silently index
-#: the last anchor the way ``-1`` would if it were used as a gather index directly.
+#: Anchor index reported for a padding detection row, which has no source anchor. Negative so it can never be mistaken
+#: for a real row and cannot silently index the last anchor the way ``-1`` would if it were used as a gather index
+#: directly.
 PAD_ANCHOR_INDEX = -1
 
-#: Detections kept per image by every decode path, and scored per image by every
-#: evaluation protocol that reads them (R1 sec. 3.2.1, R3 sec. 4, A9, A47). 300, not
-#: COCO's 100: it is the width the one-to-one branch's top-k emits, and a lower scoring
-#: cap would measure a truncation rather than the model.
+#: Detections kept per image by every decode path, and scored per image by every evaluation protocol that reads them
+#: (R1 sec. 3.2.1, R3 sec. 4, A9, A47). 300, not COCO's 100: it is the width the one-to-one branch's top-k emits, and a
+#: lower scoring cap would measure a truncation rather than the model.
 MAX_DETECTIONS = _MAX_DETECTIONS
 
-#: Evaluation-time confidence threshold of the suppression paths — permissive, so the
-#: mAP integration sees the low-confidence tail. Not a single-image default:
-#: :data:`lucid_yolo.predict.DEFAULT_CONF_THRESHOLD` answers a different question.
+#: Evaluation-time confidence threshold of the suppression paths — permissive, so the mAP integration sees the
+#: low-confidence tail. Not a single-image default: :data:`lucid_yolo.predict.DEFAULT_CONF_THRESHOLD` answers a
+#: different question.
 EVAL_CONF_THRESHOLD = 0.001
 
-#: Class-wise overlap above which the dense path's suppression drops the lower-scoring
-#: of two same-class boxes. The rotated path carries it over unchanged (A61).
+#: Class-wise overlap above which the dense path's suppression drops the lower-scoring of two same-class boxes. The
+#: rotated path carries it over unchanged (A61).
 DEFAULT_IOU_THRESHOLD = 0.7
 
-#: Letterbox side of the COCO tiers — detection, segmentation and keypoints — and so the
-#: default canvas of their single-image entry points (R1 sec. 4.4). The oriented tier
-#: trains at 1024 px instead (R18 sec. 4) and states its own side.
+#: Letterbox side of the COCO tiers — detection, segmentation and keypoints — and so the default canvas of their
+#: single-image entry points (R1 sec. 4.4). The oriented tier trains at 1024 px instead (R18 sec. 4) and states its own
+#: side.
 COCO_IMG_SIZE = 640
 
 
 class IndexingDecoder(Protocol):
     """A decoder that reports, beside each detection row, the anchor that row came from.
 
-    :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` and
-    :class:`~lucid_yolo.decode.nms_path.NMSDecoder` both satisfy it. A per-anchor value
-    outside the A9 tuple — a mask coefficient vector, a point set — can be paired with
-    a detection only through this index, by :func:`gather_by_anchor`.
+    :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` and :class:`~lucid_yolo.decode.nms_path.NMSDecoder` both satisfy
+    it. A per-anchor value outside the A9 tuple — a mask coefficient vector, a point set — can be paired with a
+    detection only through this index, by :func:`gather_by_anchor`.
 
     Examples:
         ```pycon
@@ -127,27 +121,22 @@ class IndexingDecoder(Protocol):
 def pad_detections(detections: Tensor, max_det: int) -> Tensor:
     """Resize the detection axis to exactly ``max_det``, padding or truncating.
 
-    Appends all-zero rows (score 0) after the ranked detections so the output
-    length along the detection axis (the second-to-last axis) is always
-    ``max_det``, regardless of how many detections a given image produced. The
-    fixed length is the export-friendly contract: the shape does not depend on
-    the anchor count or the survivor count, so a traced graph has a static output
-    shape. The score-descending ordering of the input is preserved because the
+    Appends all-zero rows (score 0) after the ranked detections so the output length along the detection axis (the
+    second-to-last axis) is always ``max_det``, regardless of how many detections a given image produced. The fixed
+    length is the export-friendly contract: the shape does not depend on the anchor count or the survivor count, so a
+    traced graph has a static output shape. The score-descending ordering of the input is preserved because the
     appended rows all carry score 0.
 
-    An **over-length** input is truncated to its first ``max_det`` rows rather
-    than passed through. Returning it unchanged would break the one property the
-    function exists to provide — every in-tree caller caps before padding, so a
-    pass-through only ever surfaces as a variable-length export where a static
-    shape was promised, at whichever caller stopped capping. Truncation is the
-    cap those callers already apply: the rows arrive score-descending, so the
-    dropped tail is the lowest-scoring one, which is what ``max_det`` means.
-    :func:`pad_anchor_indices` truncates at the same length, so a detection and
-    its anchor index are dropped together and row ``n`` keeps naming anchor ``n``.
+    An **over-length** input is truncated to its first ``max_det`` rows rather than passed through. Returning it
+    unchanged would break the one property the function exists to provide — every in-tree caller caps before padding,
+    so a pass-through only ever surfaces as a variable-length export where a static shape was promised, at whichever
+    caller stopped capping. Truncation is the cap those callers already apply: the rows arrive score-descending, so the
+    dropped tail is the lowest-scoring one, which is what ``max_det`` means. :func:`pad_anchor_indices` truncates at the
+    same length, so a detection and its anchor index are dropped together and row ``n`` keeps naming anchor ``n``.
 
     Args:
-        detections: Ranked detections with the detection count on the
-            second-to-last axis, e.g. shape ``(B, N, 6)`` or ``(N, 6)``.
+        detections: Ranked detections with the detection count on the second-to-last axis, e.g. shape ``(B, N, 6)`` or
+            ``(N, 6)``.
         max_det: Fixed output length along the detection axis.
 
     Returns:
@@ -179,28 +168,23 @@ def pad_detections(detections: Tensor, max_det: int) -> Tensor:
 def pad_anchor_indices(indices: Tensor, max_det: int) -> Tensor:
     """Resize the anchor-index axis to exactly ``max_det``, padding or truncating.
 
-    The index-side twin of :func:`pad_detections`, and it must stay that: the two
-    are resized to the same length by the same callers so that row ``n`` of a
-    decoder's detections and entry ``n`` of its anchor indices describe the same
-    detection for every ``n``, padding rows included. Anything gathered per anchor
-    and **not** carried in the A9 tuple — the mask coefficients of the
-    segmentation decode — is selected by these indices, so a length or ordering
-    mismatch here pairs a box with another anchor's coefficients: a plausible mask
-    of the wrong object, at a correct box, with a correct score.
+    The index-side twin of :func:`pad_detections`, and it must stay that: the two are resized to the same length by the
+    same callers so that row ``n`` of a decoder's detections and entry ``n`` of its anchor indices describe the same
+    detection for every ``n``, padding rows included. Anything gathered per anchor and **not** carried in the A9 tuple
+    — the mask coefficients of the segmentation decode — is selected by these indices, so a length or ordering
+    mismatch here pairs a box with another anchor's coefficients: a plausible mask of the wrong object, at a correct
+    box, with a correct score.
 
-    That twinning is why an over-length input is truncated here too rather than
-    passed through: the detections beside it are, so an index axis that kept its
-    surplus entries would be the one length mismatch this function exists to rule
-    out. The shortfall is filled with :data:`PAD_ANCHOR_INDEX`.
+    That twinning is why an over-length input is truncated here too rather than passed through: the detections beside
+    it are, so an index axis that kept its surplus entries would be the one length mismatch this function exists to
+    rule out. The shortfall is filled with :data:`PAD_ANCHOR_INDEX`.
 
     Args:
-        indices: Source anchor index per kept detection, shape ``(N,)`` or
-            ``(B, N)`` with the detection count last.
+        indices: Source anchor index per kept detection, shape ``(N,)`` or ``(B, N)`` with the detection count last.
         max_det: Fixed output length along the detection axis.
 
     Returns:
-        Indices whose last axis has length exactly ``max_det``, any shortfall
-        filled with :data:`PAD_ANCHOR_INDEX`.
+        Indices whose last axis has length exactly ``max_det``, any shortfall filled with :data:`PAD_ANCHOR_INDEX`.
 
     Examples:
         ```pycon
@@ -226,30 +210,26 @@ def pad_anchor_indices(indices: Tensor, max_det: int) -> Tensor:
 def gather_by_anchor(per_anchor: Tensor, anchor_index: Tensor) -> Tensor:
     """Select each detection's per-anchor values by the anchor its own box came from.
 
-    The one gather every decode consumer pairs a detection with its anchor's values
-    through — the mask coefficients of Eq. 7 and the decoded point sets alike — so the
-    padding rule below exists once. ``anchor_index`` comes from the decoder that
-    produced the detections, so row ``n`` of the result belongs to the anchor row ``n``'s
-    box came from: a row taken from a differently ranked selection would be a plausible
-    mask or pose of the wrong object beside a correct box.
+    The one gather every decode consumer pairs a detection with its anchor's values through — the mask coefficients of
+    Eq. 7 and the decoded point sets alike — so the padding rule below exists once. ``anchor_index`` comes from the
+    decoder that produced the detections, so row ``n`` of the result belongs to the anchor row ``n``'s box came from: a
+    row taken from a differently ranked selection would be a plausible mask or pose of the wrong object beside a
+    correct box.
 
-    Rows carrying :data:`PAD_ANCHOR_INDEX` are clamped to a valid gather position and
-    then zeroed, so a padding row never reads the last anchor's values. For coefficients
-    that is an all-zero vector — a mask logit of exactly 0, a probability of 0.5, and so
-    an empty mask under the strictly-greater A37 threshold; for points it is the origin.
-    Those rows carry score 0 as well. On a batch with no padding row the clamp and the
-    product by one leave every gathered value bit-for-bit what a bare gather returns.
+    Rows carrying :data:`PAD_ANCHOR_INDEX` are clamped to a valid gather position and then zeroed, so a padding row
+    never reads the last anchor's values. For coefficients that is an all-zero vector — a mask logit of exactly 0, a
+    probability of 0.5, and so an empty mask under the strictly-greater A37 threshold; for points it is the origin.
+    Those rows carry score 0 as well. On a batch with no padding row the clamp and the product by one leave every
+    gathered value bit-for-bit what a bare gather returns.
 
     The values must already be in their final per-anchor form: points are decoded by
-    :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` over the whole anchor grid
-    **before** this runs, because that decode needs every anchor's centre and stride and
-    offers no per-detection indexing.
+    :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` over the whole anchor grid **before** this runs, because
+    that decode needs every anchor's centre and stride and offers no per-detection indexing.
 
     Args:
-        per_anchor: Dense per-anchor values of shape ``(B, A, *trailing)`` — mask
-            coefficients ``(B, A, M)``, decoded point sets ``(B, A, K, 2)``.
-        anchor_index: Source anchor per detection, shape ``(B, N)``, as a decoder's
-            ``decode_with_indices`` reports it.
+        per_anchor: Dense per-anchor values of shape ``(B, A, *trailing)`` — mask coefficients ``(B, A, M)``, decoded
+            point sets ``(B, A, K, 2)``.
+        anchor_index: Source anchor per detection, shape ``(B, N)``, as a decoder's ``decode_with_indices`` reports it.
 
     Returns:
         The selected values, shape ``(B, N, *trailing)``, padding rows all zero.
@@ -288,27 +268,22 @@ def to_letterboxed_original(
 ) -> Tensor:
     """Un-letterbox detection boxes back to original-image coordinates (A10).
 
-    Eval-time hook shared by both decode paths: maps the ``xyxy`` box corners of
-    each detection from the letterboxed canvas the model saw back to the original
-    image via the exact analytic inverse of
-    :class:`~lucid_yolo.data.letterbox.Letterbox`. The score and class columns pass
-    through untouched. Padding / sub-threshold rows (score 0) are mapped like any
-    other row; they are identified downstream by their zero score, not by their
-    coordinates.
+    Eval-time hook shared by both decode paths: maps the ``xyxy`` box corners of each detection from the letterboxed
+    canvas the model saw back to the original image via the exact analytic inverse of
+    :class:`~lucid_yolo.data.letterbox.Letterbox`. The score and class columns pass through untouched. Padding /
+    sub-threshold rows (score 0) are mapped like any other row; they are identified downstream by their zero score, not
+    by their coordinates.
 
     Args:
-        detections: Detections of shape ``(B, N, 6)`` with the A9 tuple
-            ``[x1, y1, x2, y2, score, class]`` in letterboxed-canvas pixels.
+        detections: Detections of shape ``(B, N, 6)`` with the A9 tuple ``[x1, y1, x2, y2, score, class]`` in
+            letterboxed-canvas pixels.
         orig_size: Original image ``(height, width)``.
-        letterboxed_size: Letterboxed canvas ``(height, width)`` the boxes live
-            in.
-        allow_upscale: The letterbox ``allow_upscale`` setting used at resize
-            time; must match so the inverse recovers the exact geometry.
-            Defaults to ``True`` (the transform default).
+        letterboxed_size: Letterboxed canvas ``(height, width)`` the boxes live in.
+        allow_upscale: The letterbox ``allow_upscale`` setting used at resize time; must match so the inverse recovers
+            the exact geometry. Defaults to ``True`` (the transform default).
 
     Returns:
-        Detections of shape ``(B, N, 6)`` with box corners in original-image
-        coordinates and score/class unchanged.
+        Detections of shape ``(B, N, 6)`` with box corners in original-image coordinates and score/class unchanged.
 
     Examples:
         ```pycon
@@ -339,23 +314,21 @@ def points_to_letterboxed_original(
 ) -> Tensor:
     """Un-letterbox bare ``(x, y)`` points of one image back to original coordinates (A10).
 
-    The point-set twin of :func:`to_letterboxed_original`: the same exact inverse the
-    box corners take, applied to points with no score or class column beside them. Any
-    leading shape is kept — ``(N, K, 2)`` point sets, a flat ``(P, 2)`` list — because
-    every point is folded into one flat list for a single
-    :meth:`~lucid_yolo.data.letterbox.Letterbox.inverse_map` call and the shape restored
-    after, so no row can take a different inverse from its neighbour. A batch whose
-    images have different original sizes calls this once per image.
+    The point-set twin of :func:`to_letterboxed_original`: the same exact inverse the box corners take, applied to
+    points with no score or class column beside them. Any leading shape is kept — ``(N, K, 2)`` point sets, a flat
+    ``(P, 2)`` list — because every point is folded into one flat list for a single
+    :meth:`~lucid_yolo.data.letterbox.Letterbox.inverse_map` call and the shape restored after, so no row can take a
+    different inverse from its neighbour. A batch whose images have different original sizes calls this once per image.
 
-    An empty input skips the inverse and comes back unchanged, so the trailing point
-    axis survives an image with nothing in it.
+    An empty input skips the inverse and comes back unchanged, so the trailing point axis survives an image with
+    nothing in it.
 
     Args:
         points: Letterboxed-canvas points of shape ``(..., 2)``.
         orig_size: Original image ``(height, width)``.
         letterboxed_size: Letterboxed canvas ``(height, width)`` the points live in.
-        allow_upscale: The letterbox ``allow_upscale`` setting used at resize time;
-            must match so the inverse recovers the exact geometry. Defaults to ``True``.
+        allow_upscale: The letterbox ``allow_upscale`` setting used at resize time; must match so the inverse recovers
+            the exact geometry. Defaults to ``True``.
 
     Returns:
         Points of the input's shape in original-image coordinates.
@@ -388,37 +361,33 @@ def rboxes_to_letterboxed_original(
 ) -> Tensor:
     """Un-letterbox **oriented** detections back to original-image coordinates (A10, A45).
 
-    The rotated twin of :func:`to_letterboxed_original`, for the A45 tuple
-    ``[cx, cy, w, h, theta, score, class]``. A letterbox is one isotropic scale plus a
-    translation, so its inverse maps a rectangle onto a rectangle exactly: the centre
-    goes through the same point inverse the axis-aligned corners use, the two extents
-    divide by the same ratio, and **``theta`` is unchanged** — an isotropic map turns
-    no angle. That is why this is an exact inverse rather than a re-fit, and why the
-    long-edge convention survives it: ``w >= h`` is preserved by scaling both by one
-    positive number.
+    The rotated twin of :func:`to_letterboxed_original`, for the A45 tuple ``[cx, cy, w, h, theta, score, class]``. A
+    letterbox is one isotropic scale plus a translation, so its inverse maps a rectangle onto a rectangle exactly: the
+    centre goes through the same point inverse the axis-aligned corners use, the two extents divide by the same ratio,
+    and **``theta`` is unchanged** — an isotropic map turns no angle. That is why this is an exact inverse rather than
+    a re-fit, and why the long-edge convention survives it: ``w >= h`` is preserved by scaling both by one positive
+    number.
 
     The ratio is not passed in but recovered from the two sizes through
-    :class:`~lucid_yolo.data.letterbox.Letterbox`'s own geometry, so the forward
-    transform stays the single definition of what a letterbox is (the WP-053a rule
-    against a second copy of that arithmetic). Score and class pass through untouched,
-    and score-zero padding rows are mapped like any other row — they are identified
-    downstream by their score, never by their coordinates.
+    :class:`~lucid_yolo.data.letterbox.Letterbox`'s own geometry, so the forward transform stays the single definition
+    of what a letterbox is (the WP-053a rule against a second copy of that arithmetic). Score and class pass through
+    untouched, and score-zero padding rows are mapped like any other row — they are identified downstream by their
+    score, never by their coordinates.
 
     Args:
-        detections: Oriented detections of shape ``(B, N, 7)`` in letterboxed-canvas
-            pixels, as :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` emits them.
+        detections: Oriented detections of shape ``(B, N, 7)`` in letterboxed-canvas pixels, as
+            :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` emits them.
         orig_size: Original image ``(height, width)``.
         letterboxed_size: Letterboxed canvas ``(height, width)`` the boxes live in.
-        allow_upscale: The letterbox ``allow_upscale`` setting used at resize time;
-            must match so the inverse recovers the exact geometry. Defaults to ``True``.
+        allow_upscale: The letterbox ``allow_upscale`` setting used at resize time; must match so the inverse recovers
+            the exact geometry. Defaults to ``True``.
 
     Returns:
-        Detections of shape ``(B, N, 7)`` with centres and extents in original-image
-        coordinates, ``theta``, ``score`` and ``class`` unchanged.
+        Detections of shape ``(B, N, 7)`` with centres and extents in original-image coordinates, ``theta``, ``score``
+        and ``class`` unchanged.
 
     Raises:
-        ValueError: If ``detections`` is not a 3-D tensor with at least
-            :data:`RBOX_COLUMNS` trailing columns.
+        ValueError: If ``detections`` is not a 3-D tensor with at least :data:`RBOX_COLUMNS` trailing columns.
 
     Examples:
         ```pycon
@@ -438,8 +407,8 @@ def rboxes_to_letterboxed_original(
     batch, num_det, _ = detections.shape
     letterbox = Letterbox(letterboxed_size, allow_upscale=allow_upscale)
     centres = letterbox.inverse_map(detections[..., :2].reshape(-1, 2), orig_size, letterboxed_size)
-    # The extents scale by the same ratio the centres do; read it off the inverse rather
-    # than recomputing `min(out_h / H, out_w / W)` here, which would be that second copy.
+    # The extents scale by the same ratio the centres do; read it off the inverse rather than recomputing
+    # `min(out_h / H, out_w / W)` here, which would be that second copy.
     origin = letterbox.inverse_map(detections.new_zeros((2, 2)), orig_size, letterboxed_size)[0]
     unit = letterbox.inverse_map(detections.new_ones((2, 2)), orig_size, letterboxed_size)[0]
     inverse_ratio = unit[0] - origin[0]

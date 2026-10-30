@@ -1,27 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """Cross-links between work-package pages and every docs page that names one (WP-196, D28).
 
-Each work package with findings has one page, ``docs/work_packages/wp-<id>.md``. Two
-things keep those pages reachable from each other and from the rest of the docs:
+Each work package with findings has one page, ``docs/work_packages/wp-<id>.md``. Two things keep those pages reachable
+from each other and from the rest of the docs:
 
-* **Mentions are links.** Every ``WP-<id>`` written in a ``docs/`` page, whose page
-  exists, is a markdown link to it. Headings, code, HTML comments and text already
-  inside a link are left alone, and so is a range (``WP-142…144``), which names no
-  single page. A WP page never links to itself.
-* **Each WP page opens with a generated header**, between its H1 and its first section
-  marker, so the phase pages that include the sections never show it: the log pages
-  that include it, the WPs it depends on and the ones that depend on it (both read off
-  the roadmap's Dep column), and the previous and next WP that has a page.
+* **Mentions are links.** Every ``WP-<id>`` written in a ``docs/`` page, whose page exists, is a markdown link to it.
+  Headings, code, HTML comments and text already inside a link are left alone, and so is a range (``WP-142…144``),
+  which names no single page. A WP page never links to itself.
+* **Each WP page opens with a generated header**, between its H1 and its first section marker, so the phase pages that
+  include the sections never show it: the log pages that include it, the WPs it depends on and the ones that depend on
+  it (both read off the roadmap's Dep column), and the previous and next WP that has a page.
 
-Both are derived, so both are checked rather than trusted, and ``--fix`` writes them.
-The header in particular is a copy of roadmap data, which is exactly what rots
-(D28): adding a row that depends on WP-125 changes WP-125's own header.
+Both are derived, so both are checked rather than trusted, and ``--fix`` writes them. The header in particular is a
+copy of roadmap data, which is exactly what rots (D28): adding a row that depends on WP-125 changes WP-125's own header.
 
-Links are written relative to the page that holds them, and every page sits at most
-one directory below ``docs/``. That matters for text the snippets extension inlines:
-a WP section lands in ``research/`` or ``engineering/``, a report table in
-``model_cards/`` or ``method/``, all one level down, so ``../work_packages/…`` written
-in the source still resolves on the page that shows it.
+Links are written relative to the page that holds them, and every page sits at most one directory below ``docs/``.
+That matters for text the snippets extension inlines: a WP section lands in ``research/`` or ``engineering/``,
+a report table in ``model_cards/`` or ``method/``, all one level down, so ``../work_packages/…`` written in the source
+still resolves on the page that shows it.
 
 Examples:
     Command-line usage (exit status is the process return code)::
@@ -46,16 +42,15 @@ DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 #: Directory, under ``docs/``, holding one page per work package.
 _WP_DIR = "work_packages"
 
-#: The log directories whose phase pages include work-package sections, with the label
-#: a WP header gives each.
+#: The log directories whose phase pages include work-package sections, with the label a WP header gives each.
 _LOGS = {"research": "Research log", "engineering": "Engineering log"}
 
-#: A work-package mention: ``WP-125``, ``WP-091b``. The look-arounds reject a range
-#: (``WP-142…144``, or the same with an en dash) and an id glued into a longer token.
+#: A work-package mention: ``WP-125``, ``WP-091b``. The look-arounds reject a range (``WP-142…144``, or the same
+#: with an en dash) and an id glued into a longer token.
 _MENTION = re.compile(r"(?<![\w/-])WP-(\d{3}[a-z]?)(?![\w\u2026\u2013-])")
 
-#: Inline spans a mention inside of is not prose: a code span, an HTML comment or tag,
-#: and a whole markdown link or image (its text included, so an existing link is kept).
+#: Inline spans a mention inside of is not prose: a code span, an HTML comment or tag, and a whole markdown link
+#: or image (its text included, so an existing link is kept).
 _SKIP_SPAN = re.compile(r"`[^`\n]*`|<!--.*?-->|!?\[[^\]\n]*\]\([^)\n]*\)|<[^>\n]+>")
 
 #: Lines whose mentions are never linked: headings and snippet include lines.

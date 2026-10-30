@@ -1,43 +1,35 @@
 # SPDX-License-Identifier: Apache-2.0
 """Dual-path keypoint evaluation of a training checkpoint on COCO val2017 (WP-134).
 
-The pose counterpart of :mod:`lucid_yolo.eval.detect_eval`, and structurally its
-twin: load the letterboxed split, run the model once per batch, decode both the
-suppression-free E2E path and the NMS path, and report each. What it adds is the
-half WP-124 built and nothing called — OKS keypoint mAP — so the acceptance metric
-of the keypoint tier is finally producible by a shipped command instead of only by
-a library function with no caller.
+The pose counterpart of :mod:`lucid_yolo.eval.detect_eval`, and structurally its twin: load the letterboxed split,
+run the model once per batch, decode both the suppression-free E2E path and the NMS path, and report each. What
+it adds is the half WP-124 built and nothing called — OKS keypoint mAP — so the acceptance metric of the keypoint
+tier is finally producible by a shipped command instead of only by a library function with no caller.
 
 **Two things a keypoint report must not inherit from the detection one.**
 
-The ground truth is ``person_keypoints_val2017.json``, not
-``instances_val2017.json``. A keypoint checkpoint is trained on one category, and
-COCO's mAP averages average precision over every category the ground truth
-contains: scored against the 80-category instances file, a person detector's 79
-empty categories each contribute ``AP = 0`` and the reported ``map`` is its true
-person AP divided by 80. That is not an approximation of the right number, it is a
-different number — a checkpoint whose training loop logged ``val/mAP`` at 0.48
-reported ``map = 0.0063`` through the detection path, and ``0.0063 * 80 = 0.50``.
-The person-keypoints file names one category, so the average is over that one.
+The ground truth is ``person_keypoints_val2017.json``, not ``instances_val2017.json``. A keypoint checkpoint is
+trained on one category, and COCO's mAP averages average precision over every category the ground truth contains:
+scored against the 80-category instances file, a person detector's 79 empty categories each contribute ``AP = 0``
+and the reported ``map`` is its true person AP divided by 80. That is not an approximation of the right number,
+it is a different number — a checkpoint whose training loop logged ``val/mAP`` at 0.48 reported ``map = 0.0063``
+through the detection path, and ``0.0063 * 80 = 0.50``. The person-keypoints file names one category, so the average
+is over that one.
 
-The comparable figure is the **e2e** entry. Training's own ``val/mAP`` is logged
-from the one-to-one branch alone (:mod:`lucid_yolo.ptl.module`), against the
-datamodule's already single-class targets, so it is the E2E row of this report that
-an epoch metric can be read beside; the ``nms`` row is the dense branch's own
-answer and is expected to sit above it by the R1 sec. 4.4 deficit.
+The comparable figure is the **e2e** entry. Training's own ``val/mAP`` is logged from the one-to-one branch alone
+(:mod:`lucid_yolo.ptl.module`), against the datamodule's already single-class targets, so it is the E2E row of this
+report that an epoch metric can be read beside; the ``nms`` row is the dense branch's own answer and is expected
+to sit above it by the R1 sec. 4.4 deficit.
 
-Box AP and OKS come from one pass over one set of decoded detections, per path, so
-the two columns cannot describe differently filtered predictions. The report keeps
-the box statistics under their bare names and prefixes the ten keypoint ones with
-``oks_``, exactly as the segmentation report prefixes its mask ones.
+Box AP and OKS come from one pass over one set of decoded detections, per path, so the two columns cannot describe
+differently filtered predictions. The report keeps the box statistics under their bare names and prefixes the ten
+keypoint ones with ``oks_``, exactly as the segmentation report prefixes its mask ones.
 
-``lucid-eval`` reaches this path when the checkpoint's own ``task`` is
-``"keypoints"`` (WP-096's rule: the protocol is the checkpoint's property, not a
-flag the caller has to remember). A checkpoint whose ``K`` is not COCO's 17 is
-refused here rather than scored: this protocol's ground truth, its sigma table and
-its point ordering are all the person schema's, and nothing maps some other
-schema's point ``i`` onto it (A67 makes the same argument from the other side, for
-the synthetic symbol schema's own gate).
+``lucid-eval`` reaches this path when the checkpoint's own ``task`` is ``"keypoints"`` (WP-096's rule: the protocol
+is the checkpoint's property, not a flag the caller has to remember). A checkpoint whose ``K`` is not COCO's 17
+is refused here rather than scored: this protocol's ground truth, its sigma table and its point ordering are all
+the person schema's, and nothing maps some other schema's point ``i`` onto it (A67 makes the same argument from
+the other side, for the synthetic symbol schema's own gate).
 
 Usage::
 
@@ -45,8 +37,8 @@ Usage::
         [--no-ema] [--batch_size 32] [--img_size 640] \
         [--device mps] [--limit 200] [--output report.json]
 
-Provenance: R1 Table 7, R1 sec. 4.4 (dual-path protocol), R12 (COCO keypoint
-protocol and the OKS sigma table), R14. Assumptions: A9, A10, A37.
+Provenance: R1 Table 7, R1 sec. 4.4 (dual-path protocol), R12 (COCO keypoint protocol and the OKS sigma table), R14.
+Assumptions: A9, A10, A37.
 """
 
 from __future__ import annotations
@@ -116,8 +108,8 @@ def run(
         ```
     """
     try:
-        # Refused rather than scored on an invented sigma table; the reason is the
-        # helper's docstring. A library caller gets the ValueError, the command a FAIL line.
+        # Refused rather than scored on an invented sigma table; the reason is the helper's docstring. A library
+        # caller gets the ValueError, the command a FAIL line.
         num_keypoints = _require_coco_person_schema(module)
     except ValueError as refusal:
         print(f"FAIL: {refusal}")

@@ -1,113 +1,77 @@
 # SPDX-License-Identifier: Apache-2.0
 """Functional-core tests: dependency-license audit rejects copyleft (WP-004, WP-063).
 
-Guards the Apache-compatibility policy: the copyleft pattern must catch the
-GPL family and spare permissive licenses, and ``find_copyleft_violations`` must
-flag an AGPL-classified distribution while leaving the live (clean) environment
+Guards the Apache-compatibility policy: the copyleft pattern must catch the GPL family and spare permissive licenses,
+and ``find_copyleft_violations`` must flag an AGPL-classified distribution while leaving the live (clean) environment
 untouched.
 
-A second surface is guarded since WP-063: what a wheel *vendors*, as opposed to
-what its metadata declares. ``shapely`` says ``BSD 3-Clause`` and ships GEOS under
-LGPLv2.1; the metadata-only audit passed on it for as long as it existed. These
-tests pin the three rules that make the bundled check meaningful — declarations are
-read, prose is not; the GCC Runtime Library Exception is permissive for every
-package; and the per-package allowlist excuses only what it names (D15).
+A second surface is guarded since WP-063: what a wheel *vendors*, as opposed to what its metadata declares. ``shapely``
+says ``BSD 3-Clause`` and ships GEOS under LGPLv2.1; the metadata-only audit passed on it for as long as it existed.
+These tests pin the three rules that make the bundled check meaningful — declarations are read, prose is not; the GCC
+Runtime Library Exception is permissive for every package; and the per-package allowlist excuses only what it names
+(D15).
 
-A third surface is guarded since WP-109: what a wheel *ships*, when it documents the
-vendored library nowhere at all. ``av`` declares ``BSD-3-Clause``, ships a license
-document with no GPL mention in it, and ships a GPL x264 binary — both older checks
-pass it. The tests here are two-sided on purpose, because either side alone would be
-worthless: the synthetic ``av`` must be caught, and well-formed metadata must stay
-clean. A check firing on everything gets disabled by the next person; a check firing on
-nothing is decoration.
+A third surface is guarded since WP-109: what a wheel *ships*, when it documents the vendored library nowhere at all.
+``av`` declares ``BSD-3-Clause``, ships a license document with no GPL mention in it, and ships a GPL x264 binary — both
+older checks pass it. The tests here are two-sided on purpose, because either side alone would be worthless: the
+synthetic ``av`` must be caught, and well-formed metadata must stay clean. A check firing on everything gets disabled by
+the next person; a check firing on nothing is decoration.
 
-**Nothing here reads the installed environment, deliberately** (WP-115b). Earlier
-versions of this file asserted over ``metadata.distributions()`` — the whole venv is
-clean, ``shapely`` really does ship GEOS — and those assertions are not about this
-code. A contributor who installs anything into their environment can fail them without
-touching a line of the audit, and one did: ``cuda-toolkit``, a package no dependency
-list here mentions. The live claim belongs to the pre-commit hook, which runs the audit
-against the real environment on every commit and is the actual gate; the suite's job is
-that the audit *decides correctly*, which synthetic distributions answer without
-depending on what anyone happens to have installed. Every fixture below is written by
-hand, and the shapes they are written to were read off real wheels once and recorded in
-their docstrings.
+**Nothing here reads the installed environment, deliberately** (WP-115b). Earlier versions of this file asserted over
+``metadata.distributions()`` — the whole venv is clean, ``shapely`` really does ship GEOS — and those assertions are not
+about this code. A contributor who installs anything into their environment can fail them without touching a line of the
+audit, and one did: ``cuda-toolkit``, a package no dependency list here mentions. The live claim belongs to the
+pre-commit hook, which runs the audit against the real environment on every commit and is the actual gate; the suite's
+job is that the audit *decides correctly*, which synthetic distributions answer without depending on what anyone
+happens to have installed. Every fixture below is written by hand, and the shapes they are written to were read off
+real wheels once and recorded in their docstrings.
 
-A fourth surface is guarded since WP-115: the *absence* of a license. All three checks
-above match a forbidden pattern against a declaration, so a distribution declaring
-nothing matches nothing and passes in the same run that prints a clean verdict — which
-is why WP-114b had to bound MkDocs with a version cap rather than a check. The tests
-here pin both halves of the fix: a shipped license text is identified from its own
-header, so a field-less but genuinely permissive wheel is cleared rather than failed
-(``faster-coco-eval`` is the live case), and the finding is graded by dependency tier,
-so a package the wheel republishes fails while one only the dev or docs groups reach is
-reported and the run passes. Copyleft stays tier-blind: a document whose header names a
-GPL-family license escalates past the flag wherever it sits.
+A fourth surface is guarded since WP-115: the *absence* of a license. All three checks above match a forbidden pattern
+against a declaration, so a distribution declaring nothing matches nothing and passes in the same run that prints a
+clean verdict — which is why WP-114b had to bound MkDocs with a version cap rather than a check. The tests here pin both
+halves of the fix: a shipped license text is identified from its own header, so a field-less but genuinely permissive
+wheel is cleared rather than failed (``faster-coco-eval`` is the live case), and the finding is graded by dependency
+tier, so a package the wheel republishes fails while one only the dev or docs groups reach is reported and the run
+passes. Copyleft stays tier-blind: a document whose header names a GPL-family license escalates past the flag wherever
+it sits.
 """
 
-import importlib.util
 from collections.abc import Callable, Sequence
 from importlib import metadata
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from license_audit_stubs import StubDist, StubMetadata, bundling_dist, tiered_pyproject, undeclared_dist
+from script_loader import load_script
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-AUDIT_PATH = REPO_ROOT / "scripts" / "lint" / "audit_licenses.py"
+#: What ``find_unreadable_licenses`` returns: the failures and the flags, each ``(distribution, reason)`` pairs.
+Graded = tuple[list[tuple[str, str]], list[tuple[str, str]]]
 
 
 @pytest.fixture(scope="session")
 def audit() -> ModuleType:
     """Load ``scripts/lint/audit_licenses.py`` as an importable module.
 
-    A fixture rather than a module-level import: ``scripts/`` is not a package, so the
-    module has to be loaded by path, and doing that at import time makes collecting this
-    file execute it. Session-scoped because the module is stateless and loading it per
-    test would re-execute the tables for nothing.
+    A fixture rather than a module-level import: doing the load at import time makes collecting this file execute the
+    script. Session-scoped because the module is stateless and loading it per test would re-execute the tables for
+    nothing.
     """
-    spec = importlib.util.spec_from_file_location("audit_licenses", AUDIT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_script("audit_licenses")
 
 
-class _StubMetadata:
-    """Minimal stand-in for ``importlib.metadata`` message objects."""
+@pytest.fixture
+def grade(audit: ModuleType) -> Callable[[Sequence[StubDist], Path], Graded]:
+    """Run the fourth surface end to end: tier the distributions against a pyproject, then grade them.
 
-    def __init__(
-        self,
-        name: str,
-        classifiers: tuple[str, ...] = (),
-        license_text: str = "",
-        license_files: tuple[str, ...] = (),
-    ) -> None:
-        self._fields = {"Name": name, "License": license_text, "License-Expression": ""}
-        self._classifiers = list(classifiers)
-        self._license_files = list(license_files)
+    Returns:
+        A callable taking the distributions and the pyproject path and returning ``(failures, flags)``.
+    """
 
-    def get(self, key: str, default: object = None) -> object:
-        return self._fields.get(key, default)
+    def run(dists: Sequence[StubDist], pyproject: Path) -> Graded:
+        return audit.find_unreadable_licenses(dists, audit.dependency_tiers(dists, pyproject))
 
-    def get_all(self, key: str, default: object = None) -> object:
-        if key == "Classifier":
-            return list(self._classifiers)
-        if key == "License-File":
-            return list(self._license_files)
-        return default
-
-
-class _StubDist:
-    """Minimal stand-in for an installed distribution."""
-
-    def __init__(self, metadata_obj: _StubMetadata, documents: dict[str, str] | None = None) -> None:
-        self.metadata = metadata_obj
-        self._documents = documents or {}
-
-    def read_text(self, path: str) -> str | None:
-        """Return a bundled document's text, mimicking ``Distribution.read_text``."""
-        return self._documents.get(path)
+    return run
 
 
 COPYLEFT_SAMPLES = ("AGPL-3.0", "GPLv2", "LGPL-2.1", "GNU General Public License")
@@ -120,22 +84,22 @@ PERMISSIVE_SAMPLES = (
 )
 
 
-def test_copyleft_pattern_matches_gpl_family(audit: ModuleType) -> None:
+@pytest.mark.parametrize("sample", COPYLEFT_SAMPLES)
+def test_copyleft_pattern_matches_gpl_family(audit: ModuleType, sample: str) -> None:
     """The copyleft pattern catches every GPL-family indicator."""
-    for sample in COPYLEFT_SAMPLES:
-        assert audit.COPYLEFT_PATTERN.search(sample), f"should match copyleft: {sample!r}"
+    assert audit.COPYLEFT_PATTERN.search(sample), f"should match copyleft: {sample!r}"
 
 
-def test_copyleft_pattern_spares_permissive(audit: ModuleType) -> None:
+@pytest.mark.parametrize("sample", PERMISSIVE_SAMPLES)
+def test_copyleft_pattern_spares_permissive(audit: ModuleType, sample: str) -> None:
     """The copyleft pattern leaves permissive licenses alone."""
-    for sample in PERMISSIVE_SAMPLES:
-        assert not audit.COPYLEFT_PATTERN.search(sample), f"should not match permissive: {sample!r}"
+    assert not audit.COPYLEFT_PATTERN.search(sample), f"should not match permissive: {sample!r}"
 
 
 def test_agpl_classifier_flagged(audit: ModuleType) -> None:
     """A distribution carrying an AGPL OSI classifier is reported as a violation."""
-    stub = _StubDist(
-        _StubMetadata(
+    stub = StubDist(
+        StubMetadata(
             "evil-copyleft",
             classifiers=("License :: OSI Approved :: GNU Affero General Public License v3",),
         )
@@ -150,9 +114,9 @@ def test_agpl_classifier_flagged(audit: ModuleType) -> None:
 def test_clean_stub_set_empty(audit: ModuleType) -> None:
     """A set of permissively licensed distributions yields no violation."""
     clean = [
-        _StubDist(_StubMetadata("alpha", classifiers=("License :: OSI Approved :: MIT License",))),
-        _StubDist(_StubMetadata("beta", classifiers=("License :: OSI Approved :: Apache Software License",))),
-        _StubDist(_StubMetadata("gamma", classifiers=("License :: OSI Approved :: BSD License",))),
+        StubDist(StubMetadata("alpha", classifiers=("License :: OSI Approved :: MIT License",))),
+        StubDist(StubMetadata("beta", classifiers=("License :: OSI Approved :: Apache Software License",))),
+        StubDist(StubMetadata("gamma", classifiers=("License :: OSI Approved :: BSD License",))),
     ]
     assert audit.find_copyleft_violations(clean) == []
 
@@ -160,13 +124,12 @@ def test_clean_stub_set_empty(audit: ModuleType) -> None:
 def test_long_prose_license_field_not_identifier(audit: ModuleType) -> None:
     """A License field holding full license prose (mentioning GPL) is not flagged when classifiers are permissive.
 
-    Regression case: matplotlib embeds third-party license texts (FreeType,
-    'GPL-2.0-or-later') in a 64 KB free-text License field while its actual
-    classifier is PSF — prose must not be scanned as an identifier.
+    Regression case: matplotlib embeds third-party license texts (FreeType, 'GPL-2.0-or-later') in a 64 KB free-text
+    License field while its actual classifier is PSF — prose must not be scanned as an identifier.
     """
     prose = "x" * 200 + " ... GNU General Public License ... " + "y" * 200
-    stub = _StubDist(
-        _StubMetadata(
+    stub = StubDist(
+        StubMetadata(
             "prose-license",
             classifiers=("License :: OSI Approved :: Python Software Foundation License",),
             license_text=prose,
@@ -177,7 +140,7 @@ def test_long_prose_license_field_not_identifier(audit: ModuleType) -> None:
 
 def test_short_gpl_license_field_flagged(audit: ModuleType) -> None:
     """A short identifier-style License field naming GPL is still caught."""
-    stub = _StubDist(_StubMetadata("short-gpl", license_text="GPL-3.0-only"))
+    stub = StubDist(StubMetadata("short-gpl", license_text="GPL-3.0-only"))
     violations = audit.find_copyleft_violations([stub])
     assert len(violations) == 1
 
@@ -199,10 +162,9 @@ NON_PERMISSIVE_SAMPLES = (
 def test_non_permissive_pattern_matches_named_classes(audit: ModuleType, sample: str) -> None:
     """Every source-available and non-commercial class D13 and D18d name is recognized.
 
-    The GPL pattern matched none of these: SSPL, BUSL, Elastic, PolyForm, Prosperity,
-    the Commons Clause rider and the CC non-commercial grants are all inadmissible
-    under D13 and all spelled nothing like ``GPL``, so the audit passed a distribution
-    the policy forbids while printing a clean verdict.
+    The GPL pattern matched none of these: SSPL, BUSL, Elastic, PolyForm, Prosperity, the Commons Clause rider and the
+    CC non-commercial grants are all inadmissible under D13 and all spelled nothing like ``GPL``, so the audit passed a
+    distribution the policy forbids while printing a clean verdict.
     """
     assert audit.inadmissible_license(sample) == "non-permissive"
 
@@ -211,8 +173,8 @@ def test_non_permissive_pattern_matches_named_classes(audit: ModuleType, sample:
 def test_non_permissive_pattern_spares_permissive(audit: ModuleType, sample: str) -> None:
     """The second pattern leaves permissive licenses alone, exactly as the first does.
 
-    A check that fires on a permissive licence is worse than no check: it is the one
-    that gets an allowlist entry written for it and then stops being read.
+    A check that fires on a permissive licence is worse than no check: it is the one that gets an allowlist entry
+    written for it and then stops being read.
     """
     assert audit.inadmissible_license(sample) is None
 
@@ -220,11 +182,11 @@ def test_non_permissive_pattern_spares_permissive(audit: ModuleType, sample: str
 def test_sspl_distribution_rejected(audit: ModuleType) -> None:
     """A distribution declaring SSPL is a violation, and the finding names the class.
 
-    The DoD case for WP-168. SSPL is what a formerly-permissive dependency relicenses
-    *to* — the licence change lands in a routine transitive bump, and the audit that
-    only knew the GPL family would have reported the tree clean in the same run.
+    The DoD case for WP-168. SSPL is what a formerly-permissive dependency relicenses *to* — the licence change lands in
+    a routine transitive bump, and the audit that only knew the GPL family would have reported the tree clean in the
+    same run.
     """
-    stub = _StubDist(_StubMetadata("relicensed-store", license_text="SSPL-1.0"))
+    stub = StubDist(StubMetadata("relicensed-store", license_text="SSPL-1.0"))
 
     violations = audit.find_copyleft_violations([stub])
 
@@ -236,58 +198,38 @@ def test_sspl_distribution_rejected(audit: ModuleType) -> None:
 
 def test_bundled_non_permissive_declaration_rejected(audit: ModuleType) -> None:
     """A wheel declaring Apache for itself and vendoring a BUSL library is a violation."""
-    stub = _bundling_dist("vendors-busl", "Name: some-engine\nLicense: BUSL-1.1\n")
+    stub = bundling_dist("vendors-busl", "Name: some-engine\nLicense: BUSL-1.1\n")
 
     violations = audit.find_bundled_violations([stub])
 
     assert [name for name, _ in violations] == ["vendors-busl"]
 
 
-def test_distribution_declaring_no_license_rejected(audit: ModuleType, tmp_path: Path) -> None:
+def test_distribution_declaring_no_license_rejected(
+    grade: Callable[[Sequence[StubDist], Path], Graded], tmp_path: Path
+) -> None:
     """A shipped distribution declaring no licence at all fails the audit.
 
-    The DoD's second licence case. It is the fourth surface (WP-115) rather than a
-    pattern: the three pattern-matching checks compare a declaration against a
-    forbidden list, so a distribution declaring nothing matches nothing and passes.
-    D13's last clause -- "anything ... of unstated license" -- is what this covers,
-    and it is the only check here that catches a licence class nobody listed.
+    The DoD's second licence case. It is the fourth surface (WP-115) rather than a pattern: the three pattern-matching
+    checks compare a declaration against a forbidden list, so a distribution declaring nothing matches nothing and
+    passes. D13's last clause -- "anything ... of unstated license" -- is what this covers, and it is the only check
+    here that catches a licence class nobody listed.
     """
-    dists = [_undeclared_dist("says-nothing")]
-    pyproject = _tiered_pyproject(tmp_path, base=("says-nothing",), dev=(), docs=())
+    pyproject = tiered_pyproject(tmp_path, base=("says-nothing",), dev=(), docs=())
 
-    failures, flags = audit.find_unreadable_licenses(dists, audit.dependency_tiers(dists, pyproject))
+    failures, flags = grade([undeclared_dist("says-nothing")], pyproject)
 
     assert [name for name, _ in failures] == ["says-nothing"]
     assert flags == []
 
 
-def _bundling_dist(name: str, body: str, filename: str = "LICENSE.txt") -> _StubDist:
-    """A distribution declaring a permissive license while vendoring ``body``.
-
-    Examples:
-        >>> dist = _bundling_dist("vendors-lgpl", "License: LGPL-2.1-or-later\\n")
-        >>> dist.metadata.get_all("License-File")
-        ['LICENSE.txt']
-        >>> dist.read_text("licenses/LICENSE.txt")
-        'License: LGPL-2.1-or-later\\n'
-    """
-    return _StubDist(
-        _StubMetadata(
-            name,
-            classifiers=("License :: OSI Approved :: BSD License",),
-            license_files=(filename,),
-        ),
-        documents={f"licenses/{filename}": body},
-    )
-
-
 def test_bundled_copyleft_flagged_though_metadata_permissive(audit: ModuleType) -> None:
     """A wheel declaring BSD while vendoring an LGPL binary is reported.
 
-    The shapely case that motivated the check: every metadata field says BSD, so
-    the declared-license audit passes and the LGPL sits in the environment unseen.
+    The shapely case that motivated the check: every metadata field says BSD, so the declared-license audit passes and
+    the LGPL sits in the environment unseen.
     """
-    stub = _bundling_dist("vendors-lgpl", "Name: libthing\nFiles: libthing.so\nLicense: LGPL-2.1-or-later\n")
+    stub = bundling_dist("vendors-lgpl", "Name: libthing\nFiles: libthing.so\nLicense: LGPL-2.1-or-later\n")
 
     violations = audit.find_bundled_violations([stub])
 
@@ -297,11 +239,10 @@ def test_bundled_copyleft_flagged_though_metadata_permissive(audit: ModuleType) 
 def test_bundled_license_prose_not_scanned(audit: ModuleType) -> None:
     """A vendored copy of the LGPL text itself is not a declaration.
 
-    A full GPL text names "GPL" on dozens of lines. Scanning the body would flag
-    every wheel shipping any license document, and a gate that fires on everything
-    teaches its reader to bypass it.
+    A full GPL text names "GPL" on dozens of lines. Scanning the body would flag every wheel shipping any license
+    document, and a gate that fires on everything teaches its reader to bypass it.
     """
-    stub = _bundling_dist("ships-the-text", "GNU LESSER GENERAL PUBLIC LICENSE\nVersion 2.1\n...prose...\n")
+    stub = bundling_dist("ships-the-text", "GNU LESSER GENERAL PUBLIC LICENSE\nVersion 2.1\n...prose...\n")
 
     assert audit.find_bundled_violations([stub]) == []
 
@@ -309,11 +250,10 @@ def test_bundled_license_prose_not_scanned(audit: ModuleType) -> None:
 def test_gcc_runtime_exception_permissive_for_any_package(audit: ModuleType) -> None:
     """GPL-3 under the GCC Runtime Library Exception is not a finding, allowlist or not.
 
-    The exception exists precisely to let GPL-3 runtime objects be linked into
-    programs under any license, so it is recognized by expression rather than by
-    package: a new dependency built by gcc needs no allowlist entry (D15).
+    The exception exists precisely to let GPL-3 runtime objects be linked into programs under any license, so it is
+    recognized by expression rather than by package: a new dependency built by gcc needs no allowlist entry (D15).
     """
-    stub = _bundling_dist(
+    stub = bundling_dist(
         "not-on-any-allowlist",
         "Name: GCC runtime library\nFiles: libgfortran.dylib\nLicense: GPL-3.0-or-later WITH GCC-exception-3.1\n",
     )
@@ -327,8 +267,8 @@ def test_allowlisted_package_excused_only_for_bundled_findings(audit: ModuleType
     body = "Name: libthing\nFiles: libthing.so\nLicense: LGPL-2.1-or-later\n"
     listed = next(iter(audit.BUNDLED_ALLOWLIST))
 
-    assert audit.find_bundled_violations([_bundling_dist(listed, body)]) == []
-    assert audit.find_bundled_violations([_bundling_dist("someone-else", body)]) != []
+    assert audit.find_bundled_violations([bundling_dist(listed, body)]) == []
+    assert audit.find_bundled_violations([bundling_dist("someone-else", body)]) != []
 
 
 PERMISSIVE_LICENSE_DOCUMENT = (
@@ -342,20 +282,16 @@ PERMISSIVE_LICENSE_DOCUMENT = (
 def synthetic_dist(tmp_path: Path) -> Callable[[str, Sequence[str]], metadata.Distribution]:
     """Build an installed distribution from a hand-written ``.dist-info``.
 
-    ``av`` cannot be installed to test against — keeping it out of this tree is the
-    whole point of the check — so the positive case is written by hand instead: a
-    METADATA declaring a permissive license, a bundled license document that names no
-    copyleft anywhere, and a RECORD listing the files the wheel ships. Going through
-    ``Distribution.at`` rather than a stub object means the real ``RECORD`` parser runs,
-    which is the part the check depends on.
+    ``av`` cannot be installed to test against — keeping it out of this tree is the whole point of the check — so the
+    positive case is written by hand instead: a METADATA declaring a permissive license, a bundled license document
+    that names no copyleft anywhere, and a RECORD listing the files the wheel ships. Going through ``Distribution.at``
+    rather than a stub object means the real ``RECORD`` parser runs, which is the part the check depends on.
 
-    Every listed file is also created on disk, empty. A RECORD line alone was enough on
-    Python 3.11, but 3.12 added ``skip_missing_files`` to ``Distribution.files``, which
-    filters the parsed RECORD down to the entries that exist under the distribution's
-    root. Writing only the RECORD there yields a distribution shipping nothing, and the
-    binary scan reads ``files``, so the x264 cases passed on 3.11 and reported clean on
-    3.12 and 3.13 — a fixture artefact, not a behaviour difference in the audit, since a
-    real wheel installs the binaries it records.
+    Every listed file is also created on disk, empty. A RECORD line alone was enough on Python 3.11, but 3.12 added
+    ``skip_missing_files`` to ``Distribution.files``, which filters the parsed RECORD down to the entries that exist
+    under the distribution's root. Writing only the RECORD there yields a distribution shipping nothing, and the binary
+    scan reads ``files``, so the x264 cases passed on 3.11 and reported clean on 3.12 and 3.13 — a fixture artefact, not
+    a behaviour difference in the audit, since a real wheel installs the binaries it records.
     """
 
     def build(name: str, shipped: Sequence[str] = ()) -> metadata.Distribution:
@@ -389,14 +325,11 @@ def av_lookalike(synthetic_dist: Callable[[str, Sequence[str]], metadata.Distrib
     return synthetic_dist("av", ("av/__init__.py", "av/.dylibs/libx264.165.dylib", "av/.dylibs/libmp3lame.0.dylib"))
 
 
-def test_shipped_x264_flagged_though_nothing_declares_it(
-    audit: ModuleType, av_lookalike: metadata.Distribution
-) -> None:
+def test_shipped_x264_flagged_without_declaration(audit: ModuleType, av_lookalike: metadata.Distribution) -> None:
     """A wheel shipping a GPL x264 binary is reported from its file list alone.
 
-    The finding that motivated the check: ``supervision`` pulls ``av>=14.2``, whose
-    wheel bundles ``libx264`` — GPL-2.0 — under BSD-3-Clause metadata. Nothing but the
-    filename says so, so the filename is what the audit reads.
+    The finding that motivated the check: ``supervision`` pulls ``av>=14.2``, whose wheel bundles ``libx264`` —
+    GPL-2.0 — under BSD-3-Clause metadata. Nothing but the filename says so, so the filename is what the audit reads.
     """
     violations = audit.find_binary_violations([av_lookalike])
 
@@ -406,9 +339,8 @@ def test_shipped_x264_flagged_though_nothing_declares_it(
 def test_older_two_checks_pass_same_wheel_clean(audit: ModuleType, av_lookalike: metadata.Distribution) -> None:
     """Neither the declared-license nor the license-file check sees the x264 binary.
 
-    Pinned as a test rather than left as a claim in a docstring: this is the exact gap
-    WP-109 closes, and if a later change made either older check catch it, the third
-    check's justification would have quietly evaporated.
+    Pinned as a test rather than left as a claim in a docstring: this is the exact gap WP-109 closes, and if a later
+    change made either older check catch it, the third check's justification would have quietly evaporated.
     """
     assert audit.find_copyleft_violations([av_lookalike]) == []
     assert audit.find_bundled_violations([av_lookalike]) == []
@@ -420,10 +352,9 @@ def test_shipped_x264_flagged_through_manylinux_spelling(
 ) -> None:
     """The same wheel repaired for manylinux is caught under its grafted filename.
 
-    The platform this matters on is the one no developer here runs: ``auditwheel``
-    rewrites ``libx264.so.164`` to ``libx264-94059858.so.164`` when it vendors the
-    library into a Linux wheel, and CI runs on Linux. A table that matched only the
-    macOS spelling would pass every local check and see nothing on the runner.
+    The platform this matters on is the one no developer here runs: ``auditwheel`` rewrites ``libx264.so.164`` to
+    ``libx264-94059858.so.164`` when it vendors the library into a Linux wheel, and CI runs on Linux. A table that
+    matched only the macOS spelling would pass every local check and see nothing on the runner.
     """
     linux_av = synthetic_dist("av", ("av/__init__.py", "av.libs/libx264-94059858.so.164"))
 
@@ -438,9 +369,9 @@ def test_unrecognized_binaries_not_findings(
 ) -> None:
     """A wheel shipping ordinary native libraries produces nothing.
 
-    ``torch`` alone ships hundreds of ``.dylib``/``.so`` files, so a check failing on
-    anything it does not recognize would fire on every commit and be switched off within
-    a week. The table names what is known to be copyleft; everything else passes.
+    ``torch`` alone ships hundreds of ``.dylib``/``.so`` files, so a check failing on anything it does not recognize
+    would fire on every commit and be switched off within a week. The table names what is known to be copyleft;
+    everything else passes.
     """
     ordinary = synthetic_dist(
         "well-behaved",
@@ -481,17 +412,14 @@ def test_library_stem_normalizes_every_platform_spelling(
 ) -> None:
     """One table entry matches a library however the platform spelled its filename.
 
-    The table is keyed on the stem precisely so that a rebuild bumping ``libx264.164``
-    to ``libx264.165``, or a Windows wheel spelling it ``x264.dll``, does not walk out
-    from under the entry that names it.
+    The table is keyed on the stem precisely so that a rebuild bumping ``libx264.164`` to ``libx264.165``, or a Windows
+    wheel spelling it ``x264.dll``, does not walk out from under the entry that names it.
 
-    The ``auditwheel-graft`` cases are the ones that matter most and are the reason this
-    is parametrized rather than asserted on the live environment alone: the graft only
-    appears on manylinux wheels, so a normalizer that handles the macOS spelling and not
-    the Linux one passes every check a macOS developer can run while seeing nothing at
-    all on the Linux runner CI uses. The four filenames are transcribed from the
-    ``shapely`` and ``pillow`` manylinux wheels, not invented — except the ``libx264``
-    one, which applies the same convention to a library this tree must never install.
+    The ``auditwheel-graft`` cases are the ones that matter most and are the reason this is parametrized rather than
+    asserted on the live environment alone: the graft only appears on manylinux wheels, so a normalizer that handles the
+    macOS spelling and not the Linux one passes every check a macOS developer can run while seeing nothing at all on the
+    Linux runner CI uses. The four filenames are transcribed from the ``shapely`` and ``pillow`` manylinux wheels, not
+    invented — except the ``libx264`` one, which applies the same convention to a library this tree must never install.
     """
     assert audit.library_stem(filename) == expected
 
@@ -502,10 +430,9 @@ def test_binary_allowlist_excuses_named_library_only(
 ) -> None:
     """An allowlisted pair passes; the same distribution's other copyleft binary does not.
 
-    This is what the ``(distribution, library)`` key buys over the package-keyed
-    allowlist beside it. ``shapely`` is allowed to ship GEOS and nothing else — if it
-    started shipping x264 tomorrow the audit must still say so, which a package-keyed
-    entry would have silently prevented.
+    This is what the ``(distribution, library)`` key buys over the package-keyed allowlist beside it. ``shapely`` is
+    allowed to ship GEOS and nothing else — if it started shipping x264 tomorrow the audit must still say so, which a
+    package-keyed entry would have silently prevented.
     """
     excused = synthetic_dist("shapely", ("shapely/.dylibs/libgeos.3.13.1.dylib",))
     unrelated = synthetic_dist("shapely-but-x264", ("shapely/.dylibs/libx264.165.dylib",))
@@ -517,9 +444,8 @@ def test_binary_allowlist_excuses_named_library_only(
 def test_every_binary_allowlist_entry_names_listed_library(audit: ModuleType) -> None:
     """No allowlist entry excuses a library the table does not name.
 
-    An entry whose stem has drifted out of ``COPYLEFT_BINARIES`` — renamed, or removed
-    when the table was edited — excuses nothing and reads as though it does, which is
-    the failure mode of an allowlist nobody re-reads.
+    An entry whose stem has drifted out of ``COPYLEFT_BINARIES`` — renamed, or removed when the table was edited —
+    excuses nothing and reads as though it does, which is the failure mode of an allowlist nobody re-reads.
     """
     listed = {stem for _, stem in audit.BUNDLED_BINARY_ALLOWLIST}
 
@@ -556,61 +482,14 @@ COPYLEFT_HEADERS = (
 )
 
 
-def _undeclared_dist(name: str, documents: dict[str, str] | None = None) -> _StubDist:
-    """A distribution with no license field, optionally shipping license documents.
-
-    Examples:
-        >>> bare = _undeclared_dist("says-nothing")
-        >>> bare.metadata.get_all("License-File")
-        []
-        >>> shipped = _undeclared_dist("has-doc", {"LICENSE": "Apache text"})
-        >>> shipped.read_text("licenses/LICENSE")
-        'Apache text'
-    """
-    documents = documents or {}
-    return _StubDist(
-        _StubMetadata(name, license_files=tuple(documents)),
-        {f"licenses/{filename}": text for filename, text in documents.items()},
-    )
-
-
-def _tiered_pyproject(tmp_path: Path, base: Sequence[str], dev: Sequence[str], docs: Sequence[str]) -> Path:
-    """Write a minimal pyproject declaring one tier's roots each.
-
-    Examples:
-        >>> import tempfile
-        >>> with tempfile.TemporaryDirectory() as tmp:
-        ...     path = _tiered_pyproject(Path(tmp), base=["alpha"], dev=["beta"], docs=[])
-        ...     print(path.read_text())
-        [project]
-        name = "x"
-        version = "0"
-        dependencies = ["alpha"]
-        <BLANKLINE>
-        [dependency-groups]
-        dev = ["beta"]
-        docs = []
-        <BLANKLINE>
-    """
-    path = tmp_path / "pyproject.toml"
-    path.write_text(
-        "[project]\nname = 'x'\nversion = '0'\n"
-        f"dependencies = {list(base)!r}\n\n"
-        f"[dependency-groups]\ndev = {list(dev)!r}\ndocs = {list(docs)!r}\n".replace("'", '"'),
-        encoding="utf-8",
-    )
-    return path
-
-
 def test_distribution_declaring_nothing_at_all_finding(audit: ModuleType) -> None:
     """No license field and no license document is the case the copyleft checks cannot see.
 
-    Each of the three older surfaces matches a forbidden pattern against a declaration,
-    so a distribution declaring nothing matches nothing and passes in the same run that
-    prints a clean verdict. This is the hole WP-114b had to reach for a version cap to
-    work around.
+    Each of the three older surfaces matches a forbidden pattern against a declaration, so a distribution declaring
+    nothing matches nothing and passes in the same run that prints a clean verdict. This is the hole WP-114b had to
+    reach for a version cap to work around.
     """
-    reason = audit.unreadable_license_reason(_undeclared_dist("says-nothing"))
+    reason = audit.unreadable_license_reason(undeclared_dist("says-nothing"))
 
     assert reason is not None
     assert "ships no License-File" in reason
@@ -619,11 +498,10 @@ def test_distribution_declaring_nothing_at_all_finding(audit: ModuleType) -> Non
 def test_apache_document_with_no_license_field_read_and_cleared(audit: ModuleType) -> None:
     """A shipped Apache-2.0 text resolves a distribution whose metadata declares nothing.
 
-    The live shape this check had to accommodate: PEP 639 metadata may carry the license
-    only as a file, so a check that demanded a field would fail on a genuinely permissive
-    base dependency and be turned off within a week.
+    The live shape this check had to accommodate: PEP 639 metadata may carry the license only as a file, so a check that
+    demanded a field would fail on a genuinely permissive base dependency and be turned off within a week.
     """
-    dist = _undeclared_dist("field-less-apache", {"LICENSE": APACHE_DOCUMENT})
+    dist = undeclared_dist("field-less-apache", {"LICENSE": APACHE_DOCUMENT})
 
     assert audit.unreadable_license_reason(dist) is None
 
@@ -631,10 +509,10 @@ def test_apache_document_with_no_license_field_read_and_cleared(audit: ModuleTyp
 def test_unrecognized_license_document_stays_finding(audit: ModuleType) -> None:
     """A document matching no known permissive text is not given the benefit of the doubt.
 
-    The direction that makes the check worth having: bespoke terms are exactly what a
-    licence audit exists to surface, and silence about them reads as approval.
+    The direction that makes the check worth having: bespoke terms are exactly what a licence audit exists to surface,
+    and silence about them reads as approval.
     """
-    dist = _undeclared_dist("bespoke-terms", {"LICENSE": UNKNOWN_DOCUMENT})
+    dist = undeclared_dist("bespoke-terms", {"LICENSE": UNKNOWN_DOCUMENT})
 
     reason = audit.unreadable_license_reason(dist)
 
@@ -646,9 +524,8 @@ def test_unrecognized_license_document_stays_finding(audit: ModuleType) -> None:
 def test_recognizer_declines_every_copyleft_header(audit: ModuleType, header: str) -> None:
     """No GPL-family text is recognizable, so each one falls through to a finding.
 
-    The table lists permissive texts only, which means the recognizer never has to
-    decide that something is forbidden — an omission from the table costs a false
-    alarm, never a silent pass.
+    The table lists permissive texts only, which means the recognizer never has to decide that something is forbidden —
+    an omission from the table costs a false alarm, never a silent pass.
     """
     assert audit.recognize_license_text(header) is None
 
@@ -656,70 +533,74 @@ def test_recognizer_declines_every_copyleft_header(audit: ModuleType, header: st
 def test_mpl_prose_identified_rather_than_self_flagged(audit: ModuleType) -> None:
     """MPL-2.0 names the GPL in its own Secondary-License clause and is still recognized.
 
-    The reason the copyleft pattern is deliberately not run over a recognized text as a
-    second opinion: this environment already carries MPL-2.0 through ``certifi`` and
-    ``pathspec``, and a belt-and-braces re-scan would fail the audit on a license the
-    policy tolerates.
+    The reason the copyleft pattern is deliberately not run over a recognized text as a second opinion: this environment
+    already carries MPL-2.0 through ``certifi`` and ``pathspec``, and a belt-and-braces re-scan would fail the audit on
+    a license the policy tolerates.
     """
     assert audit.recognize_license_text(MPL_DOCUMENT) == "MPL-2.0"
 
 
-def test_group_only_package_flagged_rather_than_failed(audit: ModuleType, tmp_path: Path) -> None:
+def test_group_only_package_flagged_rather_than_failed(
+    grade: Callable[[Sequence[StubDist], Path], Graded], tmp_path: Path
+) -> None:
     """A dev- or docs-only package with no readable license is reported, and the run passes.
 
-    PEP 735 groups appear in no wheel metadata, so nothing a consumer installs is
-    affected by what the repository's own tooling pulls; treating it as fatal would make
-    the check about tidiness rather than about exposure.
+    PEP 735 groups appear in no wheel metadata, so nothing a consumer installs is affected by what the repository's own
+    tooling pulls; treating it as fatal would make the check about tidiness rather than about exposure.
     """
-    dists = [_undeclared_dist("alpha"), _undeclared_dist("beta")]
-    pyproject = _tiered_pyproject(tmp_path, base=["alpha"], dev=["beta"], docs=[])
+    dists = [undeclared_dist("alpha"), undeclared_dist("beta")]
+    pyproject = tiered_pyproject(tmp_path, base=["alpha"], dev=["beta"], docs=[])
 
-    failures, flags = audit.find_unreadable_licenses(dists, audit.dependency_tiers(dists, pyproject))
+    failures, flags = grade(dists, pyproject)
 
     assert [name for name, _ in failures] == ["alpha"]
     assert [name for name, _ in flags] == ["beta"]
 
 
-def test_package_both_tiers_reach_takes_shipped_tier(audit: ModuleType, tmp_path: Path) -> None:
+def test_package_both_tiers_reach_takes_shipped_tier(
+    grade: Callable[[Sequence[StubDist], Path], Graded], tmp_path: Path
+) -> None:
     """Reachable from base and from a group means base: the stricter attribution wins.
 
-    A shared transitive is republished in the wheel regardless of what else also pulls
-    it, so letting the group attribution win would downgrade a genuinely shipped package.
+    A shared transitive is republished in the wheel regardless of what else also pulls it, so letting the group
+    attribution win would downgrade a genuinely shipped package.
     """
-    dists = [_undeclared_dist("shared")]
-    pyproject = _tiered_pyproject(tmp_path, base=["shared"], dev=["shared"], docs=[])
+    pyproject = tiered_pyproject(tmp_path, base=["shared"], dev=["shared"], docs=[])
 
-    failures, flags = audit.find_unreadable_licenses(dists, audit.dependency_tiers(dists, pyproject))
+    failures, flags = grade([undeclared_dist("shared")], pyproject)
 
     assert [name for name, _ in failures] == ["shared"]
     assert flags == []
 
 
-def test_unattributed_package_treated_as_shipped(audit: ModuleType, tmp_path: Path) -> None:
+def test_unattributed_package_treated_as_shipped(
+    grade: Callable[[Sequence[StubDist], Path], Graded], tmp_path: Path
+) -> None:
     """A distribution no tier reaches fails rather than passing quietly.
 
-    The resolver walks installed metadata, so a gap in it — an unparsed marker, a
-    requirement form it does not follow — must present as a loud failure. The opposite
-    default would let a hole in the walk silently demote a shipped dependency to a flag.
+    The resolver walks installed metadata, so a gap in it — an unparsed marker, a requirement form it does not follow —
+    must present as a loud failure. The opposite default would let a hole in the walk silently demote a shipped
+    dependency to a flag.
     """
-    dists = [_undeclared_dist("orphan")]
-    pyproject = _tiered_pyproject(tmp_path, base=[], dev=[], docs=[])
+    pyproject = tiered_pyproject(tmp_path, base=[], dev=[], docs=[])
 
-    failures, _ = audit.find_unreadable_licenses(dists, audit.dependency_tiers(dists, pyproject))
+    failures, _ = grade([undeclared_dist("orphan")], pyproject)
 
     assert [name for name, _ in failures] == ["orphan"]
 
 
-def test_copyleft_prose_fails_even_in_group_tier(audit: ModuleType, tmp_path: Path) -> None:
+def test_copyleft_prose_fails_even_in_group_tier(
+    grade: Callable[[Sequence[StubDist], Path], Graded], tmp_path: Path
+) -> None:
     """A group-only package whose only license document is LGPL text is a failure, not a flag.
 
-    The tier grades unreadability, not copyleft. "No AGPL at any cost" is tier-blind, so a
-    document that names a GPL-family license in its own header escalates past the flag.
+    The tier grades unreadability, not copyleft. "No AGPL at any cost" is tier-blind, so a document that names a
+    GPL-family license in its own header escalates past the flag.
     """
-    dists = [_undeclared_dist("tooling", {"COPYING": LGPL_DOCUMENT})]
-    pyproject = _tiered_pyproject(tmp_path, base=[], dev=["tooling"], docs=[])
+    dists = [undeclared_dist("tooling", {"COPYING": LGPL_DOCUMENT})]
+    pyproject = tiered_pyproject(tmp_path, base=[], dev=["tooling"], docs=[])
 
-    failures, flags = audit.find_unreadable_licenses(dists, audit.dependency_tiers(dists, pyproject))
+    failures, flags = grade(dists, pyproject)
 
     assert [name for name, _ in failures] == ["tooling"]
     assert flags == []
@@ -728,9 +609,8 @@ def test_copyleft_prose_fails_even_in_group_tier(audit: ModuleType, tmp_path: Pa
 def test_include_group_entry_refused(audit: ModuleType, tmp_path: Path) -> None:
     """A ``{include-group = ...}`` entry raises instead of being walked past.
 
-    The walk follows requirement strings; a group reference it silently dropped would
-    under-attribute everything that group reaches, turning failures into flags without
-    anyone choosing that.
+    The walk follows requirement strings; a group reference it silently dropped would under-attribute everything that
+    group reaches, turning failures into flags without anyone choosing that.
     """
     path = tmp_path / "pyproject.toml"
     path.write_text(
@@ -743,19 +623,20 @@ def test_include_group_entry_refused(audit: ModuleType, tmp_path: Path) -> None:
         audit.dependency_tiers([], path)
 
 
-def test_allowlisted_distribution_not_finding(audit: ModuleType, tmp_path: Path) -> None:
+def test_allowlisted_distribution_not_finding(
+    audit: ModuleType, grade: Callable[[Sequence[StubDist], Path], Graded], tmp_path: Path
+) -> None:
     """A name in ``UNREADABLE_ALLOWLIST`` is skipped even in the shipped tier.
 
-    The fourth allowlist and the fourth exposure: this one excuses metadata that says
-    nothing at all, which is neither a copyleft declaration nor a vendored copyleft
-    library. ``cuda-toolkit`` is the live entry — its wheel dist-info holds METADATA,
-    WHEEL and RECORD and no licence document of any kind (D17).
+    The fourth allowlist and the fourth exposure: this one excuses metadata that says nothing at all, which is neither a
+    copyleft declaration nor a vendored copyleft library. ``cuda-toolkit`` is the live entry — its wheel dist-info holds
+    METADATA, WHEEL and RECORD and no licence document of any kind (D17).
     """
     listed = next(iter(audit.UNREADABLE_ALLOWLIST))
-    dists = [_undeclared_dist(listed), _undeclared_dist("not-on-any-allowlist")]
-    pyproject = _tiered_pyproject(tmp_path, base=[listed, "not-on-any-allowlist"], dev=[], docs=[])
+    dists = [undeclared_dist(listed), undeclared_dist("not-on-any-allowlist")]
+    pyproject = tiered_pyproject(tmp_path, base=[listed, "not-on-any-allowlist"], dev=[], docs=[])
 
-    failures, flags = audit.find_unreadable_licenses(dists, audit.dependency_tiers(dists, pyproject))
+    failures, flags = grade(dists, pyproject)
 
     assert [name for name, _ in failures] == ["not-on-any-allowlist"]
     assert flags == []
@@ -764,45 +645,49 @@ def test_allowlisted_distribution_not_finding(audit: ModuleType, tmp_path: Path)
 def test_every_unreadable_allowlist_entry_cites_decision(audit: ModuleType) -> None:
     """Each entry names the DECISIONS.md row that admitted it.
 
-    The convention the three older allowlists follow, pinned here so the fourth cannot
-    quietly become the one where a package is excused by a reason nobody wrote down.
+    The convention the three older allowlists follow, pinned here so the fourth cannot quietly become the one where a
+    package is excused by a reason nobody wrote down.
     """
     for name, reason in audit.UNREADABLE_ALLOWLIST.items():
         assert reason.startswith("D"), f"{name}: allowlist reason does not open with a decision id: {reason[:40]!r}"
 
 
-def test_unattributed_package_says_so_rather_than_reading_as_base(audit: ModuleType, tmp_path: Path) -> None:
+def test_unattributed_package_says_so_rather_than_reading_as_base(
+    audit: ModuleType, grade: Callable[[Sequence[StubDist], Path], Graded], tmp_path: Path
+) -> None:
     """The reported tier distinguishes "the wheel ships this" from "the walk never found it".
 
-    Both are failures and for opposite reasons, so printing them identically would send a
-    reader looking for a dependency declaration that does not exist. This is the shape the
-    live ``cuda-toolkit`` finding arrived in: reported as base, actually unattributed.
+    Both are failures and for opposite reasons, so printing them identically would send a reader looking for a
+    dependency declaration that does not exist. This is the shape the live ``cuda-toolkit`` finding arrived in: reported
+    as base, actually unattributed.
     """
-    dists = [_undeclared_dist("orphan"), _undeclared_dist("declared")]
-    pyproject = _tiered_pyproject(tmp_path, base=["declared"], dev=[], docs=[])
+    dists = [undeclared_dist("orphan"), undeclared_dist("declared")]
+    pyproject = tiered_pyproject(tmp_path, base=["declared"], dev=[], docs=[])
 
-    failures, _ = audit.find_unreadable_licenses(dists, audit.dependency_tiers(dists, pyproject))
+    failures, _ = grade(dists, pyproject)
     reasons = dict(failures)
 
     assert "unattributed" in reasons["orphan"]
     assert reasons["declared"].endswith(f"({audit.TIER_SHIPPED})")
 
 
-def test_well_formed_metadata_yields_no_unreadable_finding(audit: ModuleType, tmp_path: Path) -> None:
+def test_well_formed_metadata_yields_no_unreadable_finding(
+    grade: Callable[[Sequence[StubDist], Path], Graded], tmp_path: Path
+) -> None:
     """A set of distributions that each declare a license produces neither a failure nor a flag.
 
-    The positive control for the fourth surface, and the half that keeps it honest: every
-    other test here supplies metadata that is missing something, so without this one a
-    check that reported *every* distribution would pass them all.
+    The positive control for the fourth surface, and the half that keeps it honest: every other test here supplies
+    metadata that is missing something, so without this one a check that reported *every* distribution would pass them
+    all.
     """
     dists = [
-        _StubDist(_StubMetadata("alpha", classifiers=("License :: OSI Approved :: MIT License",))),
-        _StubDist(_StubMetadata("beta", license_text="Apache-2.0")),
-        _undeclared_dist("gamma", {"LICENSE": APACHE_DOCUMENT}),
+        StubDist(StubMetadata("alpha", classifiers=("License :: OSI Approved :: MIT License",))),
+        StubDist(StubMetadata("beta", license_text="Apache-2.0")),
+        undeclared_dist("gamma", {"LICENSE": APACHE_DOCUMENT}),
     ]
-    pyproject = _tiered_pyproject(tmp_path, base=["alpha", "beta"], dev=["gamma"], docs=[])
+    pyproject = tiered_pyproject(tmp_path, base=["alpha", "beta"], dev=["gamma"], docs=[])
 
-    failures, flags = audit.find_unreadable_licenses(dists, audit.dependency_tiers(dists, pyproject))
+    failures, flags = grade(dists, pyproject)
 
     assert failures == []
     assert flags == []

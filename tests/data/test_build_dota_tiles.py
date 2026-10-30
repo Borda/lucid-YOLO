@@ -1,21 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the tiled-layout build (WP-094).
 
-Real DOTA-v1.0 is not on this machine and is never auto-downloaded (AGENTS.md sec. 3),
-so every test here builds a tiny synthetic DOTA split on disk — images plus ``labelTxt``
-in R18's own line format — and converts it.
+Real DOTA-v1.0 is not on this machine and is never auto-downloaded (AGENTS.md sec. 3), so every test here builds a
+tiny synthetic DOTA split on disk — images plus ``labelTxt`` in R18's own line format — and converts it.
 
-The contract under test is a round trip rather than a file format: what the build writes
-must be what :class:`~lucid_yolo.data.coco.CocoDetectionDataset` reads back under
-``oriented=True``, with the geometry, the class order and R18's ``difficult`` flag intact.
-Asserting the JSON's shape alone would pass while the reader saw something else, which is
-the failure this build exists to prevent.
+The contract under test is a round trip rather than a file format: what the build writes must be what
+:class:`~lucid_yolo.data.coco.CocoDetectionDataset` reads back under ``oriented=True``, with the geometry, the class
+order and R18's ``difficult`` flag intact. Asserting the JSON's shape alone would pass while the reader saw something
+else, which is the failure this build exists to prevent.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -82,6 +81,12 @@ def built_root(tmp_path: Path) -> Path:
     return tmp_path / "tiles"
 
 
+@pytest.fixture
+def built_dataset(built_root: Path) -> CocoDetectionDataset:
+    """Read the built two-image split back through the oriented COCO reader."""
+    return CocoDetectionDataset(built_root / "val", built_root / "annotations" / "instances_val.json", oriented=True)
+
+
 def _payload(root: Path, split: str = "val") -> dict[str, list[dict[str, object]]]:
     """Read a built split's instances JSON.
 
@@ -119,9 +124,9 @@ def _dataset_index(root: Path, file_name: str, split: str = "val") -> int:
 def test_built_root_passes_lucid_data_check(tmp_path: Path) -> None:
     """A two-split root ``build-tiles`` writes is one ``lucid-data check`` accepts unaided.
 
-    The build writes ``train/``, ``val/`` and ``annotations/instances_{split}.json`` — the plain
-    COCO spelling the layout probe resolves and the OBB tier trains on. The tier's pre-flight
-    used to demand COCO 2017's ``train2017`` and its published counts of that tree instead.
+    The build writes ``train/``, ``val/`` and ``annotations/instances_{split}.json`` — the plain COCO spelling the
+    layout probe resolves and the OBB tier trains on. The tier's pre-flight used to demand COCO 2017's ``train2017``
+    and its published counts of that tree instead.
     """
     line = _axis_aligned_line(2.0, 2.0, 6.0, 4.0, "plane", 0)
     _write_split(tmp_path / "dota", "train", {"P0001": [line]})
@@ -134,8 +139,8 @@ def test_built_root_passes_lucid_data_check(tmp_path: Path) -> None:
 def test_16_bit_source_refused_by_name(tmp_path: Path) -> None:
     """A 16-bit source image fails with this build's own message, naming the file.
 
-    Tiles are written as 8-bit JPEG or PNG, so a ``uint16`` decode cannot be encoded as-is;
-    the encoder's own refusal named neither the source nor the remedy.
+    Tiles are written as 8-bit JPEG or PNG, so a ``uint16`` decode cannot be encoded as-is; the encoder's own refusal
+    named neither the source nor the remedy.
     """
     split_dir = _write_split(tmp_path / "dota", "val", {"P0001": [_axis_aligned_line(2.0, 2.0, 6.0, 4.0, "plane", 0)]})
     deep = Image.new("I;16", (SIDE, SIDE))
@@ -169,33 +174,31 @@ def test_dropping_empty_tiles_keeps_only_annotated_windows(tmp_path: Path) -> No
     assert all(record["image_id"] in {r["id"] for r in payload["images"]} for record in payload["annotations"])
 
 
-def test_reader_recovers_source_geometry(built_root: Path) -> None:
+def test_reader_recovers_source_geometry(built_root: Path, built_dataset: CocoDetectionDataset) -> None:
     """An object wholly inside a window reads back as the same rectangle, window-local.
 
-    The source rectangle spans (2, 2)-(6, 4) of ``P0001``, so in the window at the origin
-    it is unmoved: a 4x2 box centred on (4, 3) at angle 0 in canonical long-edge form.
+    The source rectangle spans (2, 2)-(6, 4) of ``P0001``, so in the window at the origin it is unmoved: a 4x2 box
+    centred on (4, 3) at angle 0 in canonical long-edge form.
     """
-    dataset = CocoDetectionDataset(built_root / "val", built_root / "annotations" / "instances_val.json", oriented=True)
     index = _dataset_index(built_root, "P0001__0_0.png")
 
-    _, targets = dataset[index]
+    _, targets = built_dataset[index]
 
     assert targets.rboxes.shape == (1, 5)
     assert torch.allclose(targets.rboxes[0], torch.tensor([4.0, 3.0, 4.0, 2.0, 0.0]), atol=1e-4)
     assert torch.equal(targets.boxes[0], torch.tensor([2.0, 2.0, 6.0, 4.0]))
 
 
-def test_difficult_flag_survives_round_trip(built_root: Path) -> None:
+def test_difficult_flag_survives_round_trip(built_root: Path, built_dataset: CocoDetectionDataset) -> None:
     """R18's flag reaches ``Targets.difficult`` through the layout (A51, A53).
 
-    ``P0002``'s object is flagged difficult in its label file, so every tile that carries
-    any part of it must read back flagged — the incoming flag is never cleared by tiling.
+    ``P0002``'s object is flagged difficult in its label file, so every tile that carries any part of it must read
+    back flagged — the incoming flag is never cleared by tiling.
     """
-    dataset = CocoDetectionDataset(built_root / "val", built_root / "annotations" / "instances_val.json", oriented=True)
     names = [str(record["file_name"]) for record in _payload(built_root)["images"]]
     indices = [index for index, name in enumerate(names) if name.startswith("P0002")]
 
-    flags = [bool(dataset[i][1].difficult.all()) for i in indices if dataset[i][1].boxes.shape[0]]
+    flags = [bool(built_dataset[i][1].difficult.all()) for i in indices if built_dataset[i][1].boxes.shape[0]]
 
     assert flags, "no tile of the difficult object carried an annotation"
     assert all(flags)
@@ -212,11 +215,9 @@ def test_tiling_flags_clipped_part_difficult(tmp_path: Path) -> None:
     assert any(float(record["visible_fraction"]) < 1.0 for record in annotations)
 
 
-def test_category_ids_preserve_published_class_order(built_root: Path) -> None:
+def test_category_ids_preserve_published_class_order(built_dataset: CocoDetectionDataset) -> None:
     """The reader's contiguous label equals the DOTA index, for every class (R18)."""
-    dataset = CocoDetectionDataset(built_root / "val", built_root / "annotations" / "instances_val.json", oriented=True)
-
-    labels = {name: dataset.category_id_to_label[index + 1] for index, name in enumerate(DOTA_CLASSES)}
+    labels = {name: built_dataset.category_id_to_label[index + 1] for index, name in enumerate(DOTA_CLASSES)}
 
     assert labels == {name: index for index, name in enumerate(DOTA_CLASSES)}
 
@@ -285,9 +286,9 @@ def _multi_image_split(root: Path) -> Path:
 def test_pooled_build_writes_same_bytes_as_serial_one(tmp_path: Path) -> None:
     """Workers change the schedule, never the file: ids are assigned by the parent in source order.
 
-    This is the whole risk of the pool. A worker cannot know how many tiles preceded it,
-    so numbering anything inside one would make the JSON depend on which process finished
-    first -- reproducible on the machine that built it and nowhere else.
+    This is the whole risk of the pool. A worker cannot know how many tiles preceded it, so numbering anything inside
+    one would make the JSON depend on which process finished first -- reproducible on the machine that built it and
+    nowhere else.
     """
     split_dir = _multi_image_split(tmp_path)
 
@@ -322,20 +323,13 @@ def test_no_record_keeps_worker_placeholder_id(tmp_path: Path) -> None:
     assert all(int(record["id"]) > 0 and int(record["image_id"]) > 0 for record in payload["annotations"])
 
 
-def test_worker_count_reaches_split_builder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(build.os, "cpu_count", return_value=7)
+@patch.object(build, "convert_split", return_value=build.SplitReport("val", 0, 0, 0, 0, 0))
+def test_worker_count_reaches_split_builder(convert_split: MagicMock, cpu_count: MagicMock, tmp_path: Path) -> None:
     """``--workers`` is forwarded rather than accepted and dropped, and defaults to one per CPU."""
-    seen: list[int] = []
-
-    def _record(*args: object, **kwargs: object) -> build.SplitReport:
-        seen.append(int(kwargs["workers"]))  # type: ignore[call-overload]
-        return build.SplitReport("val", 0, 0, 0, 0, 0)
-
-    monkeypatch.setattr(build, "convert_split", _record)
-    monkeypatch.setattr(build.os, "cpu_count", lambda: 7)
-
     assert build.build_tiles(tmp_path, tmp_path / "out", splits="val", workers=3) == 0
     assert build.build_tiles(tmp_path, tmp_path / "out", splits="val") == 0
-    assert seen == [3, 7]
+    assert [call.kwargs["workers"] for call in convert_split.call_args_list] == [3, 7]
 
 
 def test_jpeg_tiles_written_and_read_back(tmp_path: Path) -> None:
@@ -359,9 +353,9 @@ def test_jpeg_tiles_written_and_read_back(tmp_path: Path) -> None:
 def test_geometry_survives_lossy_encoder(tmp_path: Path) -> None:
     """JPEG changes pixels, never annotations: the records are identical to the PNG build's.
 
-    Worth pinning rather than assuming. The encoder sits between the crop and the disk,
-    and nothing about an annotation passes through it -- if a suffix ever reached the
-    geometry, that is a bug the pixel-level difference would hide.
+    Worth pinning rather than assuming. The encoder sits between the crop and the disk, and nothing about an
+    annotation passes through it -- if a suffix ever reached the geometry, that is a bug the pixel-level difference
+    would hide.
     """
     split_dir = _multi_image_split(tmp_path)
 

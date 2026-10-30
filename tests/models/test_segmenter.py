@@ -1,14 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gates for the WP-052 segmentation model wiring and its deploy-time view.
 
-The composite itself is thin, so what is worth pinning is the wiring: that the
-deployed view provably *lacks* the two training-only branches (the auxiliary
-semantic classifier, A17, and the one-to-many detection branch, R6) rather than
-merely skipping them, that it is a view sharing the trained parameters instead of
-a copy, that the head's coefficient width and the prototype count agree well
-enough for Eq. 7 to contract them, and that the Eq. 8 fused feature reaches both
-consumers as one tensor. The published params/FLOPs fidelity comparison is a
-separate gate and stays outside this module.
+The composite itself is thin, so what is worth pinning is the wiring: that the deployed view provably *lacks* the two
+training-only branches (the auxiliary semantic classifier, A17, and the one-to-many detection branch, R6) rather than
+merely skipping them, that it is a view sharing the trained parameters instead of a copy, that the head's coefficient
+width and the prototype count agree well enough for Eq. 7 to contract them, and that the Eq. 8 fused feature reaches
+both consumers as one tensor. The published params/FLOPs fidelity comparison is a separate gate and stays outside this
+module.
 """
 
 from __future__ import annotations
@@ -16,9 +14,9 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import torch
+from head_pyramid_helpers import square_anchor_grid
 from torch import Tensor, nn
 
-from lucid_yolo.assign.grid import make_anchor_points
 from lucid_yolo.models import Segmenter, assemble_masks, build_segmenter, count_flops, count_params
 from lucid_yolo.models.build import DEFAULT_NUM_COEFFS
 from lucid_yolo.models.heads import SemanticAux
@@ -26,16 +24,13 @@ from lucid_yolo.models.heads import SemanticAux
 #: Smallest variant — the wiring is scale-independent, so the cheapest one proves it.
 _VARIANT = "n"
 
-#: Class count, coefficient width, and proto-grid side are kept mutually distinct so
-#: no shape assertion below can pass by accidentally matching the wrong axis.
+#: Class count, coefficient width, and proto-grid side are kept mutually distinct so no shape assertion below can pass
+#: by accidentally matching the wrong axis.
 _NUM_CLASSES = 4
 _NUM_COEFFS = 6
 
 #: Square input side; divisible by 32, so every level's grid is exact.
 _IMG_SIZE = 128
-
-#: The head's level strides, in the (8, 16, 32) order the neck emits.
-_STRIDES = [8, 16, 32]
 
 
 def _anchor_count() -> int:
@@ -45,8 +40,7 @@ def _anchor_count() -> int:
         >>> _anchor_count()
         336
     """
-    feature_sizes = [(_IMG_SIZE // stride, _IMG_SIZE // stride) for stride in _STRIDES]
-    anchor_points, _ = make_anchor_points(feature_sizes, _STRIDES)
+    anchor_points, _ = square_anchor_grid(_IMG_SIZE)
     return int(anchor_points.shape[0])
 
 
@@ -83,10 +77,9 @@ def _capture_input(store: dict[str, Tensor], key: str) -> Callable[[nn.Module, t
 def test_deployed_view_excludes_auxiliary_parameters() -> None:
     """No auxiliary-branch parameter object survives into the deployed view.
 
-    Catches a deploy that keeps the training-only semantic classifier around in a
-    disabled or unreachable form: those parameters would still be exported, still
-    be counted, and the A17 "training-only" claim would be false for the artifact
-    that actually ships.
+    Catches a deploy that keeps the training-only semantic classifier around in a disabled or unreachable form: those
+    parameters would still be exported, still be counted, and the A17 "training-only" claim would be false for the
+    artifact that actually ships.
     """
     segmenter = _build()
 
@@ -101,9 +94,8 @@ def test_deployed_view_excludes_auxiliary_parameters() -> None:
 def test_deployed_view_holds_no_semantic_submodule() -> None:
     """No submodule of the deployed view is a SemanticAux instance.
 
-    Complements the parameter check: a branch held as an attribute but never
-    called would pass a forward-output test and still ship in the module tree,
-    the state dict, and any traced or scripted export.
+    Complements the parameter check: a branch held as an attribute but never called would pass a forward-output test
+    and still ship in the module tree, the state dict, and any traced or scripted export.
     """
     segmenter = _build()
 
@@ -116,9 +108,8 @@ def test_deployed_view_holds_no_semantic_submodule() -> None:
 def test_deployed_parameter_count_full_model_minus_training_only_branches() -> None:
     """Deployed params equal the full model minus the auxiliary and one-to-many branches.
 
-    The blueprint's fused-parameter identity, extended by the one-to-many branch
-    that :meth:`Segmenter.deploy` also drops. An inexact result would mean a
-    parameter is shared between a kept and a dropped branch, or counted twice —
+    The blueprint's fused-parameter identity, extended by the one-to-many branch that :meth:`Segmenter.deploy` also
+    drops. An inexact result would mean a parameter is shared between a kept and a dropped branch, or counted twice --
     either way the deployed model is not the clean subset it claims to be.
     """
     segmenter = _build()
@@ -132,9 +123,8 @@ def test_deployed_parameter_count_full_model_minus_training_only_branches() -> N
 def test_deployed_view_shares_backbone_and_neck_parameters() -> None:
     """Backbone and neck parameters are the same objects, so deploy copies nothing.
 
-    Catches a deploy that deep-copies or rebuilds the shared trunk: the exported
-    model would then silently diverge from the trained weights after any further
-    training step, and would double peak memory while both live.
+    Catches a deploy that deep-copies or rebuilds the shared trunk: the exported model would then silently diverge from
+    the trained weights after any further training step, and would double peak memory while both live.
     """
     segmenter = _build()
 
@@ -147,9 +137,8 @@ def test_deployed_view_shares_backbone_and_neck_parameters() -> None:
 def test_deployed_output_shapes_mutually_consistent() -> None:
     """The four deployed tensors agree on batch, anchor, coefficient, and proto axes.
 
-    Catches an axis swap or a stale width between the head and the prototype
-    stack — for example coefficients emitted per level instead of per anchor, or
-    prototypes left at P3 resolution instead of the A15 doubled grid.
+    Catches an axis swap or a stale width between the head and the prototype stack — for example coefficients emitted
+    per level instead of per anchor, or prototypes left at P3 resolution instead of the A15 doubled grid.
     """
     segmenter = _build()
     deployed = segmenter.deploy()
@@ -168,9 +157,8 @@ def test_deployed_output_shapes_mutually_consistent() -> None:
 def test_deployed_outputs_assemble_into_instance_masks() -> None:
     """Deployed coefficients and prototypes contract through Equation 7 without adaptation.
 
-    The end-to-end proof that both sides really share one K: a coefficient width
-    that drifted from the prototype count would raise inside the einsum rather
-    than being caught only by a later training run.
+    The end-to-end proof that both sides really share one K: a coefficient width that drifted from the prototype count
+    would raise inside the einsum rather than being caught only by a later training run.
     """
     segmenter = _build()
     deployed = segmenter.deploy()
@@ -187,9 +175,8 @@ def test_deployed_outputs_assemble_into_instance_masks() -> None:
 def test_semantic_branch_none_at_eval_and_tensor_in_training() -> None:
     """The composite's semantic field follows the branch's own training-mode gate.
 
-    Catches a wiring that materializes the auxiliary logits regardless of mode —
-    or that drops them in training — either of which would break the WP-051
-    auxiliary loss or leak the branch into evaluation.
+    Catches a wiring that materializes the auxiliary logits regardless of mode — or that drops them in training —
+    either of which would break the WP-051 auxiliary loss or leak the branch into evaluation.
     """
     segmenter = _build()
     image = torch.zeros(1, 3, _IMG_SIZE, _IMG_SIZE)
@@ -206,9 +193,8 @@ def test_semantic_branch_none_at_eval_and_tensor_in_training() -> None:
 def test_fused_feature_shared_by_prototype_and_auxiliary_branches() -> None:
     """Both mask-side consumers receive the identical fused-feature tensor object.
 
-    Catches a forward that calls ProtoFusion twice: the results would be equal by
-    value, so no numeric assertion would notice, while the fused subgraph's cost
-    silently doubles in the FLOP measurement the fidelity gate reads.
+    Catches a forward that calls ProtoFusion twice: the results would be equal by value, so no numeric assertion would
+    notice, while the fused subgraph's cost silently doubles in the FLOP measurement the fidelity gate reads.
     """
     segmenter = _build()
     received: dict[str, Tensor] = {}
@@ -225,13 +211,11 @@ def test_fused_feature_shared_by_prototype_and_auxiliary_branches() -> None:
 def test_flop_counting_traces_both_full_and_deployed_models() -> None:
     """Both segmentation dataclass outputs survive the fvcore JIT trace.
 
-    ``FlopCountAnalysis`` traces through ``torch.jit.trace``, which rejects
-    dataclass outputs outright, so every new dataclass on a countable forward
-    path has to be flattened by ``_TupleOutputAdapter``. Before this gate the
-    adapter knew only ``DualHeadOutput``, and counting the full ``Segmenter``
-    raised ``RuntimeError: ... received an input of unsupported type:
-    SegmentOutput``. The full model must also cost strictly more than its
-    deployed view, since deploy drops the one-to-many and auxiliary branches.
+    ``FlopCountAnalysis`` traces through ``torch.jit.trace``, which rejects dataclass outputs outright, so every new
+    dataclass on a countable forward path has to be flattened by ``_TupleOutputAdapter``. Before this gate the adapter
+    knew only ``DualHeadOutput``, and counting the full ``Segmenter`` raised ``RuntimeError: ... received an input of
+    unsupported type: SegmentOutput``. The full model must also cost strictly more than its deployed view, since deploy
+    drops the one-to-many and auxiliary branches.
     """
     model = Segmenter(_VARIANT, num_classes=_NUM_CLASSES, num_coeffs=_NUM_COEFFS).eval()
 
@@ -246,12 +230,10 @@ def test_flop_counting_traces_both_full_and_deployed_models() -> None:
 def test_builder_forwards_non_default_coefficient_width() -> None:
     """``build_segmenter`` reaches the ``num_coeffs`` its own class accepts.
 
-    The builder used to call ``Segmenter(variant, num_classes)`` and drop the third
-    argument, so the exported way to build a segmenter could only ever produce the A14
-    default width -- a caller wanting a narrower one had to bypass the builder and
-    instantiate the class, which is the seam a builder exists to remove. Both halves of
-    Eq. 7 have to move together: a head emitting ``K`` coefficients against a prototype
-    stack of a different count cannot contract at all.
+    The builder used to call ``Segmenter(variant, num_classes)`` and drop the third argument, so the exported way to
+    build a segmenter could only ever produce the A14 default width -- a caller wanting a narrower one had to bypass the
+    builder and instantiate the class, which is the seam a builder exists to remove. Both halves of Eq. 7 have to move
+    together: a head emitting ``K`` coefficients against a prototype stack of a different count cannot contract at all.
     """
     model = build_segmenter(_VARIANT, num_classes=_NUM_CLASSES, num_coeffs=_NUM_COEFFS)
 
@@ -262,9 +244,9 @@ def test_builder_forwards_non_default_coefficient_width() -> None:
 def test_builder_default_coefficient_width_unchanged() -> None:
     """Omitting ``num_coeffs`` still builds the A14 default the frozen goldens measure.
 
-    The forwarding above added a parameter with a default rather than changing one, and
-    this is the half that keeps ``tests/models/test_param_flops.py`` meaningful: the
-    model this function builds with two arguments must be the model it built before.
+    The forwarding above added a parameter with a default rather than changing one, and this is the half that keeps
+    ``tests/models/test_param_flops.py`` meaningful: the model this function builds with two arguments must be the
+    model it built before.
     """
     model = build_segmenter(_VARIANT, num_classes=_NUM_CLASSES)
 

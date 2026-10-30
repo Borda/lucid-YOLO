@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the Newton-Schulz orthogonalization function (WP-031).
 
-Covers the orthogonality contract across shapes and dtypes (the DoD test),
-singular-vector preservation against a known SVD, the zero-matrix edge case,
-the dtype round-trip, and input-validation errors.
+Covers the orthogonality contract across shapes and dtypes (the DoD test), singular-vector preservation against a known
+SVD, the zero-matrix edge case, the dtype round-trip, and input-validation errors.
 """
 
 from __future__ import annotations
@@ -14,23 +13,32 @@ import torch
 from lucid_yolo.optim import orthogonalize
 from lucid_yolo.optim.newton_schulz import _orthogonalize_batched
 
-# NOTE (WP-031 tolerance deviation): the R8 coefficient triple
-# (3.4445, -4.7750, 2.0315) is the aggressive Muon quintic. Its scalar map
-# ``p(x) = a*x + b*x**3 + c*x**5`` has ``p(1) = 0.701``, so 1 is NOT a fixed
-# point: the iteration pulls every singular value into a band ~[0.68, 1.14] and
-# holds it there (the orthogonality error ``||R R^T - I||_F`` floors near ~2.8
-# for a 64x64 matrix even at 50 steps). At the mandated 5 steps (A5) an
-# ill-conditioned raw ``randn`` square can additionally leave a small-singular-
-# value straggler unlifted. The blueprint's proposed ``< 1e-2`` orthogonality
-# tolerance and ``< 5e-2`` ``U V^T`` closeness are therefore physically
-# unattainable with these exact coefficients. What is asserted below is the R8
-# iteration's real, provable guarantee: on well-conditioned inputs every singular
-# value is driven into a tight band around 1, the singular vectors are preserved
-# exactly, and no input is ever blown up (top singular value stays < 1.5). See
-# the task return note for the DoD tolerance decision.
+# NOTE (WP-031 tolerance deviation): the R8 coefficient triple (3.4445, -4.7750, 2.0315) is the aggressive Muon quintic.
+# Its scalar map ``p(x) = a*x + b*x**3 + c*x**5`` has ``p(1) = 0.701``, so 1 is NOT a fixed point: the iteration pulls
+# every singular value into a band ~[0.68, 1.14] and holds it there (the orthogonality error ``||R R^T - I||_F`` floors
+# near ~2.8 for a 64x64 matrix even at 50 steps). At the mandated 5 steps (A5) an ill-conditioned raw ``randn`` square
+# can additionally leave a small-singular- value straggler unlifted. The blueprint's proposed ``< 1e-2`` orthogonality
+# tolerance and ``< 5e-2`` ``U V^T`` closeness are therefore physically unattainable with these exact coefficients. What
+# is asserted below is the R8 iteration's real, provable guarantee: on well-conditioned inputs every singular value is
+# driven into a tight band around 1, the singular vectors are preserved exactly, and no input is ever blown up (top
+# singular value stays < 1.5). See the task return note for the DoD tolerance decision.
 
 _BAND_LOW = 0.6
 _BAND_HIGH = 1.2
+
+#: Square, wide and tall matrices at the size the orthogonality contract is asserted on.
+_LARGE_SHAPES = [
+    pytest.param((64, 64), id="square"),
+    pytest.param((32, 128), id="wide"),
+    pytest.param((128, 32), id="tall"),
+]
+
+#: Square, wide and tall slices small enough for a per-slice loop to stay cheap in a native-batch comparison.
+_SLICE_SHAPES = [
+    pytest.param((4, 4), id="square"),
+    pytest.param((4, 7), id="wide"),
+    pytest.param((7, 4), id="tall"),
+]
 
 
 def _singular_values(result: torch.Tensor) -> torch.Tensor:
@@ -74,14 +82,7 @@ def _rank_deficient(rows: int, cols: int, rank: int, dtype: torch.dtype) -> torc
 class TestOrthogonality:
     """The result drives all singular values into a tight band around 1."""
 
-    @pytest.mark.parametrize(
-        "shape",
-        [
-            pytest.param((64, 64), id="square"),
-            pytest.param((32, 128), id="wide"),
-            pytest.param((128, 32), id="tall"),
-        ],
-    )
+    @pytest.mark.parametrize("shape", _LARGE_SHAPES)
     @pytest.mark.parametrize(
         "dtype",
         [
@@ -92,9 +93,8 @@ class TestOrthogonality:
     def test_orthogonality(self, shape: tuple[int, int], dtype: torch.dtype) -> None:
         """Singular values land in [0.6, 1.2] across shapes and input dtypes.
 
-        Uses well-conditioned random inputs (singular values in [0.5, 2.0]); this
-        is the R8 iteration's real orthogonalization guarantee (band ~[0.68,
-        1.14]). Exact ``||R R^T - I||_F < 1e-2`` is unreachable for these
+        Uses well-conditioned random inputs (singular values in [0.5, 2.0]); this is the R8 iteration's real
+        orthogonalization guarantee (band ~[0.68, 1.14]). Exact ``||R R^T - I||_F < 1e-2`` is unreachable for these
         coefficients (see the module-level note).
         """
         matrix = _random_conditioned(*shape, dtype)
@@ -104,14 +104,7 @@ class TestOrthogonality:
         assert singular_values.min() > _BAND_LOW
         assert singular_values.max() < _BAND_HIGH
 
-    @pytest.mark.parametrize(
-        "shape",
-        [
-            pytest.param((64, 64), id="square"),
-            pytest.param((32, 128), id="wide"),
-            pytest.param((128, 32), id="tall"),
-        ],
-    )
+    @pytest.mark.parametrize("shape", _LARGE_SHAPES)
     def test_no_blowup_on_raw_random(self, shape: tuple[int, int]) -> None:
         """A raw random matrix is never expanded (top singular value < 1.5, no NaN)."""
         result = orthogonalize(torch.randn(*shape))
@@ -122,9 +115,8 @@ class TestOrthogonality:
     def test_singular_vectors_preserved(self) -> None:
         """For ``M = U S V^T`` with known U, V, ``U^T R V`` is diagonal.
 
-        Orthogonalization rescales the singular values but must leave the left and
-        right singular vectors untouched, so the off-diagonal energy of
-        ``U^T R V`` is negligible.
+        Orthogonalization rescales the singular values but must leave the left and right singular vectors untouched, so
+        the off-diagonal energy of ``U^T R V`` is negligible.
         """
         rows, cols = 48, 32
         u = torch.linalg.qr(torch.randn(rows, cols))[0]
@@ -171,11 +163,10 @@ class TestEdgeCases:
     def test_float64_not_demoted_to_float32(self) -> None:
         """A float64 input keeps float64 arithmetic instead of being computed at fp32.
 
-        The iteration used to cast every input to float32 unconditionally, then return
-        the fp32 answer wearing the caller's dtype. A magnitude float64 holds and float32
-        does not makes that visible rather than merely imprecise: ``1e200`` overflows the
-        fp32 range, so the normalization divided infinity by infinity and every entry
-        came back NaN under a ``torch.float64`` dtype that claimed otherwise.
+        The iteration used to cast every input to float32 unconditionally, then return the fp32 answer wearing the
+        caller's dtype. A magnitude float64 holds and float32 does not makes that visible rather than merely imprecise:
+        ``1e200`` overflows the fp32 range, so the normalization divided infinity by infinity and every entry came back
+        NaN under a ``torch.float64`` dtype that claimed otherwise.
         """
         matrix = torch.eye(4, dtype=torch.float64) * 1e200
 
@@ -187,10 +178,9 @@ class TestEdgeCases:
     def test_float16_promotes_to_float32(self) -> None:
         """A half-precision input is computed at float32, which is the A5/AMP gate.
 
-        The float64 fix promotes rather than pins, so this is the half it must not have
-        broken: fp16 is narrower than float32 and the iteration's ``x @ x.T`` products
-        overflow its range readily, which is why the promotion existed at all. The
-        returned dtype is still the caller's.
+        The float64 fix promotes rather than pins, so this is the half it must not have broken: fp16 is narrower than
+        float32 and the iteration's ``x @ x.T`` products overflow its range readily, which is why the promotion existed
+        at all. The returned dtype is still the caller's.
         """
         matrix = torch.randn(32, 64).to(torch.float16)
 
@@ -203,14 +193,7 @@ class TestEdgeCases:
 class TestNativeBatch:
     """Native batched products keep every matrix slice independent."""
 
-    @pytest.mark.parametrize(
-        "shape",
-        [
-            pytest.param((4, 4), id="square"),
-            pytest.param((4, 7), id="wide"),
-            pytest.param((7, 4), id="tall"),
-        ],
-    )
+    @pytest.mark.parametrize("shape", _SLICE_SHAPES)
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
     def test_matches_per_matrix_loop(self, shape: tuple[int, int], dtype: torch.dtype) -> None:
         """A native batch matches independent scalar iterations across shapes and dtypes."""
@@ -231,14 +214,12 @@ class TestNativeBatch:
     def test_rank_deficient_batch_matches_loop_within_looser_bound(self) -> None:
         """Rank-1 float32 slices agree with the scalar loop at a looser bound than full-rank ones.
 
-        The batch carries its own copy of the iteration, so it must still follow the
-        scalar one on a slice with a null space, where rounding differences are
-        amplified rather than damped. Measured on CPU with torch 2.14.1 over ten seeds of three
-        ``64 x 576`` rank-1 slices, the largest gap with ``rtol = atol`` was ``2.4e-6``,
-        which is already past the full-rank ``2e-6`` bound in
-        :meth:`test_matches_per_matrix_loop`. This bound is ``1e-5``, about four times
-        that. Much smaller slices amplify further: ``4 x 7`` rank-1 slices measured up to
-        ``1.3e-5`` in the same sweep, so this bound belongs to the shape used here.
+        The batch carries its own copy of the iteration, so it must still follow the scalar one on a slice with a null
+        space, where rounding differences are amplified rather than damped. Measured on CPU with torch 2.14.1 over ten
+        seeds of three ``64 x 576`` rank-1 slices, the largest gap with ``rtol = atol`` was ``2.4e-6``, which is already
+        past the full-rank ``2e-6`` bound in :meth:`test_matches_per_matrix_loop`. This bound is ``1e-5``, about four
+        times that. Much smaller slices amplify further: ``4 x 7`` rank-1 slices measured up to ``1.3e-5`` in the same
+        sweep, so this bound belongs to the shape used here.
         """
         batch = torch.stack([_rank_deficient(64, 576, 1, torch.float32) for _ in range(3)])
 
@@ -258,10 +239,9 @@ class TestNativeBatch:
     def test_zero_slice_stays_finite_and_matches_loop(self) -> None:
         """An all-zero slice orthogonalizes to zeros and leaves its neighbours' answers alone.
 
-        The batched function carries its own copy of the normalization, so the scalar
-        function's zero-matrix guarantee (``eps`` keeps ``0 / (0 + eps)`` finite) is not
-        inherited. A zero slice that produced NaN would not stay in its slice: the next
-        optimizer step would write it into that parameter's weights.
+        The batched function carries its own copy of the normalization, so the scalar function's zero-matrix guarantee
+        (``eps`` keeps ``0 / (0 + eps)`` finite) is not inherited. A zero slice that produced NaN would not stay in its
+        slice: the next optimizer step would write it into that parameter's weights.
         """
         zero = torch.zeros(4, 7)
         batch = torch.stack([zero, _random_conditioned(4, 7, torch.float32), _random_conditioned(4, 7, torch.float32)])
@@ -283,11 +263,10 @@ class TestNativeBatch:
     def test_half_precision_computed_at_float32_and_returned_in_kind(self, dtype: torch.dtype) -> None:
         """A half-precision batch comes back finite in its own dtype, computed as if it were float32.
 
-        Half inputs are promoted for the arithmetic and cast back at the end, which is
-        the A5/AMP gate the scalar function already keeps. The reference is the same
-        batch widened to float32 by the caller and narrowed afterwards: promotion on
-        entry makes the two computations identical, so any difference means some step
-        ran at half precision.
+        Half inputs are promoted for the arithmetic and cast back at the end, which is the A5/AMP gate the scalar
+        function already keeps. The reference is the same batch widened to float32 by the caller and narrowed
+        afterwards: promotion on entry makes the two computations identical, so any difference means some step ran at
+        half precision.
         """
         batch = torch.stack([_random_conditioned(8, 16, dtype) for _ in range(3)])
 
@@ -301,10 +280,9 @@ class TestNativeBatch:
     def test_float64_not_demoted_to_float32(self) -> None:
         """A float64 batch keeps float64 arithmetic: a magnitude fp32 cannot hold stays finite.
 
-        Mirrors the scalar function's regression for the batched copy. ``1e200`` is
-        outside the fp32 range, so a batch silently computed at fp32 would divide
-        infinity by infinity and return NaN under a float64 dtype that claims otherwise.
-        The neighbour at unit scale also checks that one huge slice does not leak into it.
+        Mirrors the scalar function's regression for the batched copy. ``1e200`` is outside the fp32 range, so a batch
+        silently computed at fp32 would divide infinity by infinity and return NaN under a float64 dtype that claims
+        otherwise. The neighbour at unit scale also checks that one huge slice does not leak into it.
         """
         batch = torch.stack([torch.eye(4, dtype=torch.float64) * 1e200, torch.eye(4, dtype=torch.float64)])
 
@@ -313,23 +291,15 @@ class TestNativeBatch:
         assert result.dtype == torch.float64
         assert torch.isfinite(result).all()
 
-    @pytest.mark.parametrize(
-        "shape",
-        [
-            pytest.param((4, 4), id="square"),
-            pytest.param((4, 7), id="wide"),
-            pytest.param((7, 4), id="tall"),
-        ],
-    )
+    @pytest.mark.parametrize("shape", _SLICE_SHAPES)
     def test_float64_matches_per_matrix_loop_at_default_tolerance(self, shape: tuple[int, int]) -> None:
         """In float64 the native batch agrees with the scalar loop at ``assert_close``'s own float64 bounds.
 
-        :meth:`test_matches_per_matrix_loop` shares one float32-sized bound between both
-        dtypes, which cannot show that float64 is any tighter. Reassociating a product
-        in float64 moves the result by rounding noise orders of magnitude below that
-        bound, so the stricter default holds here and catches a formula difference the
-        shared bound is loose enough to hide: dropping ``eps`` from the batched
-        normalization passes the shared bound and fails this test.
+        :meth:`test_matches_per_matrix_loop` shares one float32-sized bound between both dtypes, which cannot show that
+        float64 is any tighter. Reassociating a product in float64 moves the result by rounding noise orders of
+        magnitude below that bound, so the stricter default holds here and catches a formula difference the shared bound
+        is loose enough to hide: dropping ``eps`` from the batched normalization passes the shared bound and fails this
+        test.
         """
         batch = torch.stack([_random_conditioned(*shape, torch.float64) for _ in range(3)])
 
@@ -353,12 +323,11 @@ class TestNativeBatch:
     def test_reaches_baddbmm_twice_per_step(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The native batch dispatches through ``torch.baddbmm``, not a per-slice loop.
 
-        :meth:`test_matches_per_matrix_loop` pins the output against the scalar
-        :func:`orthogonalize` loop it replaces, but a silent reversion to ``torch.vmap``
-        dispatching that same scalar expression would still match it value for value.
-        This pins the mechanism directly: each of ``steps`` iterations calls
-        :func:`torch.baddbmm` exactly twice (the polynomial, then the update), so a
-        reversion that keeps the public signature and the numbers right is still caught.
+        :meth:`test_matches_per_matrix_loop` pins the output against the scalar :func:`orthogonalize` loop it replaces,
+        but a silent reversion to ``torch.vmap`` dispatching that same scalar expression would still match it value for
+        value. This pins the mechanism directly: each of ``steps`` iterations calls :func:`torch.baddbmm` exactly twice
+        (the polynomial, then the update), so a reversion that keeps the public signature and the numbers right is
+        still caught.
         """
         calls = 0
         real = torch.baddbmm
@@ -403,11 +372,10 @@ class TestInputValidation:
     def test_steps_below_one_raises(self, steps: int) -> None:
         """A step count that runs no iteration raises ValueError naming ``steps``.
 
-        ``range(0)`` and ``range(-1)`` are both empty, so the loop was skipped and the
-        Frobenius-normalized *input* came back wearing this function's name: a matrix
-        whose singular values are the input's rescaled, not driven anywhere near 1.
-        :class:`~lucid_yolo.optim.musgd.MuSGD` has always refused ``ns_steps < 1``, so
-        the guard existed only on the caller's side of a public function (WP-171).
+        ``range(0)`` and ``range(-1)`` are both empty, so the loop was skipped and the Frobenius-normalized *input* came
+        back wearing this function's name: a matrix whose singular values are the input's rescaled, not driven anywhere
+        near 1. :class:`~lucid_yolo.optim.musgd.MuSGD` has always refused ``ns_steps < 1``, so the guard existed only on
+        the caller's side of a public function (WP-171).
         """
         matrix = torch.randn(16, 16)
 
@@ -417,9 +385,8 @@ class TestInputValidation:
     def test_single_step_moves_singular_values(self) -> None:
         """``steps=1`` is accepted and is not a no-op, which is what makes 1 the boundary.
 
-        The refusal above is a claim about where the usable range starts; asserting the
-        first accepted value does something distinguishes that boundary from an
-        off-by-one that would have rejected a working configuration.
+        The refusal above is a claim about where the usable range starts; asserting the first accepted value does
+        something distinguishes that boundary from an off-by-one that would have rejected a working configuration.
         """
         matrix = _random_conditioned(16, 16, torch.float32)
 

@@ -1,16 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Plumbing shared by the repo-content checkers in this directory.
 
-Every checker used to define ``REPO_ROOT``, hand-roll a ``--repo-root`` option, walk a
-tree with a sorted ``rglob`` and print the same ``<name> FAILED: N ...`` block; those four
-live here so the wording is written once, and a checker that gains a fifth copy has
-somewhere to go instead.
+Every checker used to define ``REPO_ROOT``, hand-roll a ``--repo-root`` option, walk a tree with a sorted ``rglob``
+and print the same ``<name> FAILED: N ...`` block; those four live here so the wording is written once, and a checker
+that gains a fifth copy has somewhere to go instead.
 
-Importing it: a checker is run as ``python scripts/lint/x.py``, which puts ``scripts/lint``
-first on ``sys.path`` and would let a plain ``from _common import ...`` resolve -- but mypy
-cannot find a module that way, so each checker puts the repository root on ``sys.path``
-and imports ``scripts.lint._common``, which resolves for the hook, for a test that loads
-the checker by path, and for the type checker alike.
+Importing it: a checker is run as ``python scripts/lint/x.py``, which puts ``scripts/lint`` first on ``sys.path``
+and would let a plain ``from _common import ...`` resolve -- but mypy cannot find a module that way, so each checker
+puts the repository root on ``sys.path`` and imports ``scripts.lint._common``, which resolves for the hook, for a
+test that loads the checker by path, and for the type checker alike.
 """
 
 from __future__ import annotations
@@ -20,11 +18,10 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
-#: Repository root (``scripts/lint/`` is two levels below it), resolved from this file rather
-#: than from the process. Every checker's paths and ``git`` calls are anchored here: read from
-#: the working directory instead, a checker answers about wherever it happens to be standing —
-#: from a subdirectory it dies on a table it cannot find, and from another checkout it would
-#: validate that checkout's history and report clean.
+#: Repository root (``scripts/lint/`` is two levels below it), resolved from this file rather than from the process.
+#: Every checker's paths and ``git`` calls are anchored here: read from the working directory instead, a checker
+#: answers about wherever it happens to be standing — from a subdirectory it dies on a table it cannot find, and
+#: from another checkout it would validate that checkout's history and report clean.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 

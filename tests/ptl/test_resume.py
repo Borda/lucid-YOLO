@@ -1,39 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
 """Deterministic checkpoint-and-resume tests for the detection loop (WP-039).
 
-Covers the DoD ``test_trajectory_match`` — a seeded, uninterrupted four-epoch
-:meth:`~pytorch_lightning.Trainer.fit` and a seeded run interrupted at a
-two-epoch checkpoint then resumed to four epochs produce the **same** per-step
-training-loss trajectory over the post-resume epochs — plus the supporting
-continuity contracts: after resume the trainer's ``global_step`` and
-``current_epoch`` continue from the checkpoint rather than restarting, and the
-:class:`~lucid_yolo.optim.musgd.MuSGD` momentum buffers are restored (the
-optimizer state is non-empty), so the resumed run continues the same momentum
-rather than re-warming from zero.
+Covers the DoD ``test_trajectory_match`` — a seeded, uninterrupted four-epoch :meth:`~pytorch_lightning.Trainer.fit` and
+a seeded run interrupted at a two-epoch checkpoint then resumed to four epochs produce the **same** per-step
+training-loss trajectory over the post-resume epochs — plus the supporting continuity contracts: after resume the
+trainer's ``global_step`` and ``current_epoch`` continue from the checkpoint rather than restarting, and the
+:class:`~lucid_yolo.optim.musgd.MuSGD` momentum buffers are restored (the optimizer state is non-empty), so the resumed
+run continues the same momentum rather than re-warming from zero.
 
-Determinism is made trivial to reason about: the data stream is a fixed
-in-memory :class:`~torch.utils.data.Dataset` of precomputed samples served with
-``shuffle=False`` (so run A epoch 3 and run B's post-resume epoch 3 see the same
-batches in the same order, without relying on sampler-state restoration, which
-is out of this WP's scope), the trainer runs on CPU with ``deterministic=True``,
-and the module carries no stochastic forward path, so the only state that must
-cross the checkpoint boundary is the module weights and the optimizer momentum
-buffers.
+Determinism is made trivial to reason about: the data stream is a fixed in-memory :class:`~torch.utils.data.Dataset` of
+precomputed samples served with ``shuffle=False`` (so run A epoch 3 and run B's post-resume epoch 3 see the same batches
+in the same order, without relying on sampler-state restoration, which is out of this WP's scope), the trainer runs on
+CPU with ``deterministic=True``, and the module carries no stochastic forward path, so the only state that must cross
+the checkpoint boundary is the module weights and the optimizer momentum buffers.
 
-The interruption is modelled the way a real one happens: every run — reference,
-interrupted, and resumed — is configured with the same ``max_epochs=4``, and the
-interrupted run is merely *stopped early* after two epochs (via a
-``should_stop`` callback) before its checkpoint is saved. Keeping ``max_epochs``
-fixed matters because the alpha ramp (WP-035) is a pure function of
-``current_epoch`` and ``max_epochs``: a differently-configured
-``Trainer(max_epochs=2)`` would ramp alpha to its endpoint by epoch 1 and so
-train the pre-checkpoint epochs on a *different* objective, producing a
-checkpoint whose trajectory could never rejoin the reference. Alpha itself is
-not checkpointed state — it is recomputed each epoch — so no restoration is
-needed once ``max_epochs`` matches.
+The interruption is modelled the way a real one happens: every run — reference, interrupted, and resumed — is
+configured with the same ``max_epochs=4``, and the interrupted run is merely *stopped early* after two epochs (via a
+``should_stop`` callback) before its checkpoint is saved. Keeping ``max_epochs`` fixed matters because the alpha ramp
+(WP-035) is a pure function of ``current_epoch`` and ``max_epochs``: a differently-configured ``Trainer(max_epochs=2)``
+would ramp alpha to its endpoint by epoch 1 and so train the pre-checkpoint epochs on a *different* objective,
+producing a checkpoint whose trajectory could never rejoin the reference. Alpha itself is not checkpointed state — it
+is recomputed each epoch — so no restoration is needed once ``max_epochs`` matches.
 
-The module is built at n-scale multipliers with a low channel cap and a 64-px
-input so the real backbone/neck/head stack trains in seconds on CPU.
+The module is built at n-scale multipliers with a low channel cap and a 64-px input so the real
+backbone/neck/head stack trains in seconds on CPU.
 """
 
 from __future__ import annotations

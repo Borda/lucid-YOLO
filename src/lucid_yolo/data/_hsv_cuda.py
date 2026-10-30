@@ -1,15 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Restore deferred CUDA colour in one pixel pass from the existing expressions.
 
-The training hook already owns a quantization boundary after HSV. The kernel
-keeps each floating operation's order, uses precise division where the existing
-operands are tensors, and disables multiply-add contraction. Only the rounded
-uint8 codes survive that boundary; they are restored with CUDA's existing
-host-scalar reciprocal and stored directly in the consumer's channels-last layout.
-Triton is optional: importing this module without it leaves the native path usable.
-A toolchain that imports but cannot compile or launch the kernel is found out on the
-first launch, which warns once and leaves the native restore in charge for the rest of
-the process.
+The training hook already owns a quantization boundary after HSV. The kernel keeps each floating operation's order,
+uses precise division where the existing operands are tensors, and disables multiply-add contraction. Only the
+rounded uint8 codes survive that boundary; they are restored with CUDA's existing host-scalar reciprocal and stored
+directly in the consumer's channels-last layout. Triton is optional: importing this module without it leaves the
+native path usable. A toolchain that imports but cannot compile or launch the kernel is found out on the first
+launch, which warns once and leaves the native restore in charge for the rest of the process.
 """
 
 import os
@@ -53,10 +50,9 @@ class _LaunchLatch:
     state: _LaunchState = _LaunchState.UNKNOWN
 
 
-#: The first launch compiles the kernel and builds Triton's host launcher, both of which
-#: depend on the installed toolchain, so that launch decides once per process whether the
-#: fused restore is usable. A failure after a verified launch is not a toolchain question
-#: and propagates.
+#: The first launch compiles the kernel and builds Triton's host launcher, both of which depend on the installed
+#: toolchain, so that launch decides once per process whether the fused restore is usable. A failure after a
+#: verified launch is not a toolchain question and propagates.
 _LATCH = _LaunchLatch()
 
 if _AVAILABLE:
@@ -158,12 +154,10 @@ if _AVAILABLE:
 def _host_compiler_available() -> bool:
     """Report whether a host C compiler for Triton's launcher is on ``PATH``.
 
-    A CUDA runtime install need not carry a C compiler. Respect an explicit
-    ``CC`` first, then the GCC/Clang discovery the launcher needs; the decision
-    is process-wide metadata, not a scan or device synchronization per batch.
-    Finding a compiler is necessary, not sufficient: one that cannot build the
-    launcher fails the first launch instead, which :func:`_guarded_launch` turns
-    into the native fallback.
+    A CUDA runtime install need not carry a C compiler. Respect an explicit ``CC`` first, then the GCC/Clang
+    discovery the launcher needs; the decision is process-wide metadata, not a scan or device synchronization
+    per batch. Finding a compiler is necessary, not sufficient: one that cannot build the launcher fails the first
+    launch instead, which :func:`_guarded_launch` turns into the native fallback.
     """
     compiler = os.environ.get("CC")
     return bool(shutil.which(compiler)) if compiler else bool(shutil.which("gcc") or shutil.which("clang"))
@@ -190,15 +184,13 @@ def _launch_kernel(images: Tensor, gains: Tensor, out: Tensor) -> None:
 def _guarded_launch(images: Tensor, gains: Tensor) -> Tensor | None:
     """Run the fused restore, or return ``None`` for good once its first launch has failed.
 
-    The first launch is where a toolchain that imports but cannot compile the kernel
-    or build its launcher shows itself. Pixels are identical on either path, so that
-    failure costs only speed: it is reported once, with its cause, and latched, and
-    every later call returns ``None`` for the native restore. After a launch has
+    The first launch is where a toolchain that imports but cannot compile the kernel or build its launcher
+    shows itself. Pixels are identical on either path, so that failure costs only speed: it is reported once,
+    with its cause, and latched, and every later call returns ``None`` for the native restore. After a launch has
     succeeded, an exception is no longer a toolchain question and propagates.
 
     Args:
-        images: Contiguous ``(B, 3, H, W)`` float32 images already accepted by
-            :func:`_restore_hsv_cuda`.
+        images: Contiguous ``(B, 3, H, W)`` float32 images already accepted by :func:`_restore_hsv_cuda`.
         gains: Contiguous ``(B, 3)`` float64 gains on the image device.
 
     Returns:
@@ -230,12 +222,10 @@ def _guarded_launch(images: Tensor, gains: Tensor) -> Tensor | None:
 def _restore_hsv_cuda(images: Tensor, gains: Tensor) -> Tensor | None:
     """Return the fused consumer batch when this CUDA backend supports the inputs.
 
-    The native restore remains the fallback for missing Triton, other devices,
-    non-contiguous inputs, capture scopes and other precision modes, and for the rest
-    of the process once a first compile or launch has failed (:func:`_guarded_launch`).
-    No tensor or output buffer is cached: the JIT owns compiled code, while every call
-    returns fresh image storage.
-    The device guard preserves a caller's current device on multi-GPU processes.
+    The native restore remains the fallback for missing Triton, other devices, non-contiguous inputs, capture scopes
+    and other precision modes, and for the rest of the process once a first compile or launch has failed
+    (:func:`_guarded_launch`). No tensor or output buffer is cached: the JIT owns compiled code, while every call
+    returns fresh image storage. The device guard preserves a caller's current device on multi-GPU processes.
 
     Args:
         images: Contiguous ``(B, 3, H, W)`` float32 geometric images.

@@ -1,20 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-014 COCO dataset, datamodule and ``check-data`` script.
 
-All dataset/datamodule tests run offline against the WP-007 synthetic
-detection/segmentation fixture (``detseg_fixture_dir``), never real COCO. They
-cover: dataset length, sample dtype/range, ``xywh``->``xyxy`` conversion within
-image bounds, box/polygon agreement, contiguous label remapping, the size-aware
-scale policy, a train/val datamodule smoke (batch stacking + ragged target list),
-seeded determinism, and the importable ``check_data`` layout validator (both the
-matching and the mismatching path, without spawning a subprocess).
+All dataset/datamodule tests run offline against the WP-007 synthetic detection/segmentation fixture
+(``detseg_fixture_dir``), never real COCO. They cover: dataset length, sample dtype/range, ``xywh``->``xyxy``
+conversion within image bounds, box/polygon agreement, contiguous label remapping, the size-aware scale policy, a
+train/val datamodule smoke (batch stacking + ragged target list), seeded determinism, and the importable ``check_data``
+layout validator (both the matching and the mismatching path, without spawning a subprocess).
 
-Hand-built COCO payloads cover the parsing rules the fixture cannot exercise, since
-its annotations are all single-ring, in-canvas and keypoint-free: which ring a
-multi-ring polygon keeps and where that instance's box then comes from (M-38), the
-per-image nature of that rule, the drop of an instance whose box clamps to no extent
-(L-30), the named error a keypoint run gets from an annotation with no points (L-29),
-and the ``image_ids`` a position-pairing consumer reads identity from.
+Hand-built COCO payloads cover the parsing rules the fixture cannot exercise, since its annotations are all
+single-ring, in-canvas and keypoint-free: which ring a multi-ring polygon keeps and where that instance's box then
+comes from (M-38), the per-image nature of that rule, the drop of an instance whose box clamps to no extent (L-30), the
+named error a keypoint run gets from an annotation with no points (L-29), and the ``image_ids`` a position-pairing
+consumer reads identity from.
 """
 
 from __future__ import annotations
@@ -24,11 +21,13 @@ import json
 import os
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 
 import pytest
 import torch
 from PIL import Image
 from pytorch_lightning import LightningModule, Trainer
+from reader_sample_helpers import assert_same_sample, count_decodes
 from torchvision.io import write_png
 
 from lucid_yolo.cli import data as data_cli
@@ -81,6 +80,19 @@ def _first_nonempty(dataset: CocoDetectionDataset) -> tuple[torch.Tensor, Target
     raise AssertionError("fixture unexpectedly has no annotated images")
 
 
+def _failing_read_image(path: str, mode: object) -> torch.Tensor:
+    """Stand in for the image decoder by failing on the first file it is asked to read.
+
+    Examples:
+        >>> try:
+        ...     _failing_read_image("a.png", None)
+        ... except RuntimeError as exc:
+        ...     str(exc)
+        'simulated decode failure'
+    """
+    raise RuntimeError("simulated decode failure")
+
+
 def test_length_matches_fixture(detseg_fixture_dir: Path) -> None:
     """The dataset length equals the fixture image count."""
     dataset = _dataset(detseg_fixture_dir)
@@ -100,14 +112,7 @@ def test_opt_in_cache_decodes_once_and_keeps_returned_images_independent(
 ) -> None:
     """The eager cache pays one decode per file and never exposes mutable cached storage."""
     split = detseg_fixture_dir / "train"
-    calls: list[str] = []
-    incumbent = image_data.read_image
-
-    def counted_read_image(path: str, mode: object) -> torch.Tensor:
-        calls.append(path)
-        return incumbent(path, mode)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(image_data, "read_image", counted_read_image)
+    calls = count_decodes(monkeypatch)
     dataset = CocoDetectionDataset(split, split / "_annotations.coco.json", cache_images=True)
     assert len(calls) == len(dataset)
     assert dataset._image_cache is not None
@@ -128,9 +133,9 @@ def test_opt_in_cache_deduplicates_repeated_coco_file_names(
 ) -> None:
     """Two COCO records naming one file retain one decoded tensor, not two copies.
 
-    The decode count proves one copy; it does not prove both records are served from it.
-    Locating the two positions by file name — records are sorted by id, so the duplicate
-    need not sit beside its original — and comparing their pixels closes that gap.
+    The decode count proves one copy; it does not prove both records are served from it. Locating the two positions by
+    file name — records are sorted by id, so the duplicate need not sit beside its original — and comparing their
+    pixels closes that gap.
     """
     split = detseg_fixture_dir / "train"
     source = split / "_annotations.coco.json"
@@ -140,14 +145,8 @@ def test_opt_in_cache_deduplicates_repeated_coco_file_names(
     payload["images"].append(duplicate)
     annotation_file = tmp_path / "instances.json"
     annotation_file.write_text(json.dumps(payload))
-    calls: list[str] = []
-    incumbent = image_data.read_image
+    calls = count_decodes(monkeypatch)
 
-    def counted_read_image(path: str, mode: object) -> torch.Tensor:
-        calls.append(path)
-        return incumbent(path, mode)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(image_data, "read_image", counted_read_image)
     dataset = CocoDetectionDataset(split, annotation_file, cache_images=True)
     first, second = (index for index, name in enumerate(dataset.file_names) if name == duplicate["file_name"])
 
@@ -158,30 +157,13 @@ def test_opt_in_cache_deduplicates_repeated_coco_file_names(
     assert torch.equal(dataset[first][0], dataset[second][0])
 
 
-def _assert_same_sample(left: tuple[torch.Tensor, Targets], right: tuple[torch.Tensor, Targets]) -> None:
-    """Assert two reader samples agree on the image and on every ``Targets`` field.
-
-    Examples:
-        >>> sample = (torch.zeros(3, 2, 2), Targets.empty())
-        >>> _assert_same_sample(sample, sample)
-    """
-    assert torch.equal(left[0], right[0]), "the images differ"
-    for field in dataclasses.fields(left[1]):
-        got, want = getattr(left[1], field.name), getattr(right[1], field.name)
-        if isinstance(got, list):
-            assert len(got) == len(want), f"{field.name} has a different length"
-            assert all(torch.equal(a, b) for a, b in zip(got, want, strict=True)), f"{field.name} differs"
-        else:
-            assert torch.equal(got, want), f"{field.name} differs"
-
-
 def test_cached_reader_returns_same_sample_as_uncached_reader_at_every_index(
     detseg_fixture_dir: Path,
 ) -> None:
     """Switching the cache on changes nothing any index returns, image or target.
 
-    The fixture's 16 images are distinct synthetic scenes with non-zero pixels, so a cache
-    that served the wrong file's bytes, or altered a value, cannot match by being all zeros.
+    The fixture's 16 images are distinct synthetic scenes with non-zero pixels, so a cache that served the wrong file's
+    bytes, or altered a value, cannot match by being all zeros.
     """
     split = detseg_fixture_dir / "train"
     uncached = CocoDetectionDataset(split, split / "_annotations.coco.json")
@@ -193,22 +175,20 @@ def test_cached_reader_returns_same_sample_as_uncached_reader_at_every_index(
     assert cached._image_cache is not None
     assert len(cached) == len(uncached)
     for index in range(len(uncached)):
-        _assert_same_sample(cached[index], uncached[index])
+        assert_same_sample(cached[index], uncached[index])
 
 
 class TestImageCacheReport:
     """What :meth:`CocoDetectionDataset.cache_images` tells an operator before the decode starts."""
 
-    def test_progress_reports_size_estimate_before_first_decode(
-        self, detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    @patch.object(image_data, "read_image", _failing_read_image)
+    def test_progress_reports_size_estimate_before_first_decode(self, detseg_fixture_dir: Path) -> None:
         """With ``progress`` on, the estimate is out before any image is decoded.
 
-        An undersized host dies part-way through the decode with an out-of-memory kill and
-        no Python error, so the figure only helps if it comes first. A decode failing on the
-        very first file stands in for that kill: the warning must already have been issued,
-        naming ``3 * height * width`` summed over the distinct files at the sizes the
-        annotation file states, and the reader must be left uncached rather than half-filled.
+        An undersized host dies part-way through the decode with an out-of-memory kill and no Python error, so the
+        figure only helps if it comes first. A decode failing on the very first file stands in for that kill: the
+        warning must already have been issued, naming ``3 * height * width`` summed over the distinct files at the
+        sizes the annotation file states, and the reader must be left uncached rather than half-filled.
         """
         split = detseg_fixture_dir / "train"
         annotation_file = split / "_annotations.coco.json"
@@ -216,11 +196,6 @@ class TestImageCacheReport:
             3 * image["height"] * image["width"] for image in json.loads(annotation_file.read_text())["images"]
         )
         dataset = CocoDetectionDataset(split, annotation_file)
-
-        def failing_read_image(path: str, mode: object) -> torch.Tensor:
-            raise RuntimeError("simulated decode failure")
-
-        monkeypatch.setattr(image_data, "read_image", failing_read_image)
 
         with pytest.warns(UserWarning, match=rf"\({expected:,} bytes\)"), pytest.raises(OSError, match="simulated"):
             dataset.cache_images(progress=True)
@@ -231,8 +206,8 @@ class TestImageCacheReport:
     ) -> None:
         """Opting into the cache at construction issues no size report.
 
-        A library caller that asks for the cache has made its own memory decision; the
-        report is the datamodule's to turn on, not a warning every direct reader pays.
+        A library caller that asks for the cache has made its own memory decision; the report is the datamodule's to
+        turn on, not a warning every direct reader pays.
         """
         split = detseg_fixture_dir / "train"
 
@@ -244,9 +219,9 @@ class TestImageCacheReport:
 def test_16_bit_png_reads_same_cached_or_not(tmp_path: Path) -> None:
     """A 16-bit PNG is cached as the ``uint16`` it decodes to and reads back exactly as uncached.
 
-    ``read_image`` keeps 16 bits per channel, so such an entry takes twice the 8-bit budget
-    the docs state. How those values are scaled is shared by both paths and out of scope
-    here; the pin is only that switching the cache on changes nothing a draw returns.
+    ``read_image`` keeps 16 bits per channel, so such an entry takes twice the 8-bit budget the docs state. How those
+    values are scaled is shared by both paths and out of scope here; the pin is only that switching the cache on
+    changes nothing a draw returns.
     """
     deep = Image.new("I;16", (6, 4))
     deep.putdata([value * 1000 for value in range(24)])
@@ -290,9 +265,9 @@ def _single_image_annotations(root: Path, file_name: str, *, height: int, width:
 def test_16_bit_png_scales_by_its_own_depth(tmp_path: Path) -> None:
     """A 16-bit PNG reads into ``[0, 1]`` by its own maximum, 65535, rather than by 255.
 
-    ``read_image`` decodes such a file to ``uint16``. Divided by the 8-bit 255, a code of
-    60000 read as 235.3, which the uint8 transport then clamped to white after HSV and mixup
-    had already run on it; scaled by its own depth it is the 0.9155 grey it was saved as.
+    ``read_image`` decodes such a file to ``uint16``. Divided by the 8-bit 255, a code of 60000 read as 235.3, which the
+    uint8 transport then clamped to white after HSV and mixup had already run on it; scaled by its own depth it is the
+    0.9155 grey it was saved as.
     """
     deep = Image.new("I;16", (6, 4))
     deep.putdata([60000] * 24)
@@ -307,9 +282,9 @@ def test_16_bit_png_scales_by_its_own_depth(tmp_path: Path) -> None:
 def test_8_bit_png_scales_by_255_bit_for_bit(tmp_path: Path) -> None:
     """Every 8-bit code reads back as exactly ``code / 255.0``, the value it always read as.
 
-    The depth-aware scale divides by ``iinfo(uint8).max``, which is 255: every pixel this
-    reader produced before the 16-bit fix, and every golden recorded from one, must survive
-    it unchanged, so all 256 codes are compared for exact equality rather than closeness.
+    The depth-aware scale divides by ``iinfo(uint8).max``, which is 255: every pixel this reader produced before the
+    16-bit fix, and every golden recorded from one, must survive it unchanged, so all 256 codes are compared for exact
+    equality rather than closeness.
     """
     codes = torch.arange(256, dtype=torch.uint8).reshape(1, 16, 16).expand(3, 16, 16).contiguous()
     write_png(codes, str(tmp_path / "flat.png"))
@@ -355,19 +330,16 @@ def test_ordinary_coco_file_reads_as_nothing_difficult(detseg_fixture_dir: Path)
     assert not bool(targets.difficult.any())
 
 
-@pytest.mark.parametrize("oriented", [pytest.param(False, id="axis-aligned"), pytest.param(True, id="oriented")])
+@pytest.mark.parametrize("oriented", [False, True])
 def test_difficult_key_reaches_targets_channel(tmp_path: Path, oriented: bool) -> None:
     """R18's flag, written per annotation, lands on the A51 channel on both readings.
 
-    The flag says something about the annotation rather than about the box modality, so
-    the oriented and axis-aligned paths must agree on it — the tiled DOTA layout (WP-094)
-    is read oriented, and losing the flag there would silently turn every ignorable
-    ground truth into a scored one at the metric (A48).
+    The flag says something about the annotation rather than about the box modality, so the oriented and axis-aligned
+    paths must agree on it — the tiled DOTA layout (WP-094) is read oriented, and losing the flag there would silently
+    turn every ignorable ground truth into a scored one at the metric (A48).
     """
     split = tmp_path / "val"
     split.mkdir()
-    from torchvision.io import write_png  # noqa: PLC0415 - test-local, the reader does not need it
-
     write_png(torch.zeros(3, 8, 8, dtype=torch.uint8), str(split / "tile.png"))
     quad = [1.0, 1.0, 3.0, 1.0, 3.0, 3.0, 1.0, 3.0]
     (split / "instances.json").write_text(
@@ -401,8 +373,6 @@ def keypoint_coco(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     """Create one image and a mutable two-instance COCO keypoint payload."""
     split = tmp_path / "val"
     split.mkdir()
-    from torchvision.io import write_png  # noqa: PLC0415 - test-local, the reader does not need it
-
     write_png(torch.zeros(3, 8, 8, dtype=torch.uint8), str(split / "pose.png"))
     payload: dict[str, object] = {
         "images": [{"id": 1, "file_name": "pose.png", "height": 8, "width": 8}],
@@ -447,15 +417,14 @@ def keypoint_coco(tmp_path: Path) -> tuple[Path, dict[str, object]]:
 class TestKeypointParsing:
     """Tests for opt-in COCO annotation-level keypoint parsing."""
 
-    @pytest.mark.parametrize("oriented", [pytest.param(False, id="axis-aligned"), pytest.param(True, id="oriented")])
+    @pytest.mark.parametrize("oriented", [False, True])
     def test_coordinates_and_visibility_reach_targets(
         self, keypoint_coco: tuple[Path, dict[str, object]], oriented: bool
     ) -> None:
         """Retained instances produce aligned coordinate and visibility tensors.
 
-        Two usable annotations carry two keypoints each, while crowd and RLE
-        annotations omit the field entirely; only the retained instance axis may
-        be indexed and stacked on either box-reading path.
+        Two usable annotations carry two keypoints each, while crowd and RLE annotations omit the field entirely; only
+        the retained instance axis may be indexed and stacked on either box-reading path.
         """
         split, payload = keypoint_coco
         (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
@@ -472,8 +441,8 @@ class TestKeypointParsing:
     def test_default_ignores_source_keypoints(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
         """The default reader leaves both keypoint channels canonically empty.
 
-        Source data alone must not opt a detection reader into pose parsing, so
-        populated annotation fields still yield the WP-120 dataclass defaults.
+        Source data alone must not opt a detection reader into pose parsing, so populated annotation fields still yield
+        the WP-120 dataclass defaults.
         """
         split, payload = keypoint_coco
         (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
@@ -486,8 +455,8 @@ class TestKeypointParsing:
     def test_malformed_length_names_image(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
         """A non-triplet annotation fails with its image name and bad length.
 
-        Four flat values cannot describe repeating ``x, y, v`` triples; raising
-        during dataset construction prevents a shifted coordinate/visibility split.
+        Four flat values cannot describe repeating ``x, y, v`` triples; raising during dataset construction prevents a
+        shifted coordinate/visibility split.
         """
         split, payload = keypoint_coco
         annotations = payload["annotations"]
@@ -501,8 +470,8 @@ class TestKeypointParsing:
     def test_mismatched_counts_name_both_k_values(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
         """Different per-instance K values fail before stacking one image.
 
-        A rectangular ``(N, K, 2)`` target cannot represent one and two points
-        together, so the reader identifies the image and both observed counts.
+        A rectangular ``(N, K, 2)`` target cannot represent one and two points together, so the reader identifies the
+        image and both observed counts.
         """
         split, payload = keypoint_coco
         annotations = payload["annotations"]
@@ -514,8 +483,8 @@ class TestKeypointParsing:
             CocoDetectionDataset(split, split / "instances.json", keypoints=True)
 
 
-#: R21's seven-point symbol schema, whose sides are named as suffixes. Written out rather
-#: than imported from fuse-augmentations so this suite pins the *reading*, not the producer.
+#: R21's seven-point symbol schema, whose sides are named as suffixes. Written out rather than imported from
+#: fuse-augmentations so this suite pins the *reading*, not the producer.
 _SYMBOL_NAMES = ["center", "apex", "tail", "flank_left", "flank_right", "base_left", "base_right"]
 #: R12's seventeen-point human pose schema, whose sides are named as prefixes.
 _POSE_NAMES = [
@@ -572,10 +541,10 @@ class TestKeypointFlipPairs:
     ) -> None:
         """Both naming conventions in circulation yield their schema's true left/right swap.
 
-        A64 makes the pairing the dataset's to state, and a COCO file states it by naming
-        the sides. The two schemas this project reads spell that differently — ``flank_left``
-        against ``left_eye`` — so a reader that understood only one would silently return no
-        pairs for the other, which is indistinguishable from a genuinely symmetric schema.
+        A64 makes the pairing the dataset's to state, and a COCO file states it by naming the sides. The two schemas
+        this project reads spell that differently — ``flank_left`` against ``left_eye`` — so a reader that understood
+        only one would silently return no pairs for the other, which is indistinguishable from a genuinely symmetric
+        schema.
         """
         split, payload = keypoint_coco
 
@@ -586,8 +555,8 @@ class TestKeypointFlipPairs:
     def test_unsided_schema_yields_none(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
         """A schema naming no left/right point pairs nothing, so the mirror only reflects x.
 
-        ``None`` is the correct answer here rather than a fallback: with no sided landmark
-        there is no identity to swap, and A64 keeps that meaning of ``None`` intact.
+        ``None`` is the correct answer here rather than a fallback: with no sided landmark there is no identity to
+        swap, and A64 keeps that meaning of ``None`` intact.
         """
         split, payload = keypoint_coco
 
@@ -598,8 +567,8 @@ class TestKeypointFlipPairs:
     def test_detection_reader_derives_nothing(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
         """A reader opened without ``keypoints=True`` publishes no pairing even from a named schema.
 
-        The pairing is only meaningful to a run that mirrors points. Deriving it regardless
-        would let a schema flaw irrelevant to a detection run stop that run at construction.
+        The pairing is only meaningful to a run that mirrors points. Deriving it regardless would let a schema flaw
+        irrelevant to a detection run stop that run at construction.
         """
         split, payload = keypoint_coco
         payload["categories"] = [{"id": 1, "name": "thing", "keypoints": _SYMBOL_NAMES}]
@@ -612,9 +581,8 @@ class TestKeypointFlipPairs:
     def test_half_declared_pair_raises(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
         """A name declaring one side with no counterpart is rejected instead of ignored.
 
-        Dropping the unmatched name would mirror that landmark's coordinate while leaving
-        its identity in place — the exact silent left/right corruption A64 exists to
-        prevent, which trains and reports nothing.
+        Dropping the unmatched name would mirror that landmark's coordinate while leaving its identity in place — the
+        exact silent left/right corruption A64 exists to prevent, which trains and reports nothing.
         """
         split, payload = keypoint_coco
         payload["categories"] = [{"id": 1, "name": "thing", "keypoints": ["nose", "left_eye"]}]
@@ -626,8 +594,8 @@ class TestKeypointFlipPairs:
     def test_conflicting_category_schemas_raise(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
         """Two categories declaring different keypoint schemas are rejected, not silently reconciled.
 
-        One permutation is applied to the whole image, so picking either schema's pairing
-        would mis-mirror every instance of the other category.
+        One permutation is applied to the whole image, so picking either schema's pairing would mis-mirror every
+        instance of the other category.
         """
         split, payload = keypoint_coco
         payload["categories"] = [
@@ -644,14 +612,11 @@ class TestKeypointFlipPairs:
 def ringless_coco(tmp_path: Path) -> Path:
     """Create one image and a two-instance COCO payload with no ``segmentation`` key at all.
 
-    Mirrors a bare ``Task.DETECTION`` export (fuse-augmentations never writes a
-    ``segmentation`` field for that task; WP-121b's own report caught this against
-    the fixed ``Task.KEYPOINTS`` export, which has the same shape of gap).
+    Mirrors a bare ``Task.DETECTION`` export (fuse-augmentations never writes a ``segmentation`` field for that task;
+    WP-121b's own report caught this against the fixed ``Task.KEYPOINTS`` export, which has the same shape of gap).
     """
     split = tmp_path / "val"
     split.mkdir()
-    from torchvision.io import write_png  # noqa: PLC0415 - test-local, the reader does not need it
-
     write_png(torch.zeros(3, 8, 8, dtype=torch.uint8), str(split / "plain.png"))
     payload = {
         "images": [{"id": 1, "file_name": "plain.png", "height": 8, "width": 8}],
@@ -671,9 +636,8 @@ class TestRinglessAnnotations:
     def test_plain_reading_keeps_boxes_without_ring(self, ringless_coco: Path) -> None:
         """Both ringless boxes survive and ``polygons`` comes back empty, not one-per-box.
 
-        The fixed-write bug (WP-121b) let a keypoints-only export silently parse to zero
-        instances; this pins the corrected contract for the plainer bare-detection case
-        the same gap applies to.
+        The fixed-write bug (WP-121b) let a keypoints-only export silently parse to zero instances; this pins the
+        corrected contract for the plainer bare-detection case the same gap applies to.
         """
         _, targets = CocoDetectionDataset(ringless_coco, ringless_coco / "instances.json")[0]
 
@@ -683,8 +647,8 @@ class TestRinglessAnnotations:
     def test_oriented_reading_requires_ring(self, ringless_coco: Path) -> None:
         """An oriented reading keeps skipping ringless annotations; it has no other rotated-box source.
 
-        Locks in that relaxing the plain/keypoints path did not loosen ``oriented=True``,
-        which derives both ``boxes`` and ``rboxes`` from the same quadrilateral ring.
+        Locks in that relaxing the plain/keypoints path did not loosen ``oriented=True``, which derives both ``boxes``
+        and ``rboxes`` from the same quadrilateral ring.
         """
         _, targets = CocoDetectionDataset(ringless_coco, ringless_coco / "instances.json", oriented=True)[0]
 
@@ -693,8 +657,8 @@ class TestRinglessAnnotations:
     def test_mask_targets_raises_without_rings(self, ringless_coco: Path) -> None:
         """Rasterising masks off a ring-free image still raises, not silently returns empty masks.
 
-        `instance_mask_targets` is the guard the relaxed parser now depends on to keep a
-        detection-only image from training a segmentation head against nothing.
+        `instance_mask_targets` is the guard the relaxed parser now depends on to keep a detection-only image from
+        training a segmentation head against nothing.
         """
         _, targets = CocoDetectionDataset(ringless_coco, ringless_coco / "instances.json")[0]
 
@@ -710,8 +674,6 @@ def _write_split(split: Path, payload: dict[str, object], *, side: int = 8) -> P
         True
     """
     split.mkdir(parents=True, exist_ok=True)
-    from torchvision.io import write_png  # noqa: PLC0415 - test-local, the reader does not need it
-
     for image in cast("list[dict[str, object]]", payload["images"]):
         write_png(torch.zeros(3, side, side, dtype=torch.uint8), str(split / str(image["file_name"])))
     (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
@@ -724,11 +686,10 @@ class TestMultiRingAnnotations:
     def test_box_retained_ring_not_annotation_bbox(self, tmp_path: Path) -> None:
         """A two-lobe object reads as the lobe whose ring survived, box and mask together.
 
-        COCO writes ``bbox`` as the envelope of *every* ring, so an object split by an
-        occluder gets a box spanning both lobes while this reader keeps only the first.
-        Left as it was, the mask branch was supervised to predict emptiness over the
-        second lobe's pixels while they sat inside that instance's own box — the box and
-        the mask described different objects.
+        COCO writes ``bbox`` as the envelope of *every* ring, so an object split by an occluder gets a box spanning
+        both lobes while this reader keeps only the first. Left as it was, the mask branch was supervised to predict
+        emptiness over the second lobe's pixels while they sat inside that instance's own box — the box and the mask
+        described different objects.
         """
         payload = {
             "images": [{"id": 1, "file_name": "lobes.png", "height": 20, "width": 20}],
@@ -756,10 +717,9 @@ class TestMultiRingAnnotations:
     def test_image_with_any_ringless_instance_keeps_bbox_boxes(self, tmp_path: Path) -> None:
         """Where no polygons survive, boxes stay COCO's own ``bbox`` — the rule is per image.
 
-        ``Targets`` holds 0 or N rings, never a mix, so one ringless instance collapses
-        the whole image's ``polygons``. There is then no mask to stay in lock-step with,
-        and the detection reading wants the annotation's own box; deriving one instance's
-        box from a ring the image does not carry would mix two sources inside one image.
+        ``Targets`` holds 0 or N rings, never a mix, so one ringless instance collapses the whole image's ``polygons``.
+        There is then no mask to stay in lock-step with, and the detection reading wants the annotation's own box;
+        deriving one instance's box from a ring the image does not carry would mix two sources inside one image.
         """
         payload = {
             "images": [{"id": 1, "file_name": "mixed.png", "height": 20, "width": 20}],
@@ -789,10 +749,9 @@ class TestDegenerateBoxes:
     def test_box_clamped_flat_dropped_with_whole_instance(self, tmp_path: Path) -> None:
         """A ``bbox`` outside the canvas clamps to zero width and takes its label and flag with it.
 
-        This is the val/train disagreement the drop closes: the train pipeline's
-        ``instance_keep_mask`` removes such an instance after every warp, while the val
-        path letterboxes and scores it, so the two paths counted different instance sets
-        for the same annotation file.
+        This is the val/train disagreement the drop closes: the train pipeline's ``instance_keep_mask`` removes such an
+        instance after every warp, while the val path letterboxes and scores it, so the two paths counted different
+        instance sets for the same annotation file.
         """
         payload = {
             "images": [{"id": 1, "file_name": "edge.png", "height": 8, "width": 8}],
@@ -812,9 +771,8 @@ class TestDegenerateBoxes:
     def test_keypoint_channels_dropped_in_lock_step(self, tmp_path: Path) -> None:
         """The surviving instance keeps its own points, not the dropped instance's.
 
-        Keypoints are stacked onto the instance axis after the drop, so a filter that
-        forgot the channel would leave ``keypoints[0]`` describing an instance that no
-        longer has a box — a misalignment no shape check would report.
+        Keypoints are stacked onto the instance axis after the drop, so a filter that forgot the channel would leave
+        ``keypoints[0]`` describing an instance that no longer has a box — a misalignment no shape check would report.
         """
         payload = {
             "images": [{"id": 1, "file_name": "edge.png", "height": 8, "width": 8}],
@@ -835,9 +793,8 @@ class TestDegenerateBoxes:
 def test_keypoint_run_names_image_whose_annotation_has_no_points(tmp_path: Path) -> None:
     """A missing ``keypoints`` field raises the reader's named error, not a bare ``KeyError`` (L-29).
 
-    Every neighbouring read in the parser is a defaulted ``.get``; this one was a
-    subscript, so a keypoint run pointed at a detection export died with a key name and
-    no file, image or field context to act on.
+    Every neighbouring read in the parser is a defaulted ``.get``; this one was a subscript, so a keypoint run pointed
+    at a detection export died with a key name and no file, image or field context to act on.
     """
     payload = {
         "images": [{"id": 1, "file_name": "pointless.png", "height": 8, "width": 8}],
@@ -853,10 +810,9 @@ def test_keypoint_run_names_image_whose_annotation_has_no_points(tmp_path: Path)
 def test_image_ids_name_each_loader_position(tmp_path: Path) -> None:
     """``image_ids`` publishes the COCO id at each position, in the reader's sorted order.
 
-    The whole-image tile merge pairs a loader position to a window and today infers the
-    tile's identity from the annotations that landed there — two tiles with identical
-    annotation sets are indistinguishable that way. The id is what lets that pairing be
-    asserted, so it has to be readable off the dataset and aligned with ``__getitem__``.
+    The whole-image tile merge pairs a loader position to a window and today infers the tile's identity from the
+    annotations that landed there — two tiles with identical annotation sets are indistinguishable that way. The id is
+    what lets that pairing be asserted, so it has to be readable off the dataset and aligned with ``__getitem__``.
     """
     payload = {
         "images": [
@@ -877,9 +833,8 @@ def test_image_ids_name_each_loader_position(tmp_path: Path) -> None:
 def test_file_names_and_targets_at_read_position_without_decoding_image(tmp_path: Path) -> None:
     """``file_names`` aligns with ``image_ids``, and ``targets_at`` returns that position's targets alone (WP-189).
 
-    The figure overlay arrives with an image file and wants its labels without the decode
-    ``__getitem__`` performs: the file name is the key it matches on, and ``targets_at``
-    answers from the targets precomputed at construction.
+    The figure overlay arrives with an image file and wants its labels without the decode ``__getitem__`` performs: the
+    file name is the key it matches on, and ``targets_at`` answers from the targets precomputed at construction.
     """
     payload = {
         "images": [
@@ -1089,28 +1044,24 @@ def _datamodule(
     )
 
 
-def test_datamodule_train_batch_smoke(detseg_fixture_dir: Path) -> None:
-    """One training batch, through the transfer hook, stacks images and lists per-image targets."""
+@pytest.mark.parametrize(
+    ("stage", "loader_name"),
+    [
+        pytest.param("fit", "train_dataloader", id="train"),
+        pytest.param("validate", "val_dataloader", id="val-letterboxed"),
+    ],
+)
+def test_datamodule_batch_smoke(detseg_fixture_dir: Path, stage: str, loader_name: str) -> None:
+    """One batch per split, through the transfer hook, stacks images and lists per-image targets.
+
+    The train loader augments and the validation loader is letterbox-only, but both quantize to uint8 through the same
+    collate and both must come back as stacked ``img_size`` float images beside one ``Targets`` per image.
+    """
     datamodule = _datamodule(detseg_fixture_dir)
-    datamodule.setup("fit")
-    batch = next(iter(datamodule.train_dataloader()))
+    datamodule.setup(stage)
+    batch = next(iter(getattr(datamodule, loader_name)()))
     assert isinstance(batch[1], PackedTargets)  # the loader emits the packed transport form
     assert batch[0].dtype == torch.uint8  # transport ships the images as uint8
-    images, targets, _ = datamodule.on_after_batch_transfer(batch, 0)
-    assert images.shape == (2, 3, _SMOKE_IMG_SIZE, _SMOKE_IMG_SIZE)
-    assert images.dtype == torch.float32  # the hook restores float images
-    assert torch.all((images >= 0.0) & (images <= 1.0))
-    assert len(targets) == 2
-    assert all(isinstance(target, Targets) for target in targets)
-
-
-def test_datamodule_val_batch_letterboxed(detseg_fixture_dir: Path) -> None:
-    """One validation batch, through the transfer hook, is letterbox-only and stacks to size."""
-    datamodule = _datamodule(detseg_fixture_dir)
-    datamodule.setup("validate")
-    batch = next(iter(datamodule.val_dataloader()))
-    assert isinstance(batch[1], PackedTargets)  # the loader emits the packed transport form
-    assert batch[0].dtype == torch.uint8  # the val path quantizes to uint8 through the same collate
     images, targets, _ = datamodule.on_after_batch_transfer(batch, 0)
     assert images.shape == (2, 3, _SMOKE_IMG_SIZE, _SMOKE_IMG_SIZE)
     assert images.dtype == torch.float32  # the hook restores float images
@@ -1144,10 +1095,7 @@ def test_datamodule_train_batch_deterministic(detseg_fixture_dir: Path) -> None:
     assert torch.equal(images_a, images_b)
 
 
-@pytest.mark.parametrize(
-    "loader_name",
-    [pytest.param("train_dataloader", id="train"), pytest.param("val_dataloader", id="val")],
-)
+@pytest.mark.parametrize("loader_name", ["train_dataloader", "val_dataloader"])
 def test_dataloader_streaming_kwargs_with_workers(detseg_fixture_dir: Path, loader_name: str) -> None:
     """Worker loaders prefetch deeper, cap worker threads, recycle workers per epoch (WP-076)."""
     datamodule = _datamodule(detseg_fixture_dir, num_workers=2)
@@ -1159,10 +1107,7 @@ def test_dataloader_streaming_kwargs_with_workers(detseg_fixture_dir: Path, load
     assert loader.pin_memory == torch.cuda.is_available()
 
 
-@pytest.mark.parametrize(
-    "loader_name",
-    [pytest.param("train_dataloader", id="train"), pytest.param("val_dataloader", id="val")],
-)
+@pytest.mark.parametrize("loader_name", ["train_dataloader", "val_dataloader"])
 def test_dataloader_persistent_workers_opt_in(detseg_fixture_dir: Path, loader_name: str) -> None:
     """persistent_workers=True keeps both loaders' worker pools alive across epochs."""
     datamodule = _datamodule(detseg_fixture_dir, num_workers=2, persistent_workers=True)
@@ -1226,10 +1171,9 @@ def test_init_worker_caps_threads_without_seedable_dataset(
 def test_worker_loader_augments_differently_each_epoch(detseg_fixture_dir: Path) -> None:
     """Two epochs of a worker-backed train loader must not replay one augmentation stream (WP-079 guard).
 
-    The unit tests above cover ``_init_worker`` in isolation; this one covers the
-    wiring, spawning real workers. Before WP-079 every worker inherited the
-    parent's generator state and rebuilt from it each epoch, so the run drew a
-    single epoch's parameters forever — invisible to every other test.
+    The unit tests above cover ``_init_worker`` in isolation; this one covers the wiring, spawning real workers. Before
+    WP-079 every worker inherited the parent's generator state and rebuilt from it each epoch, so the run drew a single
+    epoch's parameters forever — invisible to every other test.
     """
     datamodule = _datamodule(detseg_fixture_dir, num_workers=2)
     datamodule.setup("fit")
@@ -1257,16 +1201,14 @@ def test_dataloader_num_workers_auto_scales_with_batch(detseg_fixture_dir: Path)
     assert datamodule.train_dataloader().num_workers >= 1
 
 
-def test_named_worker_count_reaches_val_loader(detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(dm, "_shm_capped_workers", lambda workers, *args, **kwargs: workers)
+def test_named_worker_count_reaches_val_loader(detseg_fixture_dir: Path) -> None:
     """A worker count the caller stated is honoured by both loaders when it fits (WP-102).
 
-    The letterbox cap belongs to what this class chose, not to what an operator named:
-    someone writing ``--data.num_workers 8`` has said how much of the machine the run may
-    use, and quietly validating on half of it surfaces as an idle accelerator with no
-    message, which costs more than the host-OOM the cap was avoiding.
+    The letterbox cap belongs to what this class chose, not to what an operator named: someone writing
+    ``--data.num_workers 8`` has said how much of the machine the run may use, and quietly validating on half of it
+    surfaces as an idle accelerator with no message, which costs more than the host-OOM the cap was avoiding.
     """
-    monkeypatch.setattr(dm, "_shm_capped_workers", lambda workers, *args, **kwargs: workers)
-
     datamodule = _datamodule(detseg_fixture_dir, num_workers=8)
     datamodule.setup("fit")
 
@@ -1274,17 +1216,14 @@ def test_named_worker_count_reaches_val_loader(detseg_fixture_dir: Path, monkeyp
     assert datamodule.val_dataloader().num_workers == 8
 
 
-def test_inherited_worker_count_bounded_by_memory_budget(
-    detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@patch.object(dm, "_shm_capped_workers", lambda workers, *args, **kwargs: min(workers, 3))
+def test_inherited_worker_count_bounded_by_memory_budget(detseg_fixture_dir: Path) -> None:
     """A count named for training and inherited by validation still fits the host (WP-103).
 
-    ``--data.num_workers 32`` at 1024 px queues about 51 GB for validation alone, beside
-    a training queue that is still resident at the epoch boundary. The operator stated
-    parallelism; the gigabytes it costs are this class's arithmetic.
+    ``--data.num_workers 32`` at 1024 px queues about 51 GB for validation alone, beside a training queue that is still
+    resident at the epoch boundary. The operator stated parallelism; the gigabytes it costs are this class's
+    arithmetic.
     """
-    monkeypatch.setattr(dm, "_shm_capped_workers", lambda workers, *args, **kwargs: min(workers, 3))
-
     datamodule = _datamodule(detseg_fixture_dir, num_workers=8)
     datamodule.setup("fit")
 
@@ -1293,25 +1232,23 @@ def test_inherited_worker_count_bounded_by_memory_budget(
     assert datamodule.train_dataloader().num_workers == 8
 
 
-def test_named_val_worker_count_bounded_by_nothing(detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(dm, "_shm_capped_workers", lambda workers, *args, **kwargs: 1)
+def test_named_val_worker_count_bounded_by_nothing(detseg_fixture_dir: Path) -> None:
     """``val_num_workers`` stated outright outranks the budget — the flag that says so (WP-103)."""
-    monkeypatch.setattr(dm, "_shm_capped_workers", lambda workers, *args, **kwargs: 1)
-
     datamodule = _datamodule(detseg_fixture_dir, num_workers=8, val_num_workers=6)
     datamodule.setup("fit")
 
     assert datamodule.val_dataloader().num_workers == 6
 
 
-def test_auto_chosen_worker_count_capped_for_val(detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(dm.os, "cpu_count", lambda: 64)
+@patch.object(dm, "_shm_capped_workers", lambda workers, *args: workers)
+def test_auto_chosen_worker_count_capped_for_val(detseg_fixture_dir: Path) -> None:
     """When the count was this class's own guess, the cap still applies (WP-073).
 
-    The library owns the consequences of a number it picked, and the resident worker
-    population doubling at every epoch boundary is one of them.
+    The library owns the consequences of a number it picked, and the resident worker population doubling at every epoch
+    boundary is one of them.
     """
-    monkeypatch.setattr(dm.os, "cpu_count", lambda: 64)
-    monkeypatch.setattr(dm, "_shm_capped_workers", lambda workers, *args: workers)
-
     datamodule = _datamodule(detseg_fixture_dir, num_workers=None)
     datamodule.setup("fit")
 
@@ -1322,8 +1259,8 @@ def test_auto_chosen_worker_count_capped_for_val(detseg_fixture_dir: Path, monke
 def test_val_worker_target_scales_with_letterbox_side() -> None:
     """The cap encodes how many workers saturate a letterbox-only loader, which is pixel-bound.
 
-    Four was reasoned about 640 px samples, where val work was "a fraction of the train
-    pipeline's". At 1024 px the decode is the work, and a constant would starve it.
+    Four was reasoned about 640 px samples, where val work was "a fraction of the train pipeline's". At 1024 px the
+    decode is the work, and a constant would starve it.
     """
     assert dm._val_worker_target(640) == 4
     assert dm._val_worker_target(1024) > dm._val_worker_target(640)
@@ -1340,18 +1277,18 @@ def test_val_loader_workers_explicit_override(detseg_fixture_dir: Path) -> None:
     assert loader.worker_init_fn is None
 
 
-def test_shm_cap_bounds_workers_to_free_shm(monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(dm.Path, "exists", lambda self: True)
+@patch.object(dm.os, "statvfs", lambda _: os.statvfs_result((4096, 4096, 0, 262144, 262144, 0, 0, 0, 0, 255)))
+def test_shm_cap_bounds_workers_to_free_shm() -> None:
     """The shm cap shrinks the worker count so queued batches fit half the free tmpfs."""
-    monkeypatch.setattr(dm.Path, "exists", lambda self: True)
     # 1 GiB free (262144 blocks x 4096); batch bytes = 4*3*64*640*640 ~ 315 MB;
     # prefetch 2 -> budget 512 MiB < one queued slot -> floored to 1 worker
-    monkeypatch.setattr(dm.os, "statvfs", lambda _: os.statvfs_result((4096, 4096, 0, 262144, 262144, 0, 0, 0, 0, 255)))
     assert dm._shm_capped_workers(48, batch_size=64, img_size=640, prefetch=2) == 1
 
 
-def test_shm_cap_no_dev_shm_leaves_workers_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(dm.Path, "exists", lambda self: False)
+def test_shm_cap_no_dev_shm_leaves_workers_unchanged() -> None:
     """Hosts without /dev/shm (macOS/Windows) keep the core-based worker count."""
-    monkeypatch.setattr(dm.Path, "exists", lambda self: False)
     assert dm._shm_capped_workers(8, batch_size=64, img_size=640, prefetch=2) == 8
 
 
@@ -1396,17 +1333,14 @@ def _write_fake_coco_root(root: Path, train: int, val: int) -> None:
     _write_fake_split(root / "val2017", annotations / "instances_val2017.json", val)
 
 
-#: Annotation payloads that parse as a JSON object yet cannot be read: a list section held
-#: as something else. A ``null`` ``images`` used to raise from the count and abort the whole
-#: check; a string ``annotations`` used to pass it.
-_MALFORMED_SECTION_PAYLOADS = [
-    pytest.param({"images": None}, id="images-null"),
-    pytest.param({"images": [], "annotations": "x"}, id="annotations-string"),
+#: Annotation file bytes that parse as a JSON object yet cannot be read, or are not UTF-8 at all. A ``null`` ``images``
+#: used to raise from the count and abort the whole check; a string ``annotations`` used to pass it; ``0xff`` never
+#: starts a UTF-8 sequence, so that read fails before any JSON is parsed.
+_UNREADABLE_ANNOTATIONS = [
+    pytest.param(json.dumps({"images": None}).encode("utf-8"), id="images-null"),
+    pytest.param(json.dumps({"images": [], "annotations": "x"}).encode("utf-8"), id="annotations-string"),
+    pytest.param(b"\xff\xfe{", id="invalid-utf8"),
 ]
-
-#: Annotation file bytes that are not UTF-8 (``0xff`` never starts a UTF-8 sequence), so the
-#: read fails before any JSON is parsed.
-_INVALID_UTF8 = b"\xff\xfe{"
 
 
 class TestCheckData:
@@ -1432,9 +1366,8 @@ class TestCheckData:
     def test_real_2017_spelling_keeps_published_names_and_counts(self, tmp_path: Path) -> None:
         """A root in COCO 2017's own spelling is checked under those names against the published counts.
 
-        WP-099e pinned ``train2017``/``val2017`` and 118,287 / 5,000 as one published fact.
-        Resolving the other spellings the layout probe accepts must not loosen that for the
-        dataset the numbers were published for.
+        WP-099e pinned ``train2017``/``val2017`` and 118,287 / 5,000 as one published fact. Resolving the other
+        spellings the layout probe accepts must not loosen that for the dataset the numbers were published for.
         """
         _write_fake_coco_root(tmp_path, train=2, val=1)
 
@@ -1444,22 +1377,22 @@ class TestCheckData:
         assert result.splits[0].problems == [f"train2017: expected {check_data.COCO_TRAIN_COUNT} images, found 2"]
 
 
+@pytest.fixture
+def plain_root(tmp_path: Path) -> Path:
+    """Build ``train/`` and ``val/`` beside ``annotations/instances_{train,val}.json``."""
+    _write_fake_split(tmp_path / "train", tmp_path / "annotations" / "instances_train.json", 2)
+    _write_fake_split(tmp_path / "val", tmp_path / "annotations" / "instances_val.json", 1)
+    return tmp_path
+
+
 class TestCheckDataPlainSpelling:
     """A COCO-format root in a spelling other than COCO 2017's: presence and parseability only."""
-
-    @pytest.fixture
-    def plain_root(self, tmp_path: Path) -> Path:
-        """Build ``train/`` and ``val/`` beside ``annotations/instances_{train,val}.json``."""
-        _write_fake_split(tmp_path / "train", tmp_path / "annotations" / "instances_train.json", 2)
-        _write_fake_split(tmp_path / "val", tmp_path / "annotations" / "instances_val.json", 1)
-        return tmp_path
 
     def test_passes_without_published_counts(self, plain_root: Path) -> None:
         """The spelling ``build-tiles`` writes passes under its own split names.
 
-        COCO 2017's totals describe COCO 2017's image set and are no fact about any other
-        root; holding a tiles root to them failed the OBB tier's pre-flight on a tree that
-        trains.
+        COCO 2017's totals describe COCO 2017's image set and are no fact about any other root; holding a tiles root to
+        them failed the OBB tier's pre-flight on a tree that trains.
         """
         result = check_data.check_coco_root(plain_root)
 
@@ -1469,8 +1402,8 @@ class TestCheckDataPlainSpelling:
     def test_spare_image_on_disk_not_fault(self, plain_root: Path) -> None:
         """An unannotated image file beside the annotated ones leaves the root valid.
 
-        The reader opens only the images its annotation file names, so the annotation-vs-disk
-        parity the COCO 2017 check holds is a count, and counts belong to the published layout.
+        The reader opens only the images its annotation file names, so the annotation-vs-disk parity the COCO 2017
+        check holds is a count, and counts belong to the published layout.
         """
         (plain_root / "val" / "spare.jpg").touch()
 
@@ -1489,34 +1422,23 @@ class TestCheckDataPlainSpelling:
             .startswith(f"annotation file failed to parse: {plain_root / 'annotations' / 'instances_val.json'}")
         )
 
-    def test_cli_infers_and_passes_it(self, plain_root: Path) -> None:
+    def test_cli_infers_spelling_and_passes(self, plain_root: Path) -> None:
         """``lucid-data check --data_root <plain root>`` exits 0 with no flag at all."""
         assert data_cli.main(["check", "--data_root", str(plain_root)]) == 0
 
-    @pytest.mark.parametrize("payload", _MALFORMED_SECTION_PAYLOADS)
-    def test_malformed_section_fails_naming_file(
-        self, plain_root: Path, payload: dict[str, object], capsys: pytest.CaptureFixture[str]
+    @pytest.mark.parametrize("content", _UNREADABLE_ANNOTATIONS)
+    def test_unreadable_annotation_fails_naming_file(
+        self, plain_root: Path, content: bytes, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """An instances file with a list section held as anything else is a located FAIL, never a traceback.
+        """An instances file with a list section held as anything else, or not UTF-8, is a located FAIL.
 
-        The root passes untouched, so exit 1 is reachable only through this file; the call
-        returning at all is what shows the remaining checks were not aborted.
+        The root passes untouched, so exit 1 is reachable only through this file; the call returning at all is what
+        shows the remaining checks were not aborted. A decode error is raised by the read, not the JSON parser, so it
+        escaped a handler that caught only ``json.JSONDecodeError``; ``lucid-data`` has no handler of its own, so the
+        call returning is what shows it was caught.
         """
         annotation_file = plain_root / "annotations" / "instances_val.json"
-        annotation_file.write_text(json.dumps(payload), encoding="utf-8")
-
-        assert data_cli.main(["check", "--data_root", str(plain_root)]) == 1
-        assert f"  FAIL annotation file failed to parse: {annotation_file}" in capsys.readouterr().out
-
-    def test_invalid_utf8_fails_naming_file(self, plain_root: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        """An instances file of bytes that do not decode as UTF-8 is a located FAIL, never a traceback.
-
-        The decode error is raised by the read, not the JSON parser, so it escaped a handler
-        that caught only ``json.JSONDecodeError``; ``lucid-data`` has no handler of its own, so
-        the call returning is what shows it was caught.
-        """
-        annotation_file = plain_root / "annotations" / "instances_val.json"
-        annotation_file.write_bytes(_INVALID_UTF8)
+        annotation_file.write_bytes(content)
 
         assert data_cli.main(["check", "--data_root", str(plain_root)]) == 1
         assert f"  FAIL annotation file failed to parse: {annotation_file}" in capsys.readouterr().out
@@ -1531,12 +1453,17 @@ class TestCheckDataKeypoints:
         _write_fake_coco_root(tmp_path, train=2, val=1)
         return tmp_path
 
+    @pytest.fixture
+    def plain_keypoint_root(self, plain_root: Path) -> Path:
+        """Extend the plain-spelled root with the training split's parseable keypoint file only."""
+        (plain_root / "annotations" / "person_keypoints_train.json").write_text(json.dumps({"images": []}))
+        return plain_root
+
     def test_missing_files_named(self, coco_root: Path) -> None:
         """Both splits' absent keypoint files are reported, each by its full path.
 
-        The layout resolves only the ``instances_`` spelling, so a pose run whose config was
-        never pointed at the keypoint files fails at dataset construction, after the queue;
-        this is where that gets caught before it.
+        The layout resolves only the ``instances_`` spelling, so a pose run whose config was never pointed at the
+        keypoint files fails at dataset construction, after the queue; this is where that gets caught before it.
         """
         annotations = coco_root / "annotations"
 
@@ -1548,7 +1475,7 @@ class TestCheckDataKeypoints:
             f"annotation file missing: {annotations / 'person_keypoints_val2017.json'}",
         ]
 
-    def test_parseable_files_pass_and_are_noted(self, coco_root: Path) -> None:
+    def test_parseable_files_pass_with_notes(self, coco_root: Path) -> None:
         """Present, parseable keypoint files pass, and the report says they were read."""
         (coco_root / "annotations" / "person_keypoints_train2017.json").write_text(json.dumps({"images": []}))
         (coco_root / "annotations" / "person_keypoints_val2017.json").write_text(json.dumps({"images": []}))
@@ -1571,49 +1498,27 @@ class TestCheckDataKeypoints:
         assert not result.ok
         assert result.problems[0].startswith("annotation file failed to parse: ")
 
-    def test_cli_carries_flag_through(self, tmp_path: Path) -> None:
+    def test_cli_carries_flag_through(self, plain_keypoint_root: Path) -> None:
         """``lucid-data check --keypoints true`` reaches the keypoint files of a plain-spelled root.
 
-        jsonargparse derives the flag from ``check_dataset``'s signature, so only an end-to-end
-        parse proves it arrives. The root passes without the flag and lacks only the validation
-        keypoint file, so exit 1 is reachable only through the flag having been honoured.
+        jsonargparse derives the flag from ``check_dataset``'s signature, so only an end-to-end parse proves it arrives.
+        The root passes without the flag and lacks only the validation keypoint file, so exit 1 is reachable only
+        through the flag having been honoured.
         """
-        _write_fake_split(tmp_path / "train", tmp_path / "annotations" / "instances_train.json", 2)
-        _write_fake_split(tmp_path / "val", tmp_path / "annotations" / "instances_val.json", 1)
-        (tmp_path / "annotations" / "person_keypoints_train.json").write_text(json.dumps({"images": []}))
+        assert data_cli.main(["check", "--data_root", str(plain_keypoint_root), "--keypoints", "true"]) == 1
 
-        assert data_cli.main(["check", "--data_root", str(tmp_path), "--keypoints", "true"]) == 1
-
-    @pytest.mark.parametrize("payload", _MALFORMED_SECTION_PAYLOADS)
-    def test_malformed_section_fails_naming_file(
-        self, tmp_path: Path, payload: dict[str, object], capsys: pytest.CaptureFixture[str]
+    @pytest.mark.parametrize("content", _UNREADABLE_ANNOTATIONS)
+    def test_unreadable_section_fails_naming_file(
+        self, plain_keypoint_root: Path, content: bytes, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """A keypoint file with a list section held as anything else is a located FAIL, never a traceback.
+        """A keypoint file with a list section held as anything else, or not UTF-8, is a located FAIL.
 
-        The plain-spelled root and its training keypoint file pass, so exit 1 is reachable
-        only through the validation keypoint file, which is the one the FAIL line names.
+        The plain-spelled root and its training keypoint file pass, so exit 1 is reachable only through the validation
+        keypoint file, which is the one the FAIL line names; ``lucid-data`` has no handler of its own, so the call
+        returning is what shows a decode error was caught.
         """
-        _write_fake_split(tmp_path / "train", tmp_path / "annotations" / "instances_train.json", 2)
-        _write_fake_split(tmp_path / "val", tmp_path / "annotations" / "instances_val.json", 1)
-        (tmp_path / "annotations" / "person_keypoints_train.json").write_text(json.dumps({"images": []}))
-        keypoint_file = tmp_path / "annotations" / "person_keypoints_val.json"
-        keypoint_file.write_text(json.dumps(payload), encoding="utf-8")
+        keypoint_file = plain_keypoint_root / "annotations" / "person_keypoints_val.json"
+        keypoint_file.write_bytes(content)
 
-        assert data_cli.main(["check", "--data_root", str(tmp_path), "--keypoints", "true"]) == 1
-        assert f"  FAIL annotation file failed to parse: {keypoint_file}" in capsys.readouterr().out
-
-    def test_invalid_utf8_fails_naming_file(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        """A keypoint file of bytes that do not decode as UTF-8 is a located FAIL, never a traceback.
-
-        The plain-spelled root and its training keypoint file pass, so exit 1 is reachable
-        only through the validation keypoint file; ``lucid-data`` has no handler of its own,
-        so the call returning is what shows the decode error was caught.
-        """
-        _write_fake_split(tmp_path / "train", tmp_path / "annotations" / "instances_train.json", 2)
-        _write_fake_split(tmp_path / "val", tmp_path / "annotations" / "instances_val.json", 1)
-        (tmp_path / "annotations" / "person_keypoints_train.json").write_text(json.dumps({"images": []}))
-        keypoint_file = tmp_path / "annotations" / "person_keypoints_val.json"
-        keypoint_file.write_bytes(_INVALID_UTF8)
-
-        assert data_cli.main(["check", "--data_root", str(tmp_path), "--keypoints", "true"]) == 1
+        assert data_cli.main(["check", "--data_root", str(plain_keypoint_root), "--keypoints", "true"]) == 1
         assert f"  FAIL annotation file failed to parse: {keypoint_file}" in capsys.readouterr().out

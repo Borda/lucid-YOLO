@@ -1,27 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gates for the WP-053a segmentation mask decode (A10, A11, A16, A37).
 
-Four properties define the decode, and every test below pins exactly one of
-them:
+Four properties define the decode, and every test below pins exactly one of them:
 
-- the top-k reduction still ranks as it always did, and now says **which**
-  anchors it kept, so mask coefficients can be gathered by the same indices the
-  boxes were (a second, independently written selection would pair a box with
-  another anchor's coefficients and produce a plausible mask of the wrong
-  object);
-- the probability field is upsampled **before** it is binarized, so a mask
-  boundary can land between prototype cells;
+- the top-k reduction still ranks as it always did, and now says **which** anchors it kept, so mask coefficients can be
+  gathered by the same indices the boxes were (a second, independently written selection would pair a box with another
+  anchor's coefficients and produce a plausible mask of the wrong object);
+- the probability field is upsampled **before** it is binarized, so a mask boundary can land between prototype cells;
 - the crop uses the A11 half-open pixel-centre rule the training loss uses;
-- masks and boxes leave the letterboxed canvas through the *same* geometry, so a
-  segm score cannot be quietly wrong while the bbox score is right.
+- masks and boxes leave the letterboxed canvas through the *same* geometry, so a segm score cannot be quietly wrong
+  while the bbox score is right.
 
-Expected mask windows are hand-derived from the bilinear mapping
-``input = (out + 0.5) / scale - 0.5`` (``align_corners=False``), so the column
-indices asserted below are exact, not tolerances.
+Expected mask windows are hand-derived from the bilinear mapping ``input = (out + 0.5) / scale - 0.5``
+(``align_corners=False``), so the column indices asserted below are exact, not tolerances.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
@@ -35,6 +31,9 @@ from lucid_yolo.eval import decode_instance_masks, masks_to_original
 from lucid_yolo.eval.segment_decode import _box_crop
 from lucid_yolo.models.heads.detect import o2o_topk, o2o_topk_with_indices
 from lucid_yolo.models.heads.proto import assemble_masks
+
+if TYPE_CHECKING:
+    from unittest.mock import MagicMock
 
 _BOX_CORNERS = 4
 _SATURATED = 10.0  # sigmoid(+-10) is within 5e-5 of 1/0: a hard prototype edge.
@@ -57,13 +56,15 @@ def test_chunked_masks_equal_full_canvas_decode(instances: int) -> None:
     assert torch.equal(decode_instance_masks(prototypes, coefficients, boxes, (31, 37)), expected)
 
 
-def test_mask_upsample_bounds_instance_axis() -> None:
+@patch("lucid_yolo.eval.segment_decode.F.interpolate", wraps=F.interpolate)
+def test_mask_upsample_bounds_instance_axis(interpolate: MagicMock) -> None:
     """The full-canvas float temporary holds at most 32 masks per image."""
     prototypes = torch.ones(1, 2, 4, 4)
     coefficients = torch.ones(1, 300, 2)
     boxes = torch.full((1, 300, 4), 16.0)
-    with patch("lucid_yolo.eval.segment_decode.F.interpolate", wraps=F.interpolate) as interpolate:
-        decode_instance_masks(prototypes, coefficients, boxes, (16, 16))
+
+    decode_instance_masks(prototypes, coefficients, boxes, (16, 16))
+
     assert max(call.args[0].shape[1] for call in interpolate.call_args_list) <= 32
 
 
@@ -105,9 +106,8 @@ def _saturated_prototypes(grid: int, region: slice) -> torch.Tensor:
 def test_o2o_topk_ranking_bit_identical_to_pre_split_body() -> None:
     """The wrapper reproduces the old selection exactly, not merely closely.
 
-    Catches a rewrite of the reduction smuggled in with the index return — a
-    reordered ``topk``, a ``max`` over probabilities taken elsewhere, or a
-    different tie handling would move detections that the decode path has been
+    Catches a rewrite of the reduction smuggled in with the index return — a reordered ``topk``, a ``max`` over
+    probabilities taken elsewhere, or a different tie handling would move detections that the decode path has been
     accepted against.
     """
     scores = torch.randn(2, 50, 5)
@@ -121,9 +121,8 @@ def test_o2o_topk_ranking_bit_identical_to_pre_split_body() -> None:
 def test_anchor_index_reproduces_detection_corners() -> None:
     """Gathering ``boxes`` by the returned indices yields the tuple's own corners.
 
-    This is the contract every per-anchor quantity relies on: if the reported
-    indices were stale, off by a permutation, or taken from a second ranking,
-    the corners they select would differ from the corners the tuple carries.
+    This is the contract every per-anchor quantity relies on: if the reported indices were stale, off by a permutation,
+    or taken from a second ranking, the corners they select would differ from the corners the tuple carries.
     """
     scores = torch.randn(2, 50, 5)
     boxes = torch.randn(2, 50, 4)
@@ -137,11 +136,10 @@ def test_anchor_index_reproduces_detection_corners() -> None:
 def test_coefficients_gathered_by_anchor_index_belong_to_kept_anchors() -> None:
     """Coefficient rows selected by the returned indices are the kept anchors' own rows.
 
-    The defect this catches is a second selection path: with a known score order
-    the kept anchors are 1, 3, 4, so a coefficient map gathered by any other
-    ranking (e.g. one recomputed from the same scores by a separate helper that
-    breaks ties or sorts differently) yields different rows here while every box
-    stays correct — a mask of the wrong object with a plausible score.
+    The defect this catches is a second selection path: with a known score order the kept anchors are 1, 3, 4, so a
+    coefficient map gathered by any other ranking (e.g. one recomputed from the same scores by a separate helper that
+    breaks ties or sorts differently) yields different rows here while every box stays correct — a mask of the wrong
+    object with a plausible score.
     """
     scores = torch.tensor([[[0.1], [0.9], [0.3], [0.7], [0.5], [0.2]]])  # (B=1, A=6, C=1)
     boxes = torch.zeros(1, 6, 4)
@@ -157,16 +155,12 @@ def test_coefficients_gathered_by_anchor_index_belong_to_kept_anchors() -> None:
 def test_one_hot_coefficient_reproduces_prototype_rectangle() -> None:
     """A one-hot coefficient recovers exactly the rectangle its prototype encodes.
 
-    Catches an assembly that mixes the wrong prototypes (a transposed einsum
-    would blend in the constant distractor channel), a missing sigmoid (raw
-    logits of -10 would still threshold above 0.5 nowhere but +10 everywhere the
-    signs differ), and a wrong upsample factor: at scale 4 the +-10 edge between
-    prototype cells 1 and 2 lands at canvas coordinate 8, so the recovered window
-    is exactly ``[8, 24)`` on both axes — bar its four corner pixels, where the
-    2-D bilinear weight of the one interior prototype cell is only
-    ``0.625 ** 2 = 0.39``. That rounded corner is itself a fingerprint of
-    interpolating probabilities: a binary mask upsampled after thresholding has
-    square corners.
+    Catches an assembly that mixes the wrong prototypes (a transposed einsum would blend in the constant distractor
+    channel), a missing sigmoid (raw logits of -10 would still threshold above 0.5 nowhere but +10 everywhere the signs
+    differ), and a wrong upsample factor: at scale 4 the +-10 edge between prototype cells 1 and 2 lands at canvas
+    coordinate 8, so the recovered window is exactly ``[8, 24)`` on both axes — bar its four corner pixels, where the
+    2-D bilinear weight of the one interior prototype cell is only ``0.625 ** 2 = 0.39``. That rounded corner is itself
+    a fingerprint of interpolating probabilities: a binary mask upsampled after thresholding has square corners.
     """
     prototypes = torch.cat((_saturated_prototypes(8, slice(2, 6)), torch.full((1, 1, 8, 8), -_SATURATED)), dim=1)
     coefficients = torch.tensor([[[1.0, 0.0]]])  # (B=1, N=1, K=2)
@@ -183,13 +177,10 @@ def test_one_hot_coefficient_reproduces_prototype_rectangle() -> None:
 def test_mask_zero_outside_predicted_box() -> None:
     """A box covering part of the prototype rectangle keeps only the boxed part.
 
-    This is the test that fails if the crop is dropped or applied with the
-    ground-truth-box geometry of the loss rather than the predicted box: without
-    it the whole ``[8, 24)`` rectangle survives, since the prototype claims it.
-    The single excluded pixel at ``(8, 8)`` is the prototype rectangle's own
-    rounded corner (see
-    :func:`test_one_hot_coefficient_reproduces_prototype_rectangle`), not a
-    property of the crop.
+    This is the test that fails if the crop is dropped or applied with the ground-truth-box geometry of the loss rather
+    than the predicted box: without it the whole ``[8, 24)`` rectangle survives, since the prototype claims it. The
+    single excluded pixel at ``(8, 8)`` is the prototype rectangle's own rounded corner (see
+    :func:`test_one_hot_coefficient_reproduces_prototype_rectangle`), not a property of the crop.
     """
     prototypes = torch.cat((_saturated_prototypes(8, slice(2, 6)), torch.full((1, 1, 8, 8), -_SATURATED)), dim=1)
     coefficients = torch.tensor([[[1.0, 0.0]]])
@@ -213,11 +204,9 @@ def test_mask_zero_outside_predicted_box() -> None:
 def test_threshold_cuts_at_one_half(probability: float, foreground: bool) -> None:
     """A constant field just under 0.5 is empty and just over it is full inside the box.
 
-    Pins the A37 binarization threshold itself: a cut placed at 0 (thresholding
-    the logits instead of the probabilities) or at any value outside
-    ``(0.49, 0.51)`` would make both parametrizations agree, and a decode that
-    thresholds before the sigmoid would report foreground for the 0.49 case too,
-    whose logit is negative.
+    Pins the A37 binarization threshold itself: a cut placed at 0 (thresholding the logits instead of the
+    probabilities) or at any value outside ``(0.49, 0.51)`` would make both parametrizations agree, and a decode that
+    thresholds before the sigmoid would report foreground for the 0.49 case too, whose logit is negative.
     """
     prototypes = torch.full((1, 1, 4, 4), float(torch.logit(torch.tensor(probability))))
     coefficients = torch.ones(1, 1, 1)
@@ -232,9 +221,8 @@ def test_threshold_cuts_at_one_half(probability: float, foreground: bool) -> Non
 def test_output_bool_over_batch_and_instance_axes() -> None:
     """The decode returns ``(B, N, H, W)`` booleans, not floats or a flattened stack.
 
-    Catches an output that keeps the probability dtype (an evaluator would then
-    score a soft mask), and a batch/instance axis collapsed by a loop that
-    concatenated instead of stacking.
+    Catches an output that keeps the probability dtype (an evaluator would then score a soft mask), and a
+    batch/instance axis collapsed by a loop that concatenated instead of stacking.
     """
     prototypes = torch.randn(2, 4, 8, 8)
     coefficients = torch.randn(2, 3, 4).tanh()
@@ -249,16 +237,15 @@ def test_output_bool_over_batch_and_instance_axes() -> None:
 def test_no_kept_detections_returns_empty_stack() -> None:
     """An image with nothing to decode returns ``(B, 0, H, W)`` rather than raising.
 
-    ``F.interpolate`` treats the instance axis as channels and rejects a zero-length
-    one, so this raised ``RuntimeError`` for as long as the function has existed. No
-    test caught it because the only caller was the evaluator, whose decoders always
-    hand over a fixed 300 rows with their padding included — the axis was never empty.
-    The predict path decodes only the survivors of a confidence cut, and an image can
-    have none, which is how the case finally arrived.
+    ``F.interpolate`` treats the instance axis as channels and rejects a zero-length one, so this raised
+    ``RuntimeError`` for as long as the function has existed. No test caught it because the only caller was the
+    evaluator, whose decoders always hand over a fixed 300 rows with their padding included — the axis was never empty.
+    The predict path decodes only the survivors of a confidence cut, and an image can have none, which is how the case
+    finally arrived.
 
-    The shape contract is the point of returning rather than raising: a caller
-    stacking per-image results needs an empty tensor of the right rank and dtype, and
-    an exception forces every such caller to special-case the count itself.
+    The shape contract is the point of returning rather than raising: a caller stacking per-image results needs an
+    empty tensor of the right rank and dtype, and an exception forces every such caller to special-case the count
+    itself.
     """
     prototypes = torch.randn(2, 4, 8, 8)
     coefficients = torch.zeros(2, 0, 4)
@@ -273,13 +260,11 @@ def test_no_kept_detections_returns_empty_stack() -> None:
 def test_boundary_lands_between_prototype_cells() -> None:
     """A sloped probability edge binarizes at a position no upsampled binary mask could reach.
 
-    The gate against thresholding first and upsampling afterwards. The prototype
-    columns carry logits ``[3, 1, -3, -3]``, so the *probability* field crosses
-    0.5 at canvas x ~= 7.35: output column 6 (centre-mapped probability 0.646)
-    is foreground and column 7 (0.475) is not. Thresholding at the prototype grid
-    gives the binary columns ``[1, 1, 0, 0]``, and nearest-upsampling those puts
-    the boundary at 8 — column 7 foreground. Only the assert on column 7 tells
-    the two implementations apart.
+    The gate against thresholding first and upsampling afterwards. The prototype columns carry logits
+    ``[3, 1, -3, -3]``, so the *probability* field crosses 0.5 at canvas x ~= 7.35: output column 6 (centre-mapped
+    probability 0.646) is foreground and column 7 (0.475) is not. Thresholding at the prototype grid gives the binary
+    columns ``[1, 1, 0, 0]``, and nearest-upsampling those puts the boundary at 8 — column 7 foreground. Only the
+    assert on column 7 tells the two implementations apart.
     """
     logits = torch.tensor([3.0, 1.0, -3.0, -3.0])
     prototypes = logits.reshape(1, 1, 1, 4).expand(1, 1, 4, 4).contiguous()
@@ -296,12 +281,10 @@ def test_boundary_lands_between_prototype_cells() -> None:
 def test_masks_to_original_round_trips_real_letterbox() -> None:
     """A mask letterboxed by the validation transform comes back on the original grid.
 
-    Catches padding removed from the wrong side or the wrong axis, and a resize
-    that inverts the canvas ratio instead of the letterbox ratio: a 48x96 image
-    into a 64x64 canvas scales by 2/3 and pads 16 rows top and bottom, so a
-    ratio- or pad-blind inverse leaves the rectangle stretched or displaced,
-    which the intersection-over-union assert below rejects even though the pixel
-    count alone might survive it.
+    Catches padding removed from the wrong side or the wrong axis, and a resize that inverts the canvas ratio instead
+    of the letterbox ratio: a 48x96 image into a 64x64 canvas scales by 2/3 and pads 16 rows top and bottom, so a
+    ratio- or pad-blind inverse leaves the rectangle stretched or displaced, which the intersection-over-union assert
+    below rejects even though the pixel count alone might survive it.
     """
     letterbox = Letterbox(64, pad_value=0.0)
     original = torch.zeros(48, 96, dtype=torch.bool)
@@ -321,11 +304,10 @@ def test_masks_to_original_round_trips_real_letterbox() -> None:
 def test_recovered_mask_and_box_agree_on_original_grid() -> None:
     """A mask filling its box still fills it after both inverse transforms.
 
-    The gate against the silent failure mode: if ``masks_to_original`` derived
-    its scale or padding independently of the box inverse, every bbox score would
-    stay right while every segm score drifted by the difference. Both are pushed
-    through their own inverse here and the mask's bounding box must land on the
-    mapped box exactly, not merely near it.
+    The gate against the silent failure mode: if ``masks_to_original`` derived its scale or padding independently of
+    the box inverse, every bbox score would stay right while every segm score drifted by the difference. Both are
+    pushed through their own inverse here and the mask's bounding box must land on the mapped box exactly, not merely
+    near it.
     """
     letterbox = Letterbox(64)
     box = torch.tensor([12.0, 20.0, 44.0, 46.0])
@@ -339,10 +321,9 @@ def test_recovered_mask_and_box_agree_on_original_grid() -> None:
     rows = recovered.any(dim=1).nonzero().flatten()
     cols = recovered.any(dim=0).nonzero().flatten()
     mask_box = torch.tensor([cols[0], rows[0], cols[-1] + 1, rows[-1] + 1], dtype=torch.float32)
-    # atol measured, not guessed: this fixture is fully deterministic (no RNG anywhere in
-    # it) and the two boxes agree to 0.0 on all four sides -- 48x96 into a 64-canvas is an
-    # exact 2/3 with an exact 16-row pad, so the inverse lands on integers rather than
-    # between pixels. The former atol=1.0 therefore bought nothing but a blind spot: it
-    # accepted a whole-pixel shift per side, which is precisely the silent segm-only drift
-    # the docstring above names. 1e-4 absorbs float noise on the division and nothing else.
+    # atol measured, not guessed: this fixture is fully deterministic (no RNG anywhere in it) and the two boxes agree to
+    # 0.0 on all four sides -- 48x96 into a 64-canvas is an exact 2/3 with an exact 16-row pad, so the inverse lands on
+    # integers rather than between pixels. The former atol=1.0 therefore bought nothing but a blind spot: it accepted a
+    # whole-pixel shift per side, which is precisely the silent segm-only drift the docstring above names. 1e-4 absorbs
+    # float noise on the division and nothing else.
     assert torch.allclose(mask_box, mapped_box, atol=1e-4), f"mask box {mask_box} vs detection box {mapped_box}"

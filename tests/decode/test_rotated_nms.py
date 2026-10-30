@@ -1,30 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-091b rotated suppression decoder.
 
-Covers :class:`lucid_yolo.decode.RotatedNMSDecoder`, the oriented non-E2E path over the
-dense one-to-many branch. The gate this suite exists for is the first one: two 20x2 bars
-crossing at one centre have **identical** axis-aligned envelopes, so any decoder that
-suppresses by upright overlap sees an IoU of exactly 1.0 and deletes one of two objects
-that barely touch — their rotated IoU is 0.053. That scene is asserted with both numbers
-computed in the test, so it stays self-certifying: a later edit that moved the geometry
-somewhere less discriminating would fail on the premise rather than pass on the
-conclusion. The claim that an envelope-suppressing decoder *fails* it is executable rather
-than argued: :class:`~lucid_yolo.decode.nms_path.NMSDecoder`, handed the identical logits
-and distances and simply never shown the angles, answers with one detection where this one
-answers with two.
+Covers :class:`lucid_yolo.decode.RotatedNMSDecoder`, the oriented non-E2E path over the dense one-to-many branch. The
+gate this suite exists for is the first one: two 20x2 bars crossing at one centre have **identical** axis-aligned
+envelopes, so any decoder that suppresses by upright overlap sees an IoU of exactly 1.0 and deletes one of two objects
+that barely touch — their rotated IoU is 0.053. That scene is asserted with both numbers computed in the test, so it
+stays self-certifying: a later edit that moved the geometry somewhere less discriminating would fail on the premise
+rather than pass on the conclusion. The claim that an envelope-suppressing decoder *fails* it is executable rather than
+argued: :class:`~lucid_yolo.decode.nms_path.NMSDecoder`, handed the identical logits and distances and simply never
+shown the angles, answers with one detection where this one answers with two.
 
-The rest pins what the axis-aligned twin already promises and this one must match: a
-same-class duplicate collapses to one survivor while an overlapping *different*-class pair
-does not, the threshold is genuinely consulted rather than inlined at either extreme, the
-output is the fixed ``(B, max_det, 7)`` A45 batch with score-zero padding and a
+The rest pins what the axis-aligned twin already promises and this one must match: a same-class duplicate collapses to
+one survivor while an overlapping *different*-class pair does not, the threshold is genuinely consulted rather than
+inlined at either extreme, the output is the fixed ``(B, max_det, 7)`` A45 batch with score-zero padding and a
 non-increasing score column, survivors are canonical (A23, inherited from
-:func:`~lucid_yolo.models.heads.obb.decode_rboxes`), each image of a batch is decoded
-independently, and the decode is deterministic.
+:func:`~lucid_yolo.models.heads.obb.decode_rboxes`), each image of a batch is decoded independently, and the decode is
+deterministic.
 
-No trained weights anywhere: every scene is planted straight into the head's raw outputs,
-the way :mod:`tests.predict.planted` plants its rotated box — through the axis-aligned
-envelope, because that is the shape the head actually regresses (A44), with the raw angle
-attached beside it.
+No trained weights anywhere: every scene is planted straight into the head's raw outputs, the way
+:mod:`tests.predict.planted` plants its rotated box — through the axis-aligned envelope, because that is the shape the
+head actually regresses (A44), with the raw angle attached beside it.
 """
 
 from __future__ import annotations
@@ -34,6 +29,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 import torch
+from decode_helpers import surviving_rows
 
 from lucid_yolo.assign.grid import make_anchor_points
 from lucid_yolo.decode import ROTATED_NMS_IOU_THRESHOLD, NMSDecoder, RotatedNMSDecoder
@@ -45,31 +41,39 @@ if TYPE_CHECKING:
 
     from torch import Tensor
 
-#: One anchor level of four anchors at stride 8 — enough carriers for every scene here,
-#: and small enough that a failure prints a readable tensor.
+#: One anchor level of four anchors at stride 8 — enough carriers for every scene here, and small enough that a failure
+#: prints a readable tensor.
 _GRID = (2, 2)
 _STRIDE = 8
 
-#: Class count of the planted logits. Three, so a "different class" case has somewhere to
-#: go that is neither the planted label nor the argmax of an all-absent row.
+#: Class count of the planted logits. Three, so a "different class" case has somewhere to go that is neither the planted
+#: label nor the argmax of an all-absent row.
 _NUM_CLASSES = 3
 
-#: Logit of a class the planted anchor does not have. ``sigmoid(-20)`` is 2e-9, below any
-#: confidence threshold a test here sets, so an unplanted anchor never reaches suppression.
+#: Logit of a class the planted anchor does not have. ``sigmoid(-20)`` is 2e-9, below any confidence threshold a test
+#: here sets, so an unplanted anchor never reaches suppression.
 _ABSENT_LOGIT = -20.0
 
-#: The canonical angle range (A23), written as the assertions read it rather than imported
-#: from :mod:`lucid_yolo.data.rotated_geom`, which would agree with itself if both were wrong.
+#: The canonical angle range (A23), written as the assertions read it rather than imported from
+#: :mod:`lucid_yolo.data.rotated_geom`, which would agree with itself if both were wrong.
 _THETA_LOW = -math.pi / 4
 _THETA_HIGH = 3 * math.pi / 4
 
-#: A thin bar: long enough that a heading change moves its overlap a long way, which is
-#: what separates the rotated measure from the upright one.
+#: A thin bar: long enough that a heading change moves its overlap a long way, which is what separates the rotated
+#: measure from the upright one.
 _BAR_EXTENTS = (20.0, 2.0)
 
-#: Centre every scene shares, in canvas pixels. Away from the anchor points on purpose —
-#: the anchor is a carrier for the plant, not part of the geometry under test.
+#: Centre every scene shares, in canvas pixels. Away from the anchor points on purpose — the anchor is a carrier for the
+#: plant, not part of the geometry under test.
 _CENTRE = (32.0, 32.0)
+
+#: The bar the scenes plant first, and the same bar at the mirrored heading. Their axis-aligned envelopes are identical
+#: while their rotated overlap is small, which is the geometry the suite is built around.
+_BAR = (*_CENTRE, *_BAR_EXTENTS, 0.7)
+_CROSSING_BAR = (*_CENTRE, *_BAR_EXTENTS, -0.7)
+
+#: The score column of a rotated detection row; the seventh column is the class.
+_SCORE_COLUMN = 5
 
 
 def _ltrb_from_envelope(envelope: tuple[float, float, float, float], point: Tensor, stride: Tensor) -> Tensor:
@@ -97,15 +101,13 @@ def _plant(
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     """Plant rotated boxes into one image's raw head outputs.
 
-    Box ``i`` rides anchor ``i`` — chosen by position in the list rather than by nearest
-    anchor, because several scenes here place two boxes at the same centre and a
-    nearest-anchor rule would put them on one carrier. The geometry lives entirely in the
-    ltrb distances and the angle, both of which decode back exactly.
+    Box ``i`` rides anchor ``i`` — chosen by position in the list rather than by nearest anchor, because several scenes
+    here place two boxes at the same centre and a nearest-anchor rule would put them on one carrier. The geometry lives
+    entirely in the ltrb distances and the angle, both of which decode back exactly.
 
     Args:
         rboxes: ``(cx, cy, w, h, theta)`` per box, ``theta`` raw as R1 Eq. 13 emits it.
-        logits: The class logit each box's label carries; distinct values keep the score
-            order unambiguous.
+        logits: The class logit each box's label carries; distinct values keep the score order unambiguous.
         labels: The class index of each box.
 
     Returns:
@@ -150,40 +152,24 @@ def _envelope_iou(first: tuple[float, ...], second: tuple[float, ...]) -> float:
     return overlap / union
 
 
-def _survivors(detections: Tensor) -> Tensor:
-    """Return one image's rows with a non-zero score, dropping the padding.
-
-    Examples:
-        >>> detections = torch.zeros(1, 3, 7)
-        >>> detections[0, 0, 5] = 0.9
-        >>> _survivors(detections).shape
-        torch.Size([1, 7])
-    """
-    return detections[0, detections[0, :, 5] > 0.0]
-
-
 class TestRotatedSuppression:
     """The suppression rule itself: what it compares, and what that decides."""
 
     def test_boxes_overlapping_only_as_upright_rectangles_both_survive(self) -> None:
         """Two bars crossing at one centre both survive, because rotated overlap is what decides.
 
-        The work package's reason for existing. Two 20x2 bars through canvas ``(32, 32)``
-        at ``+0.7`` and ``-0.7`` radians have the *same* axis-aligned envelope, so an
-        upright-overlap decoder scores them at IoU 1.0 and deletes the lower-scoring one;
-        their actual rotated overlap is a small rhombus at the crossing, 0.053. Both
-        premises are computed here rather than asserted from memory, so the scene cannot
-        quietly stop discriminating: if a later edit made the envelopes disagree or the
-        rotated overlap large, this fails on the premise instead of passing.
+        The work package's reason for existing. Two 20x2 bars through canvas ``(32, 32)`` at ``+0.7`` and ``-0.7``
+        radians have the *same* axis-aligned envelope, so an upright-overlap decoder scores them at IoU 1.0 and deletes
+        the lower-scoring one; their actual rotated overlap is a small rhombus at the crossing, 0.053. Both premises are
+        computed here rather than asserted from memory, so the scene cannot quietly stop discriminating: if a later edit
+        made the envelopes disagree or the rotated overlap large, this fails on the premise instead of passing.
         """
-        first = (*_CENTRE, *_BAR_EXTENTS, 0.7)
-        second = (*_CENTRE, *_BAR_EXTENTS, -0.7)
-        assert _envelope_iou(first, second) > ROTATED_NMS_IOU_THRESHOLD
-        assert float(rotated_iou(torch.tensor([first]), torch.tensor([second]))) < ROTATED_NMS_IOU_THRESHOLD
+        assert _envelope_iou(_BAR, _CROSSING_BAR) > ROTATED_NMS_IOU_THRESHOLD
+        assert float(rotated_iou(torch.tensor([_BAR]), torch.tensor([_CROSSING_BAR]))) < ROTATED_NMS_IOU_THRESHOLD
 
-        detections = RotatedNMSDecoder(max_det=8)(*_plant([first, second], [6.0, 5.0], [1, 1]))
+        detections = RotatedNMSDecoder(max_det=8)(*_plant([_BAR, _CROSSING_BAR], [6.0, 5.0], [1, 1]))
 
-        survivors = _survivors(detections)
+        survivors = surviving_rows(detections, score_column=_SCORE_COLUMN)
         assert survivors.shape[0] == 2
         assert survivors[:, 4].tolist() == pytest.approx([0.7, -0.7])
 
@@ -191,13 +177,12 @@ class TestRotatedSuppression:
         """The upright decoder, on the very same plant, keeps one box where this one keeps two.
 
         The contrast that makes the previous test's claim executable rather than argued.
-        :class:`~lucid_yolo.decode.nms_path.NMSDecoder` is fed the identical logits and
-        distances — it simply never sees the angles — and answers with a single detection.
-        That is the WP-091 refusal's whole content: not that the axis-aligned decoder
-        errors on oriented input, but that it succeeds, plausibly, on the wrong geometry.
-        A future edit routing the oriented ``nms`` flag back to it turns this red.
+        :class:`~lucid_yolo.decode.nms_path.NMSDecoder` is fed the identical logits and distances — it simply never sees
+        the angles — and answers with a single detection. That is the WP-091 refusal's whole content: not that the
+        axis-aligned decoder errors on oriented input, but that it succeeds, plausibly, on the wrong geometry. A future
+        edit routing the oriented ``nms`` flag back to it turns this red.
         """
-        planted = _plant([(*_CENTRE, *_BAR_EXTENTS, 0.7), (*_CENTRE, *_BAR_EXTENTS, -0.7)], [6.0, 5.0], [1, 1])
+        planted = _plant([_BAR, _CROSSING_BAR], [6.0, 5.0], [1, 1])
         cls_logits, raw_ltrb, angles, points, strides = planted
 
         upright = NMSDecoder(max_det=8)(cls_logits, raw_ltrb, points, strides)
@@ -210,16 +195,13 @@ class TestRotatedSuppression:
         """Two identical rotated boxes of one class leave exactly one survivor, the higher-scoring.
 
         The suppression half of the contract, and the mirror of the axis-aligned path's
-        ``test_overlapping_same_class_collapses_to_one``: the E2E oriented path returns
-        both of these, and this decoder exists precisely to be the column where it does
-        not. Identical geometry makes the overlap exactly 1.0, so the case turns on the
-        rule rather than on where the threshold sits.
+        ``test_overlapping_same_class_collapses_to_one``: the E2E oriented path returns both of these, and this decoder
+        exists precisely to be the column where it does not. Identical geometry makes the overlap exactly 1.0, so the
+        case turns on the rule rather than on where the threshold sits.
         """
-        bar = (*_CENTRE, *_BAR_EXTENTS, 0.7)
+        detections = RotatedNMSDecoder(max_det=8)(*_plant([_BAR, _BAR], [6.0, 5.0], [1, 1]))
 
-        detections = RotatedNMSDecoder(max_det=8)(*_plant([bar, bar], [6.0, 5.0], [1, 1]))
-
-        survivors = _survivors(detections)
+        survivors = surviving_rows(detections, score_column=_SCORE_COLUMN)
         assert survivors.shape[0] == 1
         assert int(survivors[0, 6]) == 1
         assert float(survivors[0, 5]) == pytest.approx(torch.sigmoid(torch.tensor(6.0)).item())
@@ -227,16 +209,13 @@ class TestRotatedSuppression:
     def test_overlapping_pair_of_different_classes_both_survive(self) -> None:
         """The same identical-box pair survives intact when the two carry different labels.
 
-        Class-wise suppression, on the geometry that collapses within one class — so the
-        pair isolates the label test from the overlap test. A decoder that suppressed
-        globally would answer with one box here and look correct on every other scene in
-        this file.
+        Class-wise suppression, on the geometry that collapses within one class — so the pair isolates the label test
+        from the overlap test. A decoder that suppressed globally would answer with one box here and look correct on
+        every other scene in this file.
         """
-        bar = (*_CENTRE, *_BAR_EXTENTS, 0.7)
+        detections = RotatedNMSDecoder(max_det=8)(*_plant([_BAR, _BAR], [6.0, 5.0], [1, 2]))
 
-        detections = RotatedNMSDecoder(max_det=8)(*_plant([bar, bar], [6.0, 5.0], [1, 2]))
-
-        survivors = _survivors(detections)
+        survivors = surviving_rows(detections, score_column=_SCORE_COLUMN)
         assert survivors.shape[0] == 2
         assert [int(row) for row in survivors[:, 6]] == [1, 2]
 
@@ -247,10 +226,9 @@ class TestRotatedSuppression:
     def test_threshold_decides_partial_overlap(self, iou_threshold: float, expected: int) -> None:
         """A pair overlapping at 0.667 survives at threshold 0.7 and collapses at 0.5.
 
-        Proof that the threshold is consulted rather than effectively hard-coded at an
-        extreme. The two boxes share a heading and are offset along their own long axis by
-        a fifth of it, which puts their rotated IoU at 0.667 — between the two thresholds,
-        so each answer is available and the parameter is what picks.
+        Proof that the threshold is consulted rather than effectively hard-coded at an extreme. The two boxes share a
+        heading and are offset along their own long axis by a fifth of it, which puts their rotated IoU at 0.667 —
+        between the two thresholds, so each answer is available and the parameter is what picks.
         """
         heading = 0.7
         shift = 0.2 * _BAR_EXTENTS[0]
@@ -261,7 +239,7 @@ class TestRotatedSuppression:
         decoder = RotatedNMSDecoder(iou_threshold=iou_threshold, max_det=8)
         detections = decoder(*_plant([first, second], [6.0, 5.0], [1, 1]))
 
-        assert _survivors(detections).shape[0] == expected
+        assert surviving_rows(detections, score_column=_SCORE_COLUMN).shape[0] == expected
 
 
 class TestOutputContract:
@@ -271,14 +249,10 @@ class TestOutputContract:
         """Output is ``(B, max_det, 7)`` with score-zero padding rows after the survivors.
 
         The contract every consumer downstream relies on:
-        :func:`~lucid_yolo.eval.dota_eval.rotated_detections_to_predictions` drops rows by
-        score alone and would read a short or ragged batch as a different answer. Two
-        survivors out of a five-row cap leave three all-zero rows.
+        :func:`~lucid_yolo.eval.dota_eval.rotated_detections_to_predictions` drops rows by score alone and would read a
+        short or ragged batch as a different answer. Two survivors out of a five-row cap leave three all-zero rows.
         """
-        bar = (*_CENTRE, *_BAR_EXTENTS, 0.7)
-        crossing = (*_CENTRE, *_BAR_EXTENTS, -0.7)
-
-        detections = RotatedNMSDecoder(max_det=5)(*_plant([bar, crossing], [6.0, 5.0], [1, 1]))
+        detections = RotatedNMSDecoder(max_det=5)(*_plant([_BAR, _CROSSING_BAR], [6.0, 5.0], [1, 1]))
 
         assert detections.shape == (1, 5, 7)
         assert torch.equal(detections[0, 2:], torch.zeros(3, 7))
@@ -286,14 +260,10 @@ class TestOutputContract:
     def test_score_column_non_increasing(self) -> None:
         """Survivors come out in descending score order, padding included.
 
-        Greedy suppression keeps boxes in the order it visits them, which is the score
-        order, and the padding rows carry score zero — so the whole column is
-        non-increasing and a consumer may stop at the first zero.
+        Greedy suppression keeps boxes in the order it visits them, which is the score order, and the padding rows carry
+        score zero — so the whole column is non-increasing and a consumer may stop at the first zero.
         """
-        bar = (*_CENTRE, *_BAR_EXTENTS, 0.7)
-        crossing = (*_CENTRE, *_BAR_EXTENTS, -0.7)
-
-        detections = RotatedNMSDecoder(max_det=5)(*_plant([bar, crossing], [3.0, 6.0], [1, 1]))
+        detections = RotatedNMSDecoder(max_det=5)(*_plant([_BAR, _CROSSING_BAR], [3.0, 6.0], [1, 1]))
 
         scores = detections[0, :, 5]
         assert torch.all(scores[:-1] >= scores[1:])
@@ -301,13 +271,11 @@ class TestOutputContract:
     def test_nothing_above_threshold_all_padding(self) -> None:
         """An image whose every anchor is below the confidence threshold decodes to zeros.
 
-        The degenerate input the fixed-size contract exists to absorb. Suppression never
-        runs, and the answer is still a full ``(1, 4, 7)`` batch rather than an empty
-        tensor or an exception — a caller stacking per-image results needs the rank.
+        The degenerate input the fixed-size contract exists to absorb. Suppression never runs, and the answer is still a
+        full ``(1, 4, 7)`` batch rather than an empty tensor or an exception — a caller stacking per-image results needs
+        the rank.
         """
-        bar = (*_CENTRE, *_BAR_EXTENTS, 0.7)
-
-        detections = RotatedNMSDecoder(conf_threshold=0.999, max_det=4)(*_plant([bar], [6.0], [1]))
+        detections = RotatedNMSDecoder(conf_threshold=0.999, max_det=4)(*_plant([_BAR], [6.0], [1]))
 
         assert detections.shape == (1, 4, 7)
         assert torch.equal(detections, torch.zeros(1, 4, 7))
@@ -315,14 +283,12 @@ class TestOutputContract:
     def test_each_image_of_batch_decoded_on_own(self) -> None:
         """Two images decode independently: a duplicate in one does not suppress the other's box.
 
-        Suppression is per image by definition, and the batch axis is the one place that
-        is easy to lose — a flattened implementation would compare detections across
-        images and silently delete objects that share a coordinate, which is common when
-        every image is a 1024 px tile on one grid.
+        Suppression is per image by definition, and the batch axis is the one place that is easy to lose — a flattened
+        implementation would compare detections across images and silently delete objects that share a coordinate, which
+        is common when every image is a 1024 px tile on one grid.
         """
-        bar = (*_CENTRE, *_BAR_EXTENTS, 0.7)
-        duplicate_pair = _plant([bar, bar], [6.0, 5.0], [1, 1])
-        single = _plant([bar], [6.0], [1])
+        duplicate_pair = _plant([_BAR, _BAR], [6.0, 5.0], [1, 1])
+        single = _plant([_BAR], [6.0], [1])
         batched = tuple(torch.cat((left, right)) for left, right in zip(duplicate_pair[:3], single[:3], strict=True))
 
         detections = RotatedNMSDecoder(max_det=8)(*batched, duplicate_pair[3], duplicate_pair[4])
@@ -334,18 +300,17 @@ class TestOutputContract:
     def test_survivors_canonical_however_head_stated_them(self) -> None:
         """A wild raw angle and short-edge-first extents both come out canonical (A23).
 
-        The decoder inherits canonicalization from
-        :func:`~lucid_yolo.models.heads.obb.decode_rboxes` rather than repeating it, and
-        that inheritance is worth pinning here because suppression *depends* on it: two
-        boxes described a half turn apart are one rectangle, and a path that compared raw
-        angles would treat them as two objects and keep both.
+        The decoder inherits canonicalization from :func:`~lucid_yolo.models.heads.obb.decode_rboxes` rather than
+        repeating it, and that inheritance is worth pinning here because suppression *depends* on it: two boxes
+        described a half turn apart are one rectangle, and a path that compared raw angles would treat them as two
+        objects and keep both.
         """
         wild = (*_CENTRE, *_BAR_EXTENTS, 0.7 + math.pi)
         short_edge_first = (*_CENTRE, _BAR_EXTENTS[1], _BAR_EXTENTS[0], 0.0)
 
         detections = RotatedNMSDecoder(max_det=8)(*_plant([wild, short_edge_first], [6.0, 5.0], [1, 2]))
 
-        survivors = _survivors(detections)
+        survivors = surviving_rows(detections, score_column=_SCORE_COLUMN)
         assert survivors.shape[0] == 2
         assert torch.all(survivors[:, 2] >= survivors[:, 3])  # long edge first
         assert torch.all((survivors[:, 4] >= _THETA_LOW) & (survivors[:, 4] < _THETA_HIGH))
@@ -353,15 +318,10 @@ class TestOutputContract:
     def test_decoding_deterministic(self) -> None:
         """The same planted scene decodes to the same tensor twice, bit for bit.
 
-        Greedy suppression is order-sensitive, and the order comes from a sort over scores
-        that a scene may tie. The sort is stable for that reason; this is what would catch
-        it becoming unstable.
+        Greedy suppression is order-sensitive, and the order comes from a sort over scores that a scene may tie. The
+        sort is stable for that reason; this is what would catch it becoming unstable.
         """
-        planted = _plant(
-            [(*_CENTRE, *_BAR_EXTENTS, 0.7), (*_CENTRE, *_BAR_EXTENTS, -0.7), (*_CENTRE, *_BAR_EXTENTS, 0.0)],
-            [6.0, 6.0, 6.0],
-            [1, 1, 1],
-        )
+        planted = _plant([_BAR, _CROSSING_BAR, (*_CENTRE, *_BAR_EXTENTS, 0.0)], [6.0, 6.0, 6.0], [1, 1, 1])
         decoder = RotatedNMSDecoder(max_det=8)
 
         assert torch.equal(decoder(*planted), decoder(*planted))
@@ -373,10 +333,9 @@ class TestRegisteredThreshold:
     def test_default_registered_constant(self) -> None:
         """The decoder's default IoU threshold is the module constant, not a repeated literal.
 
-        The work package's own definition of done: the threshold is an assumption on the
-        register (A61), so the value exists once and the decoder reads it. A literal at the
-        constructor would leave the register describing a number the code no longer uses,
-        and nothing would report the divergence.
+        The work package's own definition of done: the threshold is an assumption on the register (A61), so the value
+        exists once and the decoder reads it. A literal at the constructor would leave the register describing a number
+        the code no longer uses, and nothing would report the divergence.
         """
         assert RotatedNMSDecoder().iou_threshold == ROTATED_NMS_IOU_THRESHOLD
 
@@ -384,13 +343,11 @@ class TestRegisteredThreshold:
 class TestNonFiniteRowsAreDropped:
     """A ``NaN`` or ``Inf`` box never reaches the output as a detection (WP-170).
 
-    Suppression cannot remove such a row and never could: ``rotated_iou`` scores
-    every pair involving a non-finite box ``0.0`` — every comparison against
-    ``NaN`` is false, so the union guard takes the zero branch — and a zero
-    overlap clears no threshold. The row therefore survived every round of
-    ``_suppress`` and was emitted with a real score beside the honest detections,
-    which is why the drop belongs at the confidence threshold, the one boundary
-    that sees it as a row rather than as an overlap.
+    Suppression cannot remove such a row and never could: ``rotated_iou`` scores every pair involving a non-finite box
+    ``0.0`` — every comparison against ``NaN`` is false, so the union guard takes the zero branch — and a zero overlap
+    clears no threshold. The row therefore survived every round of ``_suppress`` and was emitted with a real score
+    beside the honest detections, which is why the drop belongs at the confidence threshold, the one boundary that sees
+    it as a row rather than as an overlap.
     """
 
     #: A well-formed bar, planted alongside each poisoned row as the control.
@@ -400,15 +357,15 @@ class TestNonFiniteRowsAreDropped:
     def test_non_finite_angle_not_emitted(self, bad: float) -> None:
         """A box whose ``theta`` is non-finite is dropped, and the valid box beside it stays.
 
-        The realistic entry path: an angle head that has diverged emits ``NaN``
-        for one anchor while the rest of the image decodes normally.
+        The realistic entry path: an angle head that has diverged emits ``NaN`` for one anchor while the rest of the
+        image decodes normally.
         """
         poisoned = (48.0, 48.0, 16.0, 4.0, bad)
         cls_logits, raw_ltrb, angles, points, strides = _plant([self.VALID_BOX, poisoned], [6.0, 5.0], [0, 1])
 
         detections = RotatedNMSDecoder(conf_threshold=0.5)(cls_logits, raw_ltrb, angles, points, strides)
 
-        survivors = _survivors(detections)
+        survivors = surviving_rows(detections, score_column=_SCORE_COLUMN)
         assert survivors.shape[0] == 1
         assert bool(torch.isfinite(survivors).all())
         assert int(survivors[0, 6]) == 0  # the valid box's class, not the poisoned one's
@@ -416,8 +373,8 @@ class TestNonFiniteRowsAreDropped:
     def test_non_finite_extent_not_emitted(self) -> None:
         """A box whose decoded ``w``/``h`` is non-finite is dropped the same way.
 
-        Reaches the decoder through the ltrb distances rather than the angle, so
-        the drop is shown to test the decoded row and not one particular input.
+        Reaches the decoder through the ltrb distances rather than the angle, so the drop is shown to test the decoded
+        row and not one particular input.
         """
         cls_logits, raw_ltrb, angles, points, strides = _plant([self.VALID_BOX], [6.0], [0])
         raw_ltrb[0, 1] = torch.tensor([float("inf")] * 4)
@@ -425,7 +382,7 @@ class TestNonFiniteRowsAreDropped:
 
         detections = RotatedNMSDecoder(conf_threshold=0.5)(cls_logits, raw_ltrb, angles, points, strides)
 
-        survivors = _survivors(detections)
+        survivors = surviving_rows(detections, score_column=_SCORE_COLUMN)
         assert survivors.shape[0] == 1
         assert bool(torch.isfinite(survivors).all())
         assert int(survivors[0, 6]) == 0
@@ -433,9 +390,9 @@ class TestNonFiniteRowsAreDropped:
     def test_non_finite_row_not_shield_duplicate(self) -> None:
         """Dropping the bad row leaves ordinary suppression intact behind it.
 
-        Two same-class copies of one bar sit either side of a ``NaN`` row in score
-        order. The ``NaN`` is removed and the duplicate is then suppressed by the
-        survivor, so the drop neither hides a duplicate nor takes a real box with it.
+        Two same-class copies of one bar sit either side of a ``NaN`` row in score order. The ``NaN`` is removed and
+        the duplicate is then suppressed by the survivor, so the drop neither hides a duplicate nor takes a real box
+        with it.
         """
         duplicate = (32.0, 32.0, 20.0, 4.0, 0.31)
         poisoned = (48.0, 48.0, 16.0, 4.0, float("nan"))
@@ -445,7 +402,7 @@ class TestNonFiniteRowsAreDropped:
 
         detections = RotatedNMSDecoder(conf_threshold=0.5)(cls_logits, raw_ltrb, angles, points, strides)
 
-        survivors = _survivors(detections)
+        survivors = surviving_rows(detections, score_column=_SCORE_COLUMN)
         assert survivors.shape[0] == 1
         assert bool(torch.isfinite(survivors).all())
 
@@ -462,11 +419,10 @@ class TestNonFiniteRowsAreDropped:
 def test_empty_batch_decodes_to_empty_result() -> None:
     """``B = 0`` returns a zero-row A45 batch rather than raising inside ``torch.stack``.
 
-    The oriented decoder stacks one result per image, and ``torch.stack`` rejects an
-    empty list, so an empty batch failed with a message about a ``TensorList``. Both
-    other decoders return empties for the same input; matching them keeps the three
-    paths interchangeable for an evaluation loop that may legitimately hand any of
-    them a batch with no images in it.
+    The oriented decoder stacks one result per image, and ``torch.stack`` rejects an empty list, so an empty batch
+    failed with a message about a ``TensorList``. Both other decoders return empties for the same input; matching them
+    keeps the three paths interchangeable for an evaluation loop that may legitimately hand any of them a batch with no
+    images in it.
     """
     points, strides = make_anchor_points([(1, 2)], [8])
     decoder = RotatedNMSDecoder(max_det=4)
@@ -479,9 +435,9 @@ def test_empty_batch_decodes_to_empty_result() -> None:
 def _unscreened_suppress(decoder: RotatedNMSDecoder, rboxes: Tensor, scores: Tensor, classes: Tensor) -> Tensor:
     """Suppress by computing every remaining pair's IoU, the way the loop did before screening.
 
-    The reference the screened loop is asserted against: identical rule, identical order,
-    no pre-filter. Kept in the test rather than in the source so the comparison is
-    against code that cannot itself have been changed by the optimization.
+    The reference the screened loop is asserted against: identical rule, identical order, no pre-filter. Kept in the
+    test rather than in the source so the comparison is against code that cannot itself have been changed by the
+    optimization.
 
     Examples:
         >>> callable(_unscreened_suppress)
@@ -524,12 +480,11 @@ class TestScreenedSuppression:
     def test_screening_reproduces_unscreened_survivors(self, num_classes: int, seed: int) -> None:
         """Screened and unscreened suppression return the same indices, in the same order.
 
-        The screen drops two kinds of pair before the polygon intersection: one whose
-        class differs, whose overlap the rule never reads, and one whose circumscribed
-        circles do not reach, whose exact IoU is zero. Neither can change a survivor, and
-        this asserts it over scenes dense enough to exercise both — 200 boxes on a 640
-        canvas, at one, three and fifteen classes, so the single-class case (where the
-        class half of the screen does nothing) is covered too.
+        The screen drops two kinds of pair before the polygon intersection: one whose class differs, whose overlap the
+        rule never reads, and one whose circumscribed circles do not reach, whose exact IoU is zero. Neither can change
+        a survivor, and this asserts it over scenes dense enough to exercise both — 200 boxes on a 640 canvas, at one,
+        three and fifteen classes, so the single-class case (where the class half of the screen does nothing) is covered
+        too.
         """
         rboxes, scores, labels = _random_scene(200, num_classes, seed)
         decoder = RotatedNMSDecoder(max_det=300)
@@ -541,12 +496,11 @@ class TestScreenedSuppression:
     def test_reach_bound_rejects_only_exactly_disjoint_pairs(self) -> None:
         """Every pair the reach test drops has an exact rotated IoU of ``0.0``.
 
-        The class half of the screen is a restatement of the rule, but the reach half is
-        a geometric bound, and a bound that is too tight would silently delete real
-        overlaps. Asserted directly rather than argued: over a dense scene at one class,
-        so the class test admits everything and the reach test is the only thing masking,
-        the maximum IoU among rejected pairs is zero — and the minimum among the pairs it
-        keeps is not, so the scene genuinely exercises both sides.
+        The class half of the screen is a restatement of the rule, but the reach half is a geometric bound, and a bound
+        that is too tight would silently delete real overlaps. Asserted directly rather than argued: over a dense scene
+        at one class, so the class test admits everything and the reach test is the only thing masking, the maximum IoU
+        among rejected pairs is zero — and the minimum among the pairs it keeps is not, so the scene genuinely exercises
+        both sides.
         """
         rboxes, _, _ = _random_scene(120, 1, seed=3)
         one_class = torch.zeros(rboxes.shape[0] - 1, dtype=torch.long)

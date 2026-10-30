@@ -48,9 +48,8 @@ _CLEARING_GRADIENTS: ContextVar[frozenset[int]] = ContextVar("clearing_gradients
 def _gradients_cleared_after_forward(parameters: Iterable[Tensor]) -> Iterator[None]:
     """Scope the parameters native automatic optimization clears before backward.
 
-    The caller certifies the closure and its zero-gradient observers. Other
-    parameters keep their snapshots, including a parameter removed from the
-    optimizer's live groups. The token is reset even when the forward fails.
+    The caller certifies the closure and its zero-gradient observers. Other parameters keep their snapshots, including
+    a parameter removed from the optimizer's live groups. The token is reset even when the forward fails.
 
     Examples:
         ```pycon
@@ -84,9 +83,8 @@ def _fp32_policy() -> tuple[object, ...]:
     """Read the float32 matmul and cuDNN policy through the API this torch build exposes.
 
     Once any ``fp32_precision`` attribute has been set, torch refuses the legacy getters
-    (``get_float32_matmul_precision``, ``allow_tf32``) with a :class:`RuntimeError`. A
-    build that has the new attributes is therefore read only through them; they also
-    reflect values written through the legacy setters.
+    (``get_float32_matmul_precision``, ``allow_tf32``) with a :class:`RuntimeError`. A build that has the new
+    attributes is therefore read only through them; they also reflect values written through the legacy setters.
     """
     matmul, cudnn = torch.backends.cuda.matmul, torch.backends.cudnn
     if not hasattr(matmul, "fp32_precision"):
@@ -207,10 +205,9 @@ def replay_autocast() -> torch.autocast:
 def record_graphed(module: nn.Module, samples: tuple[Tensor, ...], device: torch.device) -> nn.Module:
     """Record ``module`` once on ``samples`` and leave its buffers and the RNG as they were.
 
-    The recorder's warmup runs the module, which advances BatchNorm statistics and may
-    draw random numbers; both are restored, so recording alone changes no training state.
-    This is the one call through which the network and segmentation-head holders record,
-    so a test can replace it to drive their whole lifecycle without CUDA.
+    The recorder's warmup runs the module, which advances BatchNorm statistics and may draw random numbers; both are
+    restored, so recording alone changes no training state. This is the one call through which the network and
+    segmentation-head holders record, so a test can replace it to drive their whole lifecycle without CUDA.
 
     Args:
         module: The module to record; the recorder installs the graphed forward on it.
@@ -234,9 +231,8 @@ def record_graphed(module: nn.Module, samples: tuple[Tensor, ...], device: torch
         try:
             return cast("nn.Module", torch.cuda.make_graphed_callables(module, samples))
         finally:
-            # Warmup runs on a side stream the recorder owns; a failure there can leave
-            # BatchNorm writes queued, so drain the device before the restore below
-            # copies onto the current stream.
+            # Warmup runs on a side stream the recorder owns; a failure there can leave BatchNorm writes queued,
+            # so drain the device before the restore below copies onto the current stream.
             torch.cuda.synchronize(device)
             with torch.no_grad():
                 for buffer, snapshot in snapshots:
@@ -246,21 +242,18 @@ def record_graphed(module: nn.Module, samples: tuple[Tensor, ...], device: torch
 def copy_out_live_gradients(parameters: Iterable[Tensor]) -> None:
     """Move live parameter gradients out of the storage the next replayed backward overwrites.
 
-    A parameter whose ``.grad`` was adopted from a recording's static gradient buffers
-    still aliases them, so the next replayed backward would overwrite it and then
-    accumulate onto itself. Any ``.grad`` alive before a replay (gradient accumulation, an
-    in-place ``zero_grad``, a callback keeping gradients) is copied out first. Lightning's
-    automatic optimization clears gradients after the training step's forward, so the
-    previous step's gradients are still alive at this point. Unless the caller
-    certifies a native closure that clears them before backward, those are copied
-    too. The certified scope names the optimizer's live parameters; gradients
-    outside that set retain their snapshots.
+    A parameter whose ``.grad`` was adopted from a recording's static gradient buffers still aliases them, so the next
+    replayed backward would overwrite it and then accumulate onto itself. Any ``.grad`` alive before a replay
+    (gradient accumulation, an in-place ``zero_grad``, a callback keeping gradients) is copied out first. Lightning's
+    automatic optimization clears gradients after the training step's forward, so the previous step's gradients are
+    still alive at this point. Unless the caller certifies a native closure that clears them before backward,
+    those are copied too. The certified scope names the optimizer's live parameters; gradients outside that set
+    retain their snapshots.
 
-    The caller makes the copy at forward time, before the replay, and holds every later
-    replay of the same recording until this one's backward has run. Nothing can then
-    alias the static buffers again before that backward writes them. The same copy made
-    from a pre-hook inside the replayed backward left every accumulated gradient wrong on
-    CUDA (WP-206).
+    The caller makes the copy at forward time, before the replay, and holds every later replay of the same recording
+    until this one's backward has run. Nothing can then alias the static buffers again before that backward
+    writes them. The same copy made from a pre-hook inside the replayed backward left every accumulated gradient
+    wrong on CUDA (WP-206).
 
     Examples:
         ```pycon
@@ -281,10 +274,9 @@ def copy_out_live_gradients(parameters: Iterable[Tensor]) -> None:
 def drain_device(device: torch.device | None) -> None:
     """Wait for all queued work on a recording's device, for a holder that does not record its streams.
 
-    The whole device is synchronized rather than one stream, so a replay launched from any
-    stream has finished before the caller drops its graphs (D6). Nothing runs without a
-    device, for a device that is not CUDA, or before CUDA is initialized, so a CPU run never
-    touches the CUDA runtime.
+    The whole device is synchronized rather than one stream, so a replay launched from any stream has finished before
+    the caller drops its graphs (D6). Nothing runs without a device, for a device that is not CUDA, or before CUDA is
+    initialized, so a CPU run never touches the CUDA runtime.
 
     Raises:
         RuntimeError: When the device reports an error while draining.
@@ -304,10 +296,9 @@ def drain_device(device: torch.device | None) -> None:
 def release_graphs(streams: Iterable[torch.cuda.Stream]) -> None:
     """Wait for every replay queued on ``streams`` before the caller drops its graphs.
 
-    Each distinct stream is synchronized once, in first-seen order. The caller keeps its
-    recordings referenced until this returns; dropping a graph's private pool while a
-    replay on it may still be queued is the hazard this rules out (D6). It runs only when
-    a holder is cleared, never per step.
+    Each distinct stream is synchronized once, in first-seen order. The caller keeps its recordings referenced until
+    this returns; dropping a graph's private pool while a replay on it may still be queued is the hazard this rules
+    out (D6). It runs only when a holder is cleared, never per step.
 
     Raises:
         RuntimeError: When a stream reports a device error while draining.
@@ -340,9 +331,9 @@ class _ReplayHolder(Protocol):
 class ReplayLifecycle(Callback):
     """Bound one replay holder's recordings to a fit, through skipped backwards and failure.
 
-    Subclass hook: set :attr:`attribute`, :attr:`holder_type` and :attr:`flag`. A module
-    without that attribute, or holding something other than :attr:`holder_type`, makes
-    every hook a no-op, so a trainer reused on another module class does not fail here.
+    Subclass hook: set :attr:`attribute`, :attr:`holder_type` and :attr:`flag`. A module without that attribute, or
+    holding something other than :attr:`holder_type`, makes every hook a no-op, so a trainer reused on another module
+    class does not fail here.
     """
 
     #: Name of the module attribute that owns the holder.

@@ -1,26 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 """Shared geometry for the single-image inference suites (WP-089, WP-090, WP-091).
 
-The detection suite and the segmentation one assert against the **same** planted box, and
-that is why this module exists rather than a copy in each file: ``test_mask_matches_box``
-means "the mask lands inside the box" only if the box it compares against is the very box
-:mod:`tests.predict.test_predict` proved the letterbox inverse puts there. Two files each
-carrying their own copy of the arithmetic would stay internally consistent while drifting
-apart, and the second one's containment assertion would quietly stop saying anything.
+The detection suite and the segmentation one assert against the **same** planted box, and that is why this module
+exists rather than a copy in each file: ``test_mask_matches_box`` means "the mask lands inside the box" only if the
+box it compares against is the very box :mod:`tests.predict.test_predict` proved the letterbox inverse puts there.
+Two files each carrying their own copy of the arithmetic would stay internally consistent while drifting apart, and
+the second one's containment assertion would quietly stop saying anything.
 
-The oriented suite lands on the same image and the same letterbox, with a rotated box of
-its own: an ``xyxy`` box and a ``(cx, cy, w, h, theta)`` one are not the same statement,
-and the second travels home through a different function
+The oriented suite lands on the same image and the same letterbox, with a rotated box of its own: an ``xyxy`` box and
+a ``(cx, cy, w, h, theta)`` one are not the same statement, and the second travels home through a different function
 (:func:`~lucid_yolo.decode.common.rboxes_to_letterboxed_original`).
 
-The image is 64x128, deliberately not square: at a 64 px canvas that is ratio 0.5 with a
-16 px top pad and no left pad, so a wrong inverse cannot pass by symmetry. An inverse that
-dropped the pad, or applied it on the wrong axis, or forgot the ratio, moves the box
-somewhere else and the arithmetic is small enough to check by eye.
+The image is 64x128, deliberately not square: at a 64 px canvas that is ratio 0.5 with a 16 px top pad and no left
+pad, so a wrong inverse cannot pass by symmetry. An inverse that dropped the pad, or applied it on the wrong axis, or
+forgot the ratio, moves the box somewhere else and the arithmetic is small enough to check by eye.
 
-Imported by bare module name, the way ``tests/fixtures/synthetic.py`` is: ``tests`` is
-deliberately not an importable package (see ``tests/conftest.py``), and the sibling
-``conftest.py`` puts this directory on ``sys.path``.
+Imported by bare module name, the way ``tests/fixtures/synthetic.py`` is: ``tests`` is deliberately not an importable
+package (see ``tests/conftest.py``), and the sibling ``conftest.py`` puts this directory on ``sys.path``.
 """
 
 from __future__ import annotations
@@ -40,40 +36,37 @@ if TYPE_CHECKING:
 
 #: Raised by the stub modules' superseded ``forward``/``forward_segmentation``.
 #:
-#: The four suites plant their outputs on the seam the entry points call. When that seam
-#: moved to :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward_branch`, a stub that
-#: kept planting on ``forward`` would have stopped being consulted at all: the real,
-#: untrained head would answer with noise and every geometry assertion would go on passing
-#: while testing nothing. Making the *old* seam raise is what turns that silent failure
-#: into a loud one, in both directions — if an entry point ever regresses to calling
-#: ``forward``, these suites fail immediately instead of quietly asserting against noise.
+#: The four suites plant their outputs on the seam the entry points call. When that seam moved to
+#: :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward_branch`, a stub that kept planting on ``forward`` would
+#: have stopped being consulted at all: the real, untrained head would answer with noise and every geometry assertion
+#: would go on passing while testing nothing. Making the *old* seam raise is what turns that silent failure into a
+#: loud one, in both directions — if an entry point ever regresses to calling ``forward``, these suites fail
+#: immediately instead of quietly asserting against noise.
 SUPERSEDED_SEAM = (
     "this stub plants its outputs on the branch-limited seam; reaching the dual-branch "
     "forward means the caller bypassed it and the assertions would be meaningless"
 )
 
-#: Original image size ``(height, width)``: not square, so the letterbox pad is
-#: one-sided and a pad-blind inverse cannot survive by accident.
+#: Original image size ``(height, width)``: not square, so the letterbox pad is one-sided and a pad-blind inverse
+#: cannot survive by accident.
 ORIGINAL_SIZE = (64, 128)
 
-#: Letterbox side used throughout. 64 keeps the anchor grid at 84 points (8x8 + 4x4 +
-#: 2x2) while staying divisible by 32, which the head requires.
+#: Letterbox side used throughout. 64 keeps the anchor grid at 84 points (8x8 + 4x4 + 2x2) while staying divisible
+#: by 32, which the head requires.
 IMG_SIZE = 64
 
-#: The planted box in **letterboxed canvas** pixels, and where the letterbox inverse
-#: must put it in the original image. At ratio 0.5 with a 16 px top pad and no left pad:
-#: ``x/0.5`` on the horizontal, ``(y - 16)/0.5`` on the vertical.
+#: The planted box in **letterboxed canvas** pixels, and where the letterbox inverse must put it in the original
+#: image. At ratio 0.5 with a 16 px top pad and no left pad: ``x/0.5`` on the horizontal, ``(y - 16)/0.5`` on the
+#: vertical.
 CANVAS_BOX = (8.0, 24.0, 40.0, 48.0)
 EXPECTED_ORIGINAL_BOX = (16.0, 16.0, 80.0, 64.0)
 
-#: The planted **rotated** box, in the two forms a head can emit it in, and where the
-#: letterbox inverse must put either. Both describe the same rectangle centred at canvas
-#: ``(24, 32)``: ``(32, 16)`` states the long edge first, ``(16, 32)`` the short edge
-#: first — so the second is the first rotated a quarter turn, and canonicalization has to
-#: turn it into the first with ``theta`` shifted by ``pi/2`` (A23). Their axis-aligned
-#: envelopes, ``[8, 24, 40, 40]`` and ``[16, 16, 32, 48]``, both lie inside the 64 px
-#: canvas's content band (``y`` in ``[16, 48]``), so neither planting reaches into a pad.
-#: At ratio 0.5 with a 16 px top pad: ``cx/0.5``, ``(cy - 16)/0.5``, extents ``/0.5``.
+#: The planted **rotated** box, in the two forms a head can emit it in, and where the letterbox inverse must put
+#: either. Both describe the same rectangle centred at canvas ``(24, 32)``: ``(32, 16)`` states the long edge first,
+#: ``(16, 32)`` the short edge first — so the second is the first rotated a quarter turn, and canonicalization has to
+#: turn it into the first with ``theta`` shifted by ``pi/2`` (A23). Their axis-aligned envelopes, ``[8, 24, 40, 40]``
+#: and ``[16, 16, 32, 48]``, both lie inside the 64 px canvas's content band (``y`` in ``[16, 48]``), so neither
+#: planting reaches into a pad. At ratio 0.5 with a 16 px top pad: ``cx/0.5``, ``(cy - 16)/0.5``, extents ``/0.5``.
 CANVAS_RBOX_CENTRE = (24.0, 32.0)
 CANVAS_RBOX_EXTENTS = (32.0, 16.0)
 CANVAS_RBOX_EXTENTS_SWAPPED = (16.0, 32.0)
@@ -85,24 +78,42 @@ PLANTED_LABEL = 1
 #: Class count the stub heads report over.
 NUM_CLASSES = 2
 
-#: Logit of the planted anchor's class, and of every other class on every other anchor.
-#: ``sigmoid(8) = 0.9997`` clears any sane threshold; ``sigmoid(-8) = 0.0003`` clears
-#: none, so the rest of the grid is noise that both decoders must discard. The same pair
-#: drives the planted prototypes, where their **symmetry** additionally matters: the two
-#: probabilities sum to 1, so a bilinear interpolation between them crosses 0.5 exactly
-#: midway and the mask boundary lands on a prototype-cell edge rather than near one.
+#: Logit of the planted anchor's class, and of every other class on every other anchor. ``sigmoid(8) = 0.9997``
+#: clears any sane threshold; ``sigmoid(-8) = 0.0003`` clears none, so the rest of the grid is noise that both
+#: decoders must discard. The same pair drives the planted prototypes, where their **symmetry** additionally matters:
+#: the two probabilities sum to 1, so a bilinear interpolation between them crosses 0.5 exactly midway and the mask
+#: boundary lands on a prototype-cell edge rather than near one.
 PRESENT_LOGIT = 8.0
 ABSENT_LOGIT = -8.0
+
+
+def untrained_module(task: str) -> DetectionLitModule:
+    """Build the tiny untrained module of ``task`` that the inference suites share.
+
+    One place for the ``depth``/``width``/``max_channels`` triple the suites use whenever they need a real, untrained
+    module rather than a planted stub: the refusal tests, which only need ``task`` to be the module's own property,
+    and :func:`write_checkpoint`, which saves one.
+
+    Args:
+        task: The ``task`` the module carries.
+
+    Returns:
+        A freshly initialised :class:`~lucid_yolo.ptl.module.DetectionLitModule` over :data:`NUM_CLASSES` classes.
+
+    Examples:
+        >>> untrained_module("obb").task
+        'obb'
+    """
+    return DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=NUM_CLASSES, task=task)
 
 
 def ltrb_from_anchor(box: tuple[float, ...], centre: Tensor, stride: Tensor) -> Tensor:
     """Return the raw ltrb distances that decode to ``box`` from ``centre``.
 
-    The inverse of :func:`~lucid_yolo.models.heads.detect.decode_ltrb`, which is what a
-    stub head has to do to plant a *chosen* box: distances are offsets from the anchor
-    centre in stride units. This is head arithmetic, not letterbox arithmetic — the
-    transform these work packages refuse to write twice is the letterbox inverse, and
-    that one is called, never reproduced.
+    The inverse of :func:`~lucid_yolo.models.heads.detect.decode_ltrb`, which is what a stub head has to do to plant a
+    *chosen* box: distances are offsets from the anchor centre in stride units. This is head arithmetic, not letterbox
+    arithmetic — the transform these work packages refuse to write twice is the letterbox inverse, and that one is
+    called, never reproduced.
 
     Args:
         box: Target ``xyxy`` box in letterboxed-canvas pixels.
@@ -128,13 +139,13 @@ class PlantedGrid:
     """One planted detection and the anchor grid it was planted on.
 
     Attributes:
-        cls: Class logits ``(B, A, num_classes)``, saturated present at the planted
-            anchor's own class and saturated absent everywhere else.
+        cls: Class logits ``(B, A, num_classes)``, saturated present at the planted anchor's own class and saturated
+            absent everywhere else.
         box: Raw ltrb distances ``(B, A, 4)``, zero except at the planted anchor.
         points: The anchor centres ``(A, 2)`` in canvas pixels.
         strides: Each anchor's level stride ``(A, 1)``.
-        anchor: Index of the anchor the detection was planted on, so a caller can plant
-            its own extra stems -- coefficients, angles, points -- at the same row.
+        anchor: Index of the anchor the detection was planted on, so a caller can plant its own extra stems --
+            coefficients, angles, points -- at the same row.
 
     Examples:
         >>> import torch
@@ -155,22 +166,20 @@ def plant_detection(
 ) -> PlantedGrid:
     """Plant one confident detection at ``canvas_box`` on the grid ``images`` implies.
 
-    The arithmetic every stub module in these suites needs before it can add its own
-    stems, in one place rather than four: build the anchor grid, find the anchor nearest
-    the box's centre, saturate that anchor's class logit and give it the ltrb distances
-    that decode back to the box. Four copies of this stayed correct only by coincidence,
-    and each was free to drift from the box the shared assertions are written against.
+    The arithmetic every stub module in these suites needs before it can add its own stems, in one place rather than
+    four: build the anchor grid, find the anchor nearest the box's centre, saturate that anchor's class logit and give
+    it the ltrb distances that decode back to the box. Four copies of this stayed correct only by coincidence, and
+    each was free to drift from the box the shared assertions are written against.
 
     Args:
         images: The input batch, read only for its shape.
         canvas_box: Target ``xyxy`` box in letterboxed-canvas pixels.
         label: Class index the planted detection carries.
-        num_classes: Class count the stub head reports over. Defaults to
-            :data:`NUM_CLASSES`.
+        num_classes: Class count the stub head reports over. Defaults to :data:`NUM_CLASSES`.
 
     Returns:
-        A :class:`PlantedGrid` holding the logits, the distances, the grid and the index
-        of the anchor everything was planted on.
+        A :class:`PlantedGrid` holding the logits, the distances, the grid and the index of the anchor everything was
+        planted on.
 
     Examples:
         >>> import torch
@@ -201,7 +210,7 @@ def write_checkpoint(task: str, path: Path) -> Path:
     Returns:
         ``path``, so a caller can name the file and use it in one expression.
     """
-    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=NUM_CLASSES, task=task)
+    module = untrained_module(task)
     torch.save(
         {
             "state_dict": module.state_dict(),

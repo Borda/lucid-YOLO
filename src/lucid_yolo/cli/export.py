@@ -8,30 +8,25 @@ One command, no task flag::
     lucid-export --checkpoint runs/obb.ckpt --output obb.onnx --canvas "[768, 1024]"
     lucid-export --checkpoint runs/det.ckpt --output det_raw.onnx --ema false
 
-The task is read from the checkpoint, exactly as ``lucid-eval`` and ``lucid-predict``
-read it, and the graph is the suppression-free one-to-one path that task deploys on:
-:func:`~lucid_yolo.export.graph_from_module` rebuilds the task's model from the
-checkpoint under a strict key check and :func:`~lucid_yolo.export.export_graph` writes
-it at the pinned opset. Nothing here composes a graph of its own, so the file this
-command writes is the file the ONNX export gate certifies.
+The task is read from the checkpoint, exactly as ``lucid-eval`` and ``lucid-predict`` read it, and the graph is the
+suppression-free one-to-one path that task deploys on: :func:`~lucid_yolo.export.graph_from_module` rebuilds the
+task's model from the checkpoint under a strict key check and :func:`~lucid_yolo.export.export_graph` writes it at the
+pinned opset. Nothing here composes a graph of its own, so the file this command writes is the file the ONNX export
+gate certifies.
 
-``--ema`` and ``--img_size`` keep the other commands' spellings and semantics: the EMA
-shadow by default, and a square side defaulting per task through the same
-:data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE` table. ``--canvas`` takes a non-square
-``[height, width]`` instead, written as one JSON list because that is how jsonargparse
-reads a pair; the two flags are exclusive.
+``--ema`` and ``--img_size`` keep the other commands' spellings and semantics: the EMA shadow by default, and a
+square side defaulting per task through the same :data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE` table. ``--canvas``
+takes a non-square ``[height, width]`` instead, written as one JSON list because that is how jsonargparse reads a
+pair; the two flags are exclusive.
 
-Limits a caller should know before deploying the file (the
-:mod:`lucid_yolo.export` docstring has the reasons):
+Limits a caller should know before deploying the file (the :mod:`lucid_yolo.export` docstring has the reasons):
 
-- The input shape is static, batch included: ``(1, 3, H, W)`` for the canvas named. A
-  second canvas or batch size is a second export.
-- The output is a fixed ``300`` rows per image, best first; rows no anchor produced are
-  zero-score padding. A segmentation export refuses canvases yielding fewer than 300
-  anchors (96 px a side and below).
-- Opset 17 by default, through torch's legacy TorchScript exporter, which needs the
-  ``onnx`` package: ``pip install "lucid-yolo[export]"``. This command checks for it
-  before reading the checkpoint.
+- The input shape is static, batch included: ``(1, 3, H, W)`` for the canvas named. A second canvas or batch size
+  is a second export.
+- The output is a fixed ``300`` rows per image, best first; rows no anchor produced are zero-score padding.
+  A segmentation export refuses canvases yielding fewer than 300 anchors (96 px a side and below).
+- Opset 17 by default, through torch's legacy TorchScript exporter, which needs the ``onnx`` package:
+  ``pip install "lucid-yolo[export]"``. This command checks for it before reading the checkpoint.
 
 Provenance: R1 sec. 3.2.1, R3 sec. 4. Assumptions: A9, A45.
 """
@@ -71,9 +66,8 @@ _ONNX_HINT = 'pip install "lucid-yolo[export]"'
 def _require_onnx() -> None:
     """Refuse up front when the ``onnx`` package torch's exporter needs is absent.
 
-    The exporter imports it only to finalise the file, after the trace, so without this
-    check a missing package surfaces at the end of the run rather than before the
-    checkpoint is read.
+    The exporter imports it only to finalise the file, after the trace, so without this check a missing package
+    surfaces at the end of the run rather than before the checkpoint is read.
 
     Raises:
         ModuleNotFoundError: If ``onnx`` cannot be imported; the message names the extra.
@@ -91,10 +85,9 @@ def _require_onnx() -> None:
 def _refuse_output_onto_checkpoint(checkpoint: Path, output: Path) -> None:
     """Refuse an ``--output`` that names the checkpoint file itself, under any spelling.
 
-    The exporter opens the destination for writing, which truncates it, so an output that
-    is the checkpoint replaces the weights with ONNX bytes and leaves no checkpoint to
-    export again. Two tests catch the aliases: resolved-path equality covers the same path
-    spelled differently and a symbolic link, and :func:`os.path.samefile` covers a hard
+    The exporter opens the destination for writing, which truncates it, so an output that is the checkpoint replaces
+    the weights with ONNX bytes and leaves no checkpoint to export again. Two tests catch the aliases: resolved-path
+    equality covers the same path spelled differently and a symbolic link, and :func:`os.path.samefile` covers a hard
     link, which resolves to a path of its own while sharing the checkpoint's file.
 
     Args:
@@ -102,8 +95,7 @@ def _refuse_output_onto_checkpoint(checkpoint: Path, output: Path) -> None:
         output: ``--output``, the file about to be written.
 
     Raises:
-        ValueError: If ``output`` refers to the same file as ``checkpoint``; nothing has
-            been read or written by then.
+        ValueError: If ``output`` refers to the same file as ``checkpoint``; nothing has been read or written by then.
 
     Examples:
         ```pycon
@@ -130,8 +122,8 @@ def _resolve_canvas(task: str, canvas: tuple[int, int] | None, img_size: int | N
 
     Args:
         task: The checkpoint's task, already known to have a default side.
-        canvas: ``--canvas``, a ``(height, width)`` pair; wins when given, the caller
-            having already refused it beside ``img_size``.
+        canvas: ``--canvas``, a ``(height, width)`` pair; wins when given, the caller having already refused it
+            beside ``img_size``.
         img_size: ``--img_size``, a square side.
 
     Returns:
@@ -162,34 +154,29 @@ def export(
 ) -> int:
     """Export one checkpoint's suppression-free graph to an ONNX file.
 
-    Which graph is built is the checkpoint's ``task``, not a flag, for the reason
-    ``lucid-predict`` gives: a flag is how a caller would export a segmentation model
-    with its mask branch unread.
+    Which graph is built is the checkpoint's ``task``, not a flag, for the reason ``lucid-predict`` gives: a flag is
+    how a caller would export a segmentation model with its mask branch unread.
 
     Args:
-        checkpoint: Lightning ``.ckpt`` to export; its task must be ``detect``,
-            ``segment``, ``obb`` or ``keypoints``.
+        checkpoint: Lightning ``.ckpt`` to export; its task must be ``detect``, ``segment``, ``obb`` or ``keypoints``.
         output: Destination ``.onnx`` file; the parent directory is created if absent.
-        canvas: Input ``[height, width]`` in pixels, each a positive multiple of every
-            head stride. Exclusive with ``img_size``.
-        img_size: Square input side in pixels. Defaults per the checkpoint's task when
-            neither this nor ``canvas`` is given.
+        canvas: Input ``[height, width]`` in pixels, each a positive multiple of every head stride. Exclusive with
+            ``img_size``.
+        img_size: Square input side in pixels. Defaults per the checkpoint's task when neither this nor
+            ``canvas`` is given.
         ema: Export the EMA shadow stored in the checkpoint rather than raw weights.
-        opset: ONNX opset to emit. Defaults to the pinned
-            :data:`~lucid_yolo.export.ONNX_OPSET`, the only one the export gate
-            certifies.
+        opset: ONNX opset to emit. Defaults to the pinned :data:`~lucid_yolo.export.ONNX_OPSET`, the only one
+            the export gate certifies.
 
     Returns:
         ``0``; a failure here raises rather than returning a code.
 
     Raises:
         ModuleNotFoundError: If the ``onnx`` package is not installed.
-        ValueError: If both ``canvas`` and ``img_size`` are given, if ``output`` is the
-            checkpoint file itself (the same path, a symbolic link or a hard link to it;
-            refused before the checkpoint is read), if the checkpoint's task is unknown,
-            if its weights do not match the task's model
-            (:func:`~lucid_yolo.export.graph_from_module` names the keys), or if the
-            canvas is refused.
+        ValueError: If both ``canvas`` and ``img_size`` are given, if ``output`` is the checkpoint file itself
+            (the same path, a symbolic link or a hard link to it; refused before the checkpoint is read), if
+            the checkpoint's task is unknown, if its weights do not match the task's model
+            (:func:`~lucid_yolo.export.graph_from_module` names the keys), or if the canvas is refused.
 
     Examples:
         ```pycon

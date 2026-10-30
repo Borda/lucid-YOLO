@@ -29,9 +29,8 @@ _CLIP = torch.nn.utils.clip_grad_norm_
 class _GradientNormCapture:
     """Own one reduction signature per fit and retire on incompatible inputs.
 
-    Private inputs are overwritten before every replay. A norm is consumed by native
-    scaling before the next call can overwrite it; it is never exposed to a caller.
-    Reset and serialization drop all recordings and retained tensors.
+    Private inputs are overwritten before every replay. A norm is consumed by native scaling before the next call can
+    overwrite it; it is never exposed to a caller. Reset and serialization drop all recordings and retained tensors.
     """
 
     def __init__(self) -> None:
@@ -40,9 +39,8 @@ class _GradientNormCapture:
     def clear(self) -> None:
         """Reset the holder, retaining graph-pool resources until the recorded device drains.
 
-        Reset first so a failing drain leaves an empty holder. Local references keep
-        the graph, inputs and norm alive until draining finishes; without a graph,
-        construction and repeated cleanup never touch the CUDA runtime.
+        Reset first so a failing drain leaves an empty holder. Local references keep the graph, inputs and norm alive
+        until draining finishes; without a graph, construction and repeated cleanup never touch the CUDA runtime.
         """
         previous = getattr(self, "_graph", None), getattr(self, "_inputs", []), getattr(self, "_norm", None)
         device = getattr(self, "_device", None)

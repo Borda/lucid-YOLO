@@ -1,16 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Docs-site audit: the MkDocs Material site publishes the whole ``docs/`` tree (WP-114).
 
-``mkdocs build --strict`` already fails on a page the nav omits -- but it only runs where
-the docs dependency group is installed, which is neither ``make setup`` nor the offline
-gate. This reads ``mkdocs.yml`` as data instead, so a register that drops out of the nav,
-or an identity field that drifts from ``pyproject.toml``, fails in the suite every
-contributor runs rather than in a workflow most of them never trigger.
+``mkdocs build --strict`` already fails on a page the nav omits -- but it only runs where the docs dependency group
+is installed, which is neither ``make setup`` nor the offline gate. This reads ``mkdocs.yml`` as data instead, so
+a register that drops out of the nav, or an identity field that drifts from ``pyproject.toml``, fails in the suite
+every contributor runs rather than in a workflow most of them never trigger.
 
-Notebook pages (WP-188) are the one nav target that is not a file under ``docs/``: a
-``notebooks/<name>.ipynb`` entry is valid when ``notebooks/<name>.py`` exists, and every
-such source owes the nav an entry -- the same rule as for pages, resolved against the
-committed source rather than the build product.
+Notebook pages (WP-188) are the one nav target that is not a file under ``docs/``: a ``notebooks/<name>.ipynb``
+entry is valid when ``notebooks/<name>.py`` exists, and every such source owes the nav an entry -- the same rule
+as for pages, resolved against the committed source rather than the build product.
 
 Examples:
     Command-line usage (exit status is the process return code)::
@@ -38,26 +36,25 @@ DEFAULT_PYPROJECT = REPO_ROOT / "pyproject.toml"
 DEFAULT_DOCS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docs.yml"
 DEFAULT_NOTEBOOKS_DIR = REPO_ROOT / "notebooks"
 
-#: Where `make notebooks` writes the rendered page for each source, relative to
-#: `docs/`. A nav entry under this prefix names a build product, so the audit resolves
-#: it against the source that produces it rather than against the docs tree.
+#: Where `make notebooks` writes the rendered page for each source, relative to `docs/`. A nav entry under this
+#: prefix names a build product, so the audit resolves it against the source that produces it rather than against
+#: the docs tree.
 NOTEBOOK_PAGES_PREFIX = "notebooks/"
 
 
 class _NavLoader(yaml.SafeLoader):
     """``SafeLoader`` that tolerates the ``!!python/name:`` tag Material's mermaid fence needs.
 
-    MkDocs itself parses this file with ``yaml.Loader``, which constructs that tag by
-    importing the named object. Doing the same here would make this audit depend on
-    ``pymdownx`` being installed; keeping the tag as its own suffix string reads the file
-    without importing anything from it.
+    MkDocs itself parses this file with ``yaml.Loader``, which constructs that tag by importing the named object.
+    Doing the same here would make this audit depend on ``pymdownx`` being installed; keeping the tag as its
+    own suffix string reads the file without importing anything from it.
     """
 
 
-# ``unused-ignore`` rides along with ``no-untyped-call`` on purpose: whether this call
-# is typed depends on the resolved ``types-PyYAML``, which the lockfile does not pin, so
-# the ignore is load-bearing on one version and dead on the next. Listing both codes
-# keeps the line correct under either without pinning the stub package for one comment.
+# ``unused-ignore`` rides along with ``no-untyped-call`` on purpose: whether this call is typed depends on the
+# resolved ``types-PyYAML``, which the lockfile does not pin, so the ignore is load-bearing on one version and
+# dead on the next. Listing both codes keeps the line correct under either without pinning the stub package for
+# one comment.
 _NavLoader.add_multi_constructor(  # type: ignore[no-untyped-call, unused-ignore]
     "tag:yaml.org,2002:python/name:",
     lambda loader, suffix, node: suffix,
@@ -93,10 +90,9 @@ def _nav_targets(node: Any) -> list[str]:
 def check_every_docs_page_is_listed_in_the_nav(docs_dir: Path, mkdocs_yml: Path) -> list[str]:
     """Violation for every markdown file under ``docs_dir`` absent from the nav.
 
-    A page missing from the nav is still built and still served, reachable only by search
-    or by guessing its URL -- which for a register nobody knows exists is indistinguishable
-    from not publishing it at all. The failure mode is silent by construction: the site
-    builds green and one document simply stops being findable.
+    A page missing from the nav is still built and still served, reachable only by search or by guessing its URL
+    -- which for a register nobody knows exists is indistinguishable from not publishing it at all. The failure
+    mode is silent by construction: the site builds green and one document simply stops being findable.
 
     Examples:
         >>> import tempfile
@@ -139,9 +135,8 @@ def check_every_docs_page_is_listed_in_the_nav(docs_dir: Path, mkdocs_yml: Path)
 def _notebook_source_for(target: str) -> str | None:
     """The ``notebooks/<name>.py`` source a nav target of the form ``notebooks/<name>.ipynb`` derives from.
 
-    ``None`` for every other target: a markdown page is its own file, and a ``.ipynb``
-    outside the notebooks prefix would be a committed notebook, which the
-    ``no-ipynb-tracked`` hook refuses on its own grounds.
+    ``None`` for every other target: a markdown page is its own file, and a ``.ipynb`` outside the notebooks prefix
+    would be a committed notebook, which the ``no-ipynb-tracked`` hook refuses on its own grounds.
 
     Examples:
         >>> _notebook_source_for("notebooks/wiring_gate.ipynb")
@@ -159,11 +154,10 @@ def _notebook_source_for(target: str) -> str | None:
 def _nav_target_exists(target: str, docs_dir: Path, notebooks_dir: Path) -> bool:
     """True if a nav target names a page on disk, or a notebook page whose source is on disk.
 
-    A notebook page is a build product: what has to exist is the ``notebooks/<name>.py``
-    that ``make notebooks`` converts, whether or not the ``.ipynb`` has been written yet.
-    Resolving against the source rather than the product is what makes the answer the
-    same on a warm checkout and a cold one -- a stale ``.ipynb`` with no source would
-    otherwise pass here and fail in CI.
+    A notebook page is a build product: what has to exist is the ``notebooks/<name>.py`` that ``make notebooks``
+    converts, whether or not the ``.ipynb`` has been written yet. Resolving against the source rather than the
+    product is what makes the answer the same on a warm checkout and a cold one -- a stale ``.ipynb`` with no source
+    would otherwise pass here and fail in CI.
 
     Examples:
         >>> import tempfile
@@ -188,13 +182,11 @@ def check_every_nav_entry_points_at_a_file_that_exists(
 ) -> list[str]:
     """Violation for every nav entry naming a file that does not exist under ``docs_dir``.
 
-    Checked separately from the coverage above because the two fail for opposite reasons
-    and a single set comparison would report either as "the nav and the tree disagree",
-    which does not say which file to go look at.
+    Checked separately from the coverage above because the two fail for opposite reasons and a single set comparison
+    would report either as "the nav and the tree disagree", which does not say which file to go look at.
 
-    A ``notebooks/<name>.ipynb`` entry is the one derived page (WP-188): it exists when
-    ``notebooks_dir/<name>.py`` does, since the ``.ipynb`` is gitignored and written by
-    ``make notebooks`` at build time.
+    A ``notebooks/<name>.ipynb`` entry is the one derived page (WP-188): it exists when ``notebooks_dir/<name>.py``
+    does, since the ``.ipynb`` is gitignored and written by ``make notebooks`` at build time.
 
     Examples:
         >>> import tempfile
@@ -229,13 +221,12 @@ def check_every_nav_entry_points_at_a_file_that_exists(
 def check_every_notebook_source_has_a_nav_entry(mkdocs_yml: Path, notebooks_dir: Path) -> list[str]:
     """Violation for every ``notebooks/*.py`` source with no ``notebooks/<name>.ipynb`` nav entry.
 
-    The same rule as :func:`check_every_docs_page_is_listed_in_the_nav`, for the one kind
-    of page that is not a markdown file on disk: a notebook nobody can navigate to is one
-    nobody reads. Checked from the source side rather than by globbing ``docs/notebooks/``
-    because that directory is a build product and may not exist on the checkout running
-    the hook. A ``notebooks/`` directory with no sources -- WP-188's own state -- is
-    clean, and so is a ``mkdocs.yml`` with no ``Notebooks`` section then: an empty nav
-    section is invalid YAML for MkDocs, so the section arrives with the first notebook.
+    The same rule as :func:`check_every_docs_page_is_listed_in_the_nav`, for the one kind of page that is not a
+    markdown file on disk: a notebook nobody can navigate to is one nobody reads. Checked from the source side
+    rather than by globbing ``docs/notebooks/`` because that directory is a build product and may not exist on
+    the checkout running the hook. A ``notebooks/`` directory with no sources -- WP-188's own state -- is clean,
+    and so is a ``mkdocs.yml`` with no ``Notebooks`` section then: an empty nav section is invalid YAML for MkDocs,
+    so the section arrives with the first notebook.
 
     Examples:
         >>> import tempfile
@@ -265,10 +256,9 @@ def check_every_notebook_source_has_a_nav_entry(mkdocs_yml: Path, notebooks_dir:
 def check_the_gfm_table_extension_is_declared(mkdocs_yml: Path) -> list[str]:
     """Violation if ``tables`` is absent from ``markdown_extensions``.
 
-    Supplying any extension list drops Python-Markdown's defaults, and this repository is
-    wall-to-wall pipe tables -- the assumption register, the roadmap, every acceptance
-    table. Without the extension they render as literal pipe characters on a build that
-    reports success, so nothing but this check notices.
+    Supplying any extension list drops Python-Markdown's defaults, and this repository is wall-to-wall pipe tables
+    -- the assumption register, the roadmap, every acceptance table. Without the extension they render as literal
+    pipe characters on a build that reports success, so nothing but this check notices.
 
     Examples:
         >>> import tempfile
@@ -288,15 +278,14 @@ def check_the_gfm_table_extension_is_declared(mkdocs_yml: Path) -> list[str]:
 def check_the_repo_url_matches_the_declared_homepage(mkdocs_yml: Path, pyproject: Path) -> list[str]:
     """Violation if ``repo_url`` and ``pyproject.toml``'s Homepage name different repositories.
 
-    Two places holding the same slug is exactly the shape that already went stale once:
-    the project was renamed, GitHub kept redirecting the HTML URLs, and nothing failed
-    until a raw URL -- which does not redirect -- was generated from the stale value.
+    Two places holding the same slug is exactly the shape that already went stale once: the project was renamed,
+    GitHub kept redirecting the HTML URLs, and nothing failed until a raw URL -- which does not redirect -- was
+    generated from the stale value.
 
-    ``repo_name`` is checked in the same pass because it is a *separate* key holding
-    the same fact in a shorter spelling: Material renders it as the header link's
-    label, so a rename that updates the URL and leaves the label behind puts the old
-    slug on every page of the site while every link still resolves. Nothing else in
-    the repository reads it, which is exactly why nothing else would notice.
+    ``repo_name`` is checked in the same pass because it is a *separate* key holding the same fact in a shorter
+    spelling: Material renders it as the header link's label, so a rename that updates the URL and leaves the
+    label behind puts the old slug on every page of the site while every link still resolves. Nothing else in the
+    repository reads it, which is exactly why nothing else would notice.
 
     Examples:
         >>> import tempfile
@@ -337,9 +326,8 @@ def check_the_repo_url_matches_the_declared_homepage(mkdocs_yml: Path, pyproject
 def check_the_site_description_is_the_distribution_description(mkdocs_yml: Path, pyproject: Path) -> list[str]:
     """Violation if ``site_description`` does not restate ``pyproject.toml``'s description verbatim.
 
-    It is the sentence a search engine shows under the site's title and the sentence PyPI
-    shows under the package's, and the two describing the same project differently is the
-    kind of drift no build step and no reader ever reports.
+    It is the sentence a search engine shows under the site's title and the sentence PyPI shows under the package's,
+    and the two describing the same project differently is the kind of drift no build step and no reader ever reports.
 
     Examples:
         >>> import tempfile
@@ -367,11 +355,10 @@ def check_the_site_description_is_the_distribution_description(mkdocs_yml: Path,
 def check_mkdocs_is_capped_below_the_unlicensed_major(pyproject: Path) -> list[str]:
     """Violation if the ``docs`` group's ``mkdocs`` pin is not capped below ``2``.
 
-    MkDocs 2.0 is described by the Material team's own build-time notice as "Currently
-    unlicensed", and unlicensed is stricter than the AGPL this project bans -- the default
-    is no grant at all. Checked here because the licence audit cannot see it: it matches a
-    GPL-family pattern against a declared licence, so a distribution declaring nothing
-    matches nothing and passes. Lifting the cap is a decision, not a dependency bump.
+    MkDocs 2.0 is described by the Material team's own build-time notice as "Currently unlicensed", and unlicensed
+    is stricter than the AGPL this project bans -- the default is no grant at all. Checked here because the licence
+    audit cannot see it: it matches a GPL-family pattern against a declared licence, so a distribution declaring
+    nothing matches nothing and passes. Lifting the cap is a decision, not a dependency bump.
 
     Examples:
         >>> import tempfile
@@ -382,8 +369,8 @@ def check_mkdocs_is_capped_below_the_unlicensed_major(pyproject: Path) -> list[s
         ['mkdocs is not capped below 2.0: "mkdocs>=1.6"']
     """
     text = pyproject.read_text(encoding="utf-8")
-    # The operator class is what keeps this off `mkdocs-material`, which shares the prefix
-    # and sits two lines away; without it the assertion would silently move to that pin.
+    # The operator class is what keeps this off `mkdocs-material`, which shares the prefix and sits two lines away;
+    # without it the assertion would silently move to that pin.
     pin = re.search(r'^\s*"mkdocs([<>=!~][^"]*)"', text, flags=re.MULTILINE)
     if not pin:
         return ["the docs group declares no mkdocs pin"]
@@ -395,11 +382,10 @@ def check_mkdocs_is_capped_below_the_unlicensed_major(pyproject: Path) -> list[s
 def check_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed(docs_workflow: Path) -> list[str]:
     """Violation if ``docs.yml`` does not run the licence audit before the site build.
 
-    The docs dependency group is in no other workflow's environment, so this job is the
-    only place CI ever sees the tree ``mkdocs-material`` pulls. An audit that scans the
-    installed environment rather than the diff is only a control where the environment
-    exists -- and after the build it would report on a job that already produced its
-    artifact.
+    The docs dependency group is in no other workflow's environment, so this job is the only place CI ever sees
+    the tree ``mkdocs-material`` pulls. An audit that scans the installed environment rather than the diff is
+    only a control where the environment exists -- and after the build it would report on a job that already
+    produced its artifact.
 
     Examples:
         >>> import tempfile

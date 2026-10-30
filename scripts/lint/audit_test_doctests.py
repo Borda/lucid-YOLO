@@ -1,31 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
 """Doctest-coverage audit for test helpers and the shipped surface (WP-129/130, split off WP-117).
 
-Scans ``tests/``, ``scripts/_tests/`` and ``src/`` by default. The first two hold
-test helpers -- ``scripts/_tests/`` the functional-core tests for ``scripts/``
-modules (WP-130) -- and carry the same helper-needs-an-Example expectation; the
-third is the shipped surface, where ``Makefile``'s "every public function is
-required to carry one" had no gate behind it at all.
+Scans ``tests/``, ``scripts/_tests/`` and ``src/`` by default. The first two hold test helpers -- ``scripts/_tests/``
+the functional-core tests for ``scripts/`` modules (WP-130) -- and carry the same helper-needs-an-Example expectation;
+the third is the shipped surface, where ``Makefile``'s "every public function is required to carry one" had no
+gate behind it at all.
 
-``pytest --doctest-modules`` (WP-085, ``make test``) turns a helper's ``Examples:``
-block into an executable check the moment it exists, but nothing forces the block
-to exist in the first place. This walks the same module-level-function population
-by the same AST predicate ``--doctest-modules`` already exercises, and fails naming
-every helper still missing a ``>>>`` line, so a new one lands with an Example or
-fails the gate rather than joining the pile silently.
+``pytest --doctest-modules`` (WP-085, ``make test``) turns a helper's ``Examples:`` block into an executable
+check the moment it exists, but nothing forces the block to exist in the first place. This walks the same
+module-level-function population by the same AST predicate ``--doctest-modules`` already exercises, and fails
+naming every helper still missing a ``>>>`` line, so a new one lands with an Example or fails the gate rather
+than joining the pile silently.
 
-**A skipped Example is not an executed one.** A ``>>>`` line carrying
-``# doctest: +SKIP`` satisfies collection, satisfies a presence scan and satisfies
-the human reading the diff, while executing nothing -- so a docstring whose every
-Example line is skipped counts here only when each skip states why. The reason goes
-*before* the directive (``>>> f()  # needs a checkpoint  # doctest: +SKIP``) and not
-after it: CPython's ``doctest`` reads a directive comment to the end of its line and
-rejects trailing prose there as an unknown option, so a reason written after
-``+SKIP`` breaks the collection it is annotating.
+**A skipped Example is not an executed one.** A ``>>>`` line carrying ``# doctest: +SKIP`` satisfies collection,
+satisfies a presence scan and satisfies the human reading the diff, while executing nothing -- so a docstring
+whose every Example line is skipped counts here only when each skip states why. The reason goes *before* the
+directive (``>>> f()  # needs a checkpoint  # doctest: +SKIP``) and not after it: CPython's ``doctest`` reads
+a directive comment to the end of its line and rejects trailing prose there as an unknown option, so a reason
+written after ``+SKIP`` breaks the collection it is annotating.
 
-Scope is deliberately narrow to the one invariant: a docstring's presence and its
-``>>>`` content. Whether a group of helpers should be regrouped into a class is
-WP-128's question, not this script's.
+Scope is deliberately narrow to the one invariant: a docstring's presence and its ``>>>`` content. Whether a
+group of helpers should be regrouped into a class is WP-128's question, not this script's.
 
 Examples:
     Command-line usage (exit status is the process return code)::
@@ -49,18 +44,18 @@ DEFAULT_TESTS_DIR = REPO_ROOT / "tests"
 DEFAULT_SCRIPTS_TESTS_DIR = REPO_ROOT / "scripts" / "_tests"
 DEFAULT_SRC_DIR = REPO_ROOT / "src"
 
-#: Decorator names that mark a function as a fixture rather than a helper, in
-#: either bare (``@pytest.fixture``) or call (``@pytest.fixture(scope="module")``)
-#: form, and under either the ``pytest.fixture`` or bare ``fixture`` import spelling.
+#: Decorator names that mark a function as a fixture rather than a helper, in either bare (``@pytest.fixture``)
+#: or call (``@pytest.fixture(scope="module")``) form, and under either the ``pytest.fixture`` or bare ``fixture``
+#: import spelling.
 _FIXTURE_DECORATOR_NAMES = frozenset({"fixture"})
 
 #: A doctest example line inside a docstring.
 _EXAMPLE_LINE_RE = re.compile(r"^\s*>>>")
-#: A ``+SKIP`` directive on such a line. ``doctest`` reads the directive comment to
-#: end of line, so nothing may follow the option list.
+#: A ``+SKIP`` directive on such a line. ``doctest`` reads the directive comment to end of line, so nothing may follow
+#: the option list.
 _SKIP_RE = re.compile(r"#\s*doctest:[^#\n]*\+SKIP")
-#: A ``+SKIP`` preceded on the same line by a comment that is not itself a directive --
-#: the only place a reason can sit without breaking ``doctest``'s own parse.
+#: A ``+SKIP`` preceded on the same line by a comment that is not itself a directive -- the only place a reason can
+#: sit without breaking ``doctest``'s own parse.
 _REASONED_SKIP_RE = re.compile(r"#\s*(?!doctest:)\S[^#\n]*#\s*doctest:[^#\n]*\+SKIP")
 
 
@@ -71,10 +66,9 @@ class ScanRoot:
     Attributes:
         path: Directory walked recursively.
         pattern: Glob selecting the files to parse under it.
-        include_private: Whether a leading-underscore function owes an Example. True
-            for test trees, where a module-level ``_helper`` is the whole population
-            this audit was built for; False for ``src/``, where the requirement
-            ``Makefile`` states is about the *public* surface and a private helper's
+        include_private: Whether a leading-underscore function owes an Example. True for test trees, where a
+            module-level ``_helper`` is the whole population this audit was built for; False for ``src/``, where the
+            requirement ``Makefile`` states is about the *public* surface and a private helper's
             contract is its caller's docstring.
     """
 
@@ -86,9 +80,9 @@ class ScanRoot:
 def _decorator_name(node: ast.expr) -> str:
     """Return a decorator's trailing attribute or call name, e.g. ``"fixture"``.
 
-    Handles the three shapes a decorator can take -- ``@fixture``, ``@fixture(...)``,
-    and ``@pytest.fixture(...)`` -- by unwrapping a call to its callee first and then
-    reading the attribute name off either a bare ``Name`` or an ``Attribute``.
+    Handles the three shapes a decorator can take -- ``@fixture``, ``@fixture(...)``, and ``@pytest.fixture(...)``
+    -- by unwrapping a call to its callee first and then reading the attribute name off either a bare ``Name`` or
+    an ``Attribute``.
 
     Examples:
         >>> import ast
@@ -122,11 +116,10 @@ def _is_fixture(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
 def module_level_helpers(path: Path, include_private: bool = True) -> list[str]:
     """Names of ``path``'s module-level, non-fixture, non-``test_`` functions.
 
-    Deliberately module-level only: a closure nested inside a helper (a fake
-    ``urlopen`` built by a factory, say) is private to that helper's own docstring
-    and Example already, not a second surface a caller can reach, so it is not
-    counted here -- the same boundary ``--doctest-modules`` draws when it collects
-    a module's top-level functions.
+    Deliberately module-level only: a closure nested inside a helper (a fake ``urlopen`` built by a factory, say)
+    is private to that helper's own docstring and Example already, not a second surface a caller can reach, so it
+    is not counted here -- the same boundary ``--doctest-modules`` draws when it collects a module's top-level
+    functions.
 
     Args:
         path: Python file to parse.
@@ -167,10 +160,9 @@ def module_level_helpers(path: Path, include_private: bool = True) -> list[str]:
 def example_gap(doc: str | None) -> str | None:
     """Why ``doc`` fails to carry an executable Example, or ``None`` when it does not fail.
 
-    Two distinct failures, reported apart because they call for different repairs:
-    a docstring with no ``>>>`` line at all needs an Example written, while one whose
-    every ``>>>`` line is skipped already has an Example and needs either the skip
-    removed or a reason stated for it.
+    Two distinct failures, reported apart because they call for different repairs: a docstring with no ``>>>`` line
+    at all needs an Example written, while one whose every ``>>>`` line is skipped already has an Example and
+    needs either the skip removed or a reason stated for it.
 
     Args:
         doc: A function's docstring, or ``None`` when it has none.
@@ -203,11 +195,10 @@ def example_gap(doc: str | None) -> str | None:
 def has_doctest_example(path: Path, name: str) -> bool:
     """True if the module-level function ``name`` in ``path`` carries an executable Example.
 
-    A missing docstring also fails this check (``ast.get_docstring`` returns
-    ``None``, and containment on ``None`` would raise, so the ``None`` case is
-    handled explicitly), which keeps the predicate a single check rather than
-    two the caller has to combine. So does a docstring whose Example lines are all
-    skipped without a stated reason -- see :func:`example_gap`.
+    A missing docstring also fails this check (``ast.get_docstring`` returns ``None``, and containment on ``None``
+    would raise, so the ``None`` case is handled explicitly), which keeps the predicate a single check rather than
+    two the caller has to combine. So does a docstring whose Example lines are all skipped without a stated reason
+    -- see :func:`example_gap`.
 
     Examples:
         >>> import tempfile
@@ -272,10 +263,9 @@ def find_missing(tests_dir: Path, pattern: str = "test_*.py", include_private: b
 def _scan_roots(tests_dirs: list[Path] | None, src_dirs: list[Path] | None) -> list[ScanRoot]:
     """Resolve the CLI's two repeatable directory options into scan roots.
 
-    Naming either option replaces the whole default set rather than adding to it, so
-    ``--tests-dir tests`` audits exactly that and nothing else -- the alternative,
-    where a narrowing flag silently keeps scanning ``src/``, makes the flag useless
-    for the one job it has.
+    Naming either option replaces the whole default set rather than adding to it, so ``--tests-dir tests`` audits
+    exactly that and nothing else -- the alternative, where a narrowing flag silently keeps scanning ``src/``,
+    makes the flag useless for the one job it has.
 
     Args:
         tests_dirs: Directories given as ``--tests-dir``, or ``None``.

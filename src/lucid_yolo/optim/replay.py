@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Replay the optimizer's pure orthogonalizations without changing their arithmetic (WP-197b).
 
-The optimizer owns this optional cache, not the parameters or their momentum.
-Only the two Newton--Schulz functions opt into it. Their input is copied before
-replay and their output is copied afterwards, so neither a later call nor a
-checkpoint can observe the graph's reusable storage. Capture runs the existing
-function; it does not trace, compile or substitute any of its expressions.
+The optimizer owns this optional cache, not the parameters or their momentum. Only the two Newton--Schulz functions
+opt into it. Their input is copied before replay and their output is copied afterwards, so neither a later call nor
+a checkpoint can observe the graph's reusable storage. Capture runs the existing function; it does not trace, compile
+or substitute any of its expressions.
 """
 
 from __future__ import annotations
@@ -38,10 +37,10 @@ class _Recorded:
 def _capture_open(device: torch.device) -> bool:
     """Whether a CUDA graph capture is open on the current stream of this call's device or of ``device``.
 
-    :func:`torch.cuda.is_current_stream_capturing` reads the current device's current stream,
-    while the replay key and the recording work on the tensor's own device. When the two devices
-    differ, a capture open on the tensor's device would go unseen by that query alone and a new
-    recording would start its synchronize inside it, so the stream is also read under ``device``.
+    :func:`torch.cuda.is_current_stream_capturing` reads the current device's current stream, while the replay key
+    and the recording work on the tensor's own device. When the two devices differ, a capture open on the tensor's
+    device would go unseen by that query alone and a new recording would start its synchronize inside it, so the
+    stream is also read under ``device``.
     """
     if torch.cuda.is_current_stream_capturing():
         return True
@@ -52,10 +51,9 @@ def _capture_open(device: torch.device) -> bool:
 def _runtime_key(device: torch.device) -> tuple[Any, ...]:
     """Tie a recording to the arithmetic settings and submission stream it was captured under.
 
-    Both replay owners key their recordings with this tuple, so a new setting is added
-    in one place. A setting belongs here only when it can change replayed results or
-    graph validity for correct code. Per-backend precision is queried when available:
-    the legacy getter can reject configurations set through the new API.
+    Both replay owners key their recordings with this tuple, so a new setting is added in one place. A setting belongs
+    here only when it can change replayed results or graph validity for correct code. Per-backend precision is queried
+    when available: the legacy getter can reject configurations set through the new API.
     """
     return (
         torch.get_float32_matmul_precision() if not hasattr(torch.backends.cuda.matmul, "fp32_precision") else None,
@@ -71,11 +69,10 @@ def _runtime_key(device: torch.device) -> tuple[Any, ...]:
 class _OrthogonalizationReplay:
     """Own a bounded set of optional CUDA orthogonalization recordings.
 
-    ``capacity`` is the optimizer's number of matrix parameters, a structural
-    upper bound on its ordinary distinct matrix calls. A changed signature can
-    fill unused slots, but never grows the cache beyond that bound; overflow
-    executes eagerly. Each graph has its own allocator pool, so skipped gradients
-    and changing bucket order do not impose a replay-order dependency.
+    ``capacity`` is the optimizer's number of matrix parameters, a structural upper bound on its ordinary distinct
+    matrix calls. A changed signature can fill unused slots, but never grows the cache beyond that bound; overflow
+    executes eagerly. Each graph has its own allocator pool, so skipped gradients and changing bucket order do not
+    impose a replay-order dependency.
 
     Only contiguous, zero-offset inputs are recorded. Cloning another layout can
     change the normalization's reduction order; those calls remain eager.

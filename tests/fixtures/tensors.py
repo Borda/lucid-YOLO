@@ -31,3 +31,13 @@ def assert_bytes(left: Tensor, right: Tensor) -> None:
         left.detach().contiguous().reshape(-1).view(torch.uint8),
         right.detach().contiguous().reshape(-1).view(torch.uint8),
     )
+
+
+def assert_bytes_except_nan(left: Tensor, right: Tensor) -> None:
+    """Compare NaN positions, then the remaining storage bytes, ignoring which NaN payload was produced.
+
+    Examples:
+        >>> assert_bytes_except_nan(torch.tensor([float("nan"), 1.0]), torch.tensor([float("nan"), 1.0]))
+    """
+    assert torch.equal(left.isnan(), right.isnan())
+    assert_bytes(left.masked_fill(left.isnan(), 0.0), right.masked_fill(right.isnan(), 0.0))

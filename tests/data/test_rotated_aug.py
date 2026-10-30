@@ -1,35 +1,30 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-058 rotated-aware augmentations (A40).
 
-The DoD test is the module-level ``test_roundtrip``: a similarity warp composed with its
-own inverse returns every rotated box in an angle sweep to tolerance. Around it sit the
-properties WP-058 exists to establish.
+The DoD test is the module-level ``test_roundtrip``: a similarity warp composed with its own inverse returns every
+rotated box in an angle sweep to tolerance. Around it sit the properties WP-058 exists to establish.
 
 Canonical output everywhere:
-    Every transform is swept over the whole ``[-pi/4, 3*pi/4)`` range **and** past both
-    ends, and its output must satisfy ``w >= h`` and the angle range. That is what closes
-    the WP-013 flip defect, where negating an angle above ``pi/4`` left the range.
+    Every transform is swept over the whole ``[-pi/4, 3*pi/4)`` range **and** past both ends, and its output must
+    satisfy ``w >= h`` and the angle range. That is what closes the WP-013 flip defect, where negating an angle above
+    ``pi/4`` left the range.
 
 Geometry, not parameters:
-    A rotated box is compared by its **corners**, never by ``(w, h, theta)``: the square
-    tie-break and the ``w``/``h`` swap inside ``canonicalize`` mean two different parameter
-    triples can describe one rectangle, and WP-055's row warns downstream not to assume
-    which representative comes back. ``_box_distance`` is therefore an order-agnostic
+    A rotated box is compared by its **corners**, never by ``(w, h, theta)``: the square tie-break and the ``w``/``h``
+    swap inside ``canonicalize`` mean two different parameter triples can describe one rectangle, and WP-055's row
+    warns downstream not to assume which representative comes back. ``_box_distance`` is therefore an order-agnostic
     symmetric nearest-corner distance between two boxes' corner rings.
 
 The shear residual, derived rather than tuned:
-    Under a similarity the warped box is still a rectangle and the re-fit is exact. Under
-    shear the warped quad is a parallelogram with half-vectors ``p`` (along the fitted long
-    axis) and ``q``; the fit returns ``|q|`` along ``p``'s perpendicular instead of ``q``
-    itself, so **every** corner is displaced by exactly ``2 |q| sin(s / 2)`` where ``s`` is
-    the angle by which ``q`` misses that perpendicular. The sheared test asserts that
-    identity — an equality against a quantity computed from the transform's own matrix —
-    rather than a tolerance chosen to pass.
+    Under a similarity the warped box is still a rectangle and the re-fit is exact. Under shear the warped quad is a
+    parallelogram with half-vectors ``p`` (along the fitted long axis) and ``q``; the fit returns ``|q|`` along ``p``'s
+    perpendicular instead of ``q`` itself, so **every** corner is displaced by exactly ``2 |q| sin(s / 2)`` where ``s``
+    is the angle by which ``q`` misses that perpendicular. The sheared test asserts that identity — an equality
+    against a quantity computed from the transform's own matrix — rather than a tolerance chosen to pass.
 
 Dropping, not flagging:
-    Augmentation drops what leaves the canvas (A40), by the axis-aligned path's own
-    ``min_box_size`` / ``min_visibility`` rule, and drops it from every modality at once,
-    which the instance-axis assertions pin.
+    Augmentation drops what leaves the canvas (A40), by the axis-aligned path's own ``min_box_size`` /
+    ``min_visibility`` rule, and drops it from every modality at once, which the instance-axis assertions pin.
 """
 
 from __future__ import annotations
@@ -202,6 +197,27 @@ def _assert_one_instance_axis(targets: Targets) -> None:
     assert targets.rboxes.shape[0] == targets.boxes.shape[0]
 
 
+def _mosaic_items(carried: Targets) -> list[tuple[Tensor, Targets]]:
+    """Return four mosaic inputs: ``carried`` on image 0, three empty-target images after it.
+
+    Examples:
+        >>> items = _mosaic_items(_paired(_rboxes(0.0)))
+        >>> len(items), items[0][0].shape, items[1][1].boxes.shape
+        (4, torch.Size([3, 32, 32]), torch.Size([0, 4]))
+    """
+    return [(_image(_MOSAIC_SIDE), carried)] + [(_image(_MOSAIC_SIDE), Targets.empty()) for _ in range(3)]
+
+
+def _identity_affine() -> RandomAffine:
+    """Return a seeded ``RandomAffine`` whose every range is zero, so it warps nothing and only clips.
+
+    Examples:
+        >>> isinstance(_identity_affine(), RandomAffine)
+        True
+    """
+    return RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
+
+
 def test_roundtrip() -> None:
     """A similarity warp composed with its inverse returns every swept angle's box (DoD)."""
     rboxes = _rboxes(*_SWEEP_ANGLES)
@@ -238,8 +254,7 @@ class TestCanonicalOutput:
     def test_mosaic_output_canonical(self, theta: float) -> None:
         """Mosaic placement leaves every surviving rotated box canonical."""
         mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=seeded_generator())
-        carried = _paired(_rboxes(theta, cx=30.0, cy=30.0, w=4.0, h=2.0))
-        items = [(_image(_MOSAIC_SIDE), carried)] + [(_image(_MOSAIC_SIDE), Targets.empty()) for _ in range(3)]
+        items = _mosaic_items(_paired(_rboxes(theta, cx=30.0, cy=30.0, w=4.0, h=2.0)))
 
         _, out = mosaic(items)
 
@@ -298,7 +313,7 @@ class TestAffineRotated:
 
     def test_identity_affine_returns_input_boxes(self) -> None:
         """A zero-parameter affine is the identity on every swept rotated box."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
+        affine = _identity_affine()
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
 
         _, out = affine(_image(), targets)
@@ -343,7 +358,7 @@ class TestAffineRotated:
 
     def test_offcanvas_instance_dropped_from_every_modality(self) -> None:
         """An instance outside the canvas leaves, taking its box and label with it."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
+        affine = _identity_affine()
         inside = _rboxes(0.4)
         outside = _rboxes(0.4, cx=-200.0, cy=-200.0)
         targets = _paired(torch.cat([inside, outside], dim=0))
@@ -355,7 +370,7 @@ class TestAffineRotated:
 
     def test_clipped_instance_keeps_envelope_inside_canvas(self) -> None:
         """A straddling instance survives with an envelope cut to the canvas edge."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
+        affine = _identity_affine()
         targets = _paired(_rboxes(0.0, cx=float(_CANVAS) - 4.0, cy=60.0))
 
         _, out = affine(_image(), targets)
@@ -365,7 +380,7 @@ class TestAffineRotated:
 
     def test_clipped_rotated_box_keeps_orientation_and_covers_survivor(self) -> None:
         """The re-fit invents no angle: it keeps theta and contains the region that survived."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
+        affine = _identity_affine()
         targets = _paired(_rboxes(0.6, cx=float(_CANVAS) - 4.0, cy=60.0))
 
         _, out = affine(_image(), targets)
@@ -377,8 +392,8 @@ class TestAffineRotated:
 
     def test_zero_angle_box_agrees_with_axis_aligned_path(self) -> None:
         """A theta=0 instance gets the same box whether or not the rotated path runs."""
-        rotated = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
-        plain = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
+        rotated = _identity_affine()
+        plain = _identity_affine()
         targets = _paired(_rboxes(0.0))
 
         _, with_rboxes = rotated(_image(), targets)
@@ -407,8 +422,7 @@ class TestMosaicRotated:
     def test_placed_box_follows_quadrant_offset(self) -> None:
         """The surviving box sits at its image-local position plus the sampled offset."""
         mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=seeded_generator())
-        carried = _paired(_rboxes(0.4, cx=30.0, cy=30.0, w=4.0, h=2.0))
-        items = [(_image(_MOSAIC_SIDE), carried)] + [(_image(_MOSAIC_SIDE), Targets.empty()) for _ in range(3)]
+        items = _mosaic_items(_paired(_rboxes(0.4, cx=30.0, cy=30.0, w=4.0, h=2.0)))
 
         _, out = mosaic(items)
 
@@ -421,8 +435,7 @@ class TestMosaicRotated:
         mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=seeded_generator())
         kept = _rboxes(0.4, cx=30.0, cy=30.0, w=4.0, h=2.0)
         lost = _rboxes(0.4, cx=-100.0, cy=-100.0, w=4.0, h=2.0)
-        carried = _paired(torch.cat([kept, lost], dim=0))
-        items = [(_image(_MOSAIC_SIDE), carried)] + [(_image(_MOSAIC_SIDE), Targets.empty()) for _ in range(3)]
+        items = _mosaic_items(_paired(torch.cat([kept, lost], dim=0)))
 
         _, out = mosaic(items)
 
@@ -432,8 +445,7 @@ class TestMosaicRotated:
     def test_envelope_tracks_rotated_geometry(self) -> None:
         """The merged box is the envelope of the merged rotated box (A40)."""
         mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=seeded_generator())
-        carried = _paired(_rboxes(0.4, cx=30.0, cy=30.0, w=4.0, h=2.0))
-        items = [(_image(_MOSAIC_SIDE), carried)] + [(_image(_MOSAIC_SIDE), Targets.empty()) for _ in range(3)]
+        items = _mosaic_items(_paired(_rboxes(0.4, cx=30.0, cy=30.0, w=4.0, h=2.0)))
 
         _, out = mosaic(items)
 
@@ -497,9 +509,9 @@ class TestClipRboxesToCanvas:
 def _parallelogram_fit_residual(warped: Tensor) -> Tensor:
     """Return the per-corner displacement the rectangle fit costs on a warped parallelogram.
 
-    The warped quad has half-vectors ``p`` (first edge) and ``q`` (last edge) about its
-    centre; the fit keeps ``p`` and replaces ``q`` by ``|q|`` along ``p``'s perpendicular,
-    displacing every corner by ``2 |q| sin(s / 2)`` for the misalignment ``s``.
+    The warped quad has half-vectors ``p`` (first edge) and ``q`` (last edge) about its centre; the fit keeps ``p`` and
+    replaces ``q`` by ``|q|`` along ``p``'s perpendicular, displacing every corner by ``2 |q| sin(s / 2)`` for the
+    misalignment ``s``.
 
     Examples:
         >>> corners = rboxes_to_polygons(_rboxes(0.0)).double()  # an unsheared rectangle

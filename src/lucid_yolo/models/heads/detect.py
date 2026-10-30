@@ -1,75 +1,58 @@
 # SPDX-License-Identifier: Apache-2.0
 """Dual detection head with direct ltrb regression (WP-022).
 
-The anchor-free detection head of the YOLO26 detector, built by hand from the
-method paper's formulation (R1 sec. 3.2.1-3.2.2, Fig. S2) and the dual-branch
-lineage of R6. It consumes the neck's three refined feature maps ``(N3, N4,
-N5)`` at strides 8/16/32 and predicts, on each of two parallel branches, a class
-score map and a box-distance map per level:
+The anchor-free detection head of the YOLO26 detector, built by hand from the method paper's formulation (R1 sec.
+3.2.1-3.2.2, Fig. S2) and the dual-branch lineage of R6. It consumes the neck's three refined feature maps ``(N3, N4,
+N5)`` at strides 8/16/32 and predicts, on each of two parallel branches, a class score map and a box-distance map per
+level:
 
-- **one-to-one** — the branch supervised so exactly one prediction survives per
-  ground-truth object, giving an NMS-free path at inference (R1 3.2.1, R6);
-- **one-to-many** — the branch supervised densely (many positives per object) to
-  provide the rich gradient signal that trains the shared neck features.
+- **one-to-one** — the branch supervised so exactly one prediction survives per ground-truth object, giving an
+  NMS-free path at inference (R1 3.2.1, R6);
+- **one-to-many** — the branch supervised densely (many positives per object) to provide the rich gradient signal
+  that trains the shared neck features.
 
-The two branches share the neck features but own **disjoint** prediction stems;
-neither reads the other's parameters. Each branch, at each of the three levels,
-carries the Fig. S2 stem pair — both **depthwise-separable** for a lightweight
-head (the box/cls symmetry is the WP-023 A28 revision; see below):
+The two branches share the neck features but own **disjoint** prediction stems; neither reads the other's parameters.
+Each branch, at each of the three levels, carries the Fig. S2 stem pair — both **depthwise-separable** for a
+lightweight head (the box/cls symmetry is the WP-023 A28 revision; see below):
 
-- **box stem** — two depthwise-separable units
-  (``DepthwiseConv(·, ·, 3)`` + ``ConvBNAct(·, ·, 1)``) followed by a 1x1
-  convolution to 4 outputs;
-- **class stem** — two depthwise-separable units followed by a 1x1 convolution
-  to ``num_classes`` outputs.
+- **box stem** — two depthwise-separable units (``DepthwiseConv(·, ·, 3)`` + ``ConvBNAct(·, ·, 1)``) followed by a
+  1x1 convolution to 4 outputs;
+- **class stem** — two depthwise-separable units followed by a 1x1 convolution to ``num_classes`` outputs.
 
-The stem hidden width is ``max(16, channels // 3)`` for both stems (WP-023
-fidelity gate — see :func:`_stem_width`). The box stem was originally two full
-``3x3`` convolutions at ``channels // 4``, which made it ~3.7x heavier than the
-depthwise-separable class stem despite emitting 4 vs ``num_classes`` channels;
-the WP-023 parameter gate flagged the resulting head as ~7-16x the reference
-budget, so the box stem was rebuilt depthwise-separable and the class stem's
-``max(num_classes, channels // 2)`` floor (which bloated the ``n``/``s`` head)
-was dropped. See docs/ASSUMPTIONS.md A28.
+The stem hidden width is ``max(16, channels // 3)`` for both stems (WP-023 fidelity gate — see :func:`_stem_width`).
+The box stem was originally two full ``3x3`` convolutions at ``channels // 4``, which made it ~3.7x heavier than the
+depthwise-separable class stem despite emitting 4 vs ``num_classes`` channels; the WP-023 parameter gate flagged the
+resulting head as ~7-16x the reference budget, so the box stem was rebuilt depthwise-separable and the class stem's
+``max(num_classes, channels // 2)`` floor (which bloated the ``n``/``s`` head) was dropped. See docs/ASSUMPTIONS.md
+A28.
 
-**No DFL** (R1 3.2.2): the box 1x1 emits 4 raw scalars per location — the
-``ltrb`` distances (left, top, right, bottom) from the anchor centre in stride
-units, with unconstrained range (no softmax bins, no range cap). This is the
+**No DFL** (R1 3.2.2): the box 1x1 emits 4 raw scalars per location — the ``ltrb`` distances (left, top, right,
+bottom) from the anchor centre in stride units, with unconstrained range (no softmax bins, no range cap). This is the
 ``reg_max = 1`` degenerate of a distribution-focal box head.
 
-Per branch the flattened per-level maps are concatenated level-by-level in
-row-major order into dense predictions ``(B, A, num_classes)`` and ``(B, A, 4)``,
-where ``A = 8400`` at a 640-pixel input. That ``A`` ordering matches
-:func:`~lucid_yolo.assign.grid.make_anchor_points` position-for-position, so the
-anchor point and stride of prediction ``a`` are simply row ``a`` of its outputs.
+Per branch the flattened per-level maps are concatenated level-by-level in row-major order into dense predictions
+``(B, A, num_classes)`` and ``(B, A, 4)``, where ``A = 8400`` at a 640-pixel input. That ``A`` ordering matches
+:func:`~lucid_yolo.assign.grid.make_anchor_points` position-for-position, so the anchor point and stride of
+prediction ``a`` are simply row ``a`` of its outputs.
 
-Three branch outputs are **opt-in** and absent by default, so the accepted
-detection-only head keeps its exact module tree, state-dict keys, and parameter
-count: the mask coefficients of the segmentation path (WP-047), the orientation
-angle of the oriented path (WP-062), and generic ``K``-point coordinates with
-per-axis uncertainty (WP-122). ``K`` is a constructor argument like
-``num_classes`` and ``num_coeffs``; the head does not encode a human-pose task.
-The keypoint stem emits raw coordinate offsets and raw, unbounded sigma values.
-No positivity mapping happens anywhere in this module: WP-123's hand-written RLE
-loss owns that equation-tied decision (A65).
+Three branch outputs are **opt-in** and absent by default, so the accepted detection-only head keeps its exact
+module tree, state-dict keys, and parameter count: the mask coefficients of the segmentation path (WP-047), the
+orientation angle of the oriented path (WP-062), and generic ``K``-point coordinates with per-axis uncertainty
+(WP-122). ``K`` is a constructor argument like ``num_classes`` and ``num_coeffs``; the head does not encode a
+human-pose task. The keypoint stem emits raw coordinate offsets and raw, unbounded sigma values. No positivity
+mapping happens anywhere in this module: WP-123's hand-written RLE loss owns that equation-tied decision (A65).
 
-The angle branch is A20's reading of R1 sec. 3.4.3 — "a separate branch is
-adopted to predict the orientation angle" — built as a third per-level stem
-sharing the class and coefficient stems' shape but **not** their width
-(``channels // 2`` rather than A28's ``channels // 3``;
-:func:`_angle_stem_width` records the Table S11 measurement behind the split),
-emitting **one scalar per location**. That scalar is the angle itself: R1 Eq. 13
-makes ``theta_hat = z`` with no squashing nonlinearity, so
-:func:`_build_angle_stem` ends at a raw 1x1 and no activation follows it anywhere
-in the head. Decoding and range normalization live in
-:mod:`lucid_yolo.models.heads.obb`.
+The angle branch is A20's reading of R1 sec. 3.4.3 — "a separate branch is adopted to predict the orientation
+angle" — built as a third per-level stem sharing the class and coefficient stems' shape but **not** their width
+(``channels // 2`` rather than A28's ``channels // 3``; :func:`_angle_stem_width` records the Table S11 measurement
+behind the split), emitting **one scalar per location**. That scalar is the angle itself: R1 Eq. 13 makes
+``theta_hat = z`` with no squashing nonlinearity, so :func:`_build_angle_stem` ends at a raw 1x1 and no activation
+follows it anywhere in the head. Decoding and range normalization live in :mod:`lucid_yolo.models.heads.obb`.
 
-Two pure helpers accompany the module and are reused by the E2E decoder
-(WP-041): :func:`decode_ltrb` turns raw distances into ``xyxy`` boxes against an
-anchor grid, and :func:`o2o_topk` reduces the one-to-one branch to the
-score-ranked ``(B, 300, 6)`` detection tuple ``[x1, y1, x2, y2, score, class]``
-(A9). The full NMS-free E2E decode module lands in WP-041 and reuses
-:func:`o2o_topk`.
+Two pure helpers accompany the module and are reused by the E2E decoder (WP-041): :func:`decode_ltrb` turns raw
+distances into ``xyxy`` boxes against an anchor grid, and :func:`o2o_topk` reduces the one-to-one branch to the
+score-ranked ``(B, 300, 6)`` detection tuple ``[x1, y1, x2, y2, score, class]`` (A9). The full NMS-free E2E decode
+module lands in WP-041 and reuses :func:`o2o_topk`.
 
 Provenance: R1 sec. 3.2.1, R1 sec. 3.2.2, R1 sec. 3.4.3, R1 Eq. 13, R1 Fig. S2, R6, R14.
 Assumptions: A3, A9, A20, A28, A65.
@@ -121,24 +104,21 @@ DEFAULT_NUM_COEFFS = 32
 #: Default per-image detection cap of the one-to-one branch (R3 sec. 4, A9).
 _DEFAULT_TOPK = _MAX_DETECTIONS
 
-#: Prior probability for the classification-output bias init (RetinaNet sec. 5.1,
-#: R24 arXiv:1708.02002: "we set pi = 0.01"; A30). Every class sigmoid starts
-#: near this value, so the dense background BCE begins at ~0.01 nats per element
-#: instead of ~0.69 — without it the summed classification loss opens six orders
-#: of magnitude too large and the first optimizer step destroys the network
-#: (observed on the Det-smoke launch: loss 6.2e5 -> collapse to a dead all-zero
-#: predictor within three steps).
+#: Prior probability for the classification-output bias init (RetinaNet sec. 5.1, R24 arXiv:1708.02002: "we set
+#: pi = 0.01"; A30). Every class sigmoid starts near this value, so the dense background BCE begins at ~0.01 nats
+#: per element instead of ~0.69 — without it the summed classification loss opens six orders of magnitude too large
+#: and the first optimizer step destroys the network (observed on the Det-smoke launch: loss 6.2e5 -> collapse to a
+#: dead all-zero predictor within three steps).
 CLS_PRIOR_PROB = 0.01
 
 
 def init_cls_prior_bias(conv: nn.Conv2d) -> None:
     """Apply the RetinaNet prior-probability bias init to a dense-classifier 1x1.
 
-    Sets every bias entry to ``-log((1 - pi) / pi)`` with ``pi =``
-    :data:`CLS_PRIOR_PROB`, so each output sigmoid starts at ~``pi`` (A30, R24
-    sec. 5.1). Shared by every dense sigmoid classifier over a mostly-background
-    map — the detection class stems here and the auxiliary semantic branch — so
-    the formula exists exactly once and cannot drift between copies.
+    Sets every bias entry to ``-log((1 - pi) / pi)`` with ``pi =`` :data:`CLS_PRIOR_PROB`, so each output sigmoid
+    starts at ~``pi`` (A30, R24 sec. 5.1). Shared by every dense sigmoid classifier over a mostly-background map — the
+    detection class stems here and the auxiliary semantic branch — so the formula exists exactly once and cannot drift
+    between copies.
 
     Args:
         conv: The output convolution whose bias is initialized. Must have a bias.
@@ -161,13 +141,11 @@ def init_cls_prior_bias(conv: nn.Conv2d) -> None:
 def _stem_width(channels: int) -> int:
     """Return the shared hidden width for a prediction stem of ``channels`` inputs.
 
-    The width ``max(16, channels // 3)`` (assumptions A3/A9): a third of the level
-    width, floored at 16 so the smallest scales keep a usable stem. Both the box
-    and class stems use this one width — the WP-023 parameter/FLOP gate selected
-    ``channels // 3`` (from the original box ``channels // 4`` / class
-    ``max(num_classes, channels // 2)``) as the value that lands all five scales
-    within the R1 Table 7 tolerance. The convention is unpublished; the gate
-    validates it, and this is the first knob to turn if that gate misses.
+    The width ``max(16, channels // 3)`` (assumptions A3/A9): a third of the level width, floored at 16 so the
+    smallest scales keep a usable stem. Both the box and class stems use this one width — the WP-023 parameter/FLOP
+    gate selected ``channels // 3`` (from the original box ``channels // 4`` / class
+    ``max(num_classes, channels // 2)``) as the value that lands all five scales within the R1 Table 7 tolerance. The
+    convention is unpublished; the gate validates it, and this is the first knob to turn if that gate misses.
 
     Args:
         channels: Input channel count of the level.
@@ -190,9 +168,8 @@ def _stem_width(channels: int) -> int:
 def _depthwise_separable(in_channels: int, out_channels: int) -> nn.Sequential:
     """Build a depthwise-separable unit: a 3x3 depthwise then a 1x1 pointwise.
 
-    The Fig. S2 stem building block — spatial mixing by the depthwise
-    convolution, channel projection by the pointwise :class:`ConvBNAct`. Shared by
-    both the box and class stems (assumption A9).
+    The Fig. S2 stem building block — spatial mixing by the depthwise convolution, channel projection by the pointwise
+    :class:`ConvBNAct`. Shared by both the box and class stems (assumption A9).
 
     Args:
         in_channels: Input channel count (also the depthwise group count).
@@ -219,11 +196,10 @@ def _depthwise_separable(in_channels: int, out_channels: int) -> nn.Sequential:
 def _build_box_stem(channels: int) -> nn.Sequential:
     """Build one level's box stem: two depthwise-separable units then a 1x1 to 4.
 
-    The box stem mirrors the class stem's depthwise-separable structure
-    (assumption A9, WP-023): two depthwise-separable units project the level width
-    to the stem hidden width and keep it, then a 1x1 convolution maps to the 4
-    ltrb outputs. This lightweight form replaced the original two full ``3x3``
-    convolutions, which the WP-023 parameter gate flagged as far too heavy.
+    The box stem mirrors the class stem's depthwise-separable structure (assumption A9, WP-023): two
+    depthwise-separable units project the level width to the stem hidden width and keep it, then a 1x1 convolution
+    maps to the 4 ltrb outputs. This lightweight form replaced the original two full ``3x3`` convolutions, which the
+    WP-023 parameter gate flagged as far too heavy.
 
     Args:
         channels: Input channel count of the level.
@@ -251,9 +227,8 @@ def _build_box_stem(channels: int) -> nn.Sequential:
 def _build_cls_stem(channels: int, num_classes: int) -> nn.Sequential:
     """Build one level's class stem: two depthwise-separable units then a 1x1.
 
-    Per Fig. S2 the stem stacks two depthwise-separable units; the first
-    projects the level width to the stem hidden width, the second keeps it,
-    then a 1x1 convolution maps to ``num_classes`` score logits.
+    Per Fig. S2 the stem stacks two depthwise-separable units; the first projects the level width to the stem hidden
+    width, the second keeps it, then a 1x1 convolution maps to ``num_classes`` score logits.
 
     Args:
         channels: Input channel count of the level.
@@ -263,13 +238,10 @@ def _build_cls_stem(channels: int, num_classes: int) -> nn.Sequential:
         The classification stem for a single level, emitting ``(B, num_classes,
         H, W)``.
 
-    The final 1x1 convolution's bias is initialized by
-    :func:`init_cls_prior_bias` to ``-log((1 - pi) / pi)`` with ``pi = 0.01``
-    (:data:`CLS_PRIOR_PROB`), the
-    RetinaNet prior-probability init (R24 sec. 5.1, A30): at the first step every
-    class sigmoid evaluates to ~``pi``, keeping the dense background BCE — summed
-    over anchors and classes, normalized by the alignment-weight sum (R4) — at a
-    trainable magnitude instead of exploding on the first batch.
+    The final 1x1 convolution's bias is initialized by :func:`init_cls_prior_bias` to ``-log((1 - pi) / pi)`` with
+    ``pi = 0.01`` (:data:`CLS_PRIOR_PROB`), the RetinaNet prior-probability init (R24 sec. 5.1, A30): at the first step
+    every class sigmoid evaluates to ~``pi``, keeping the dense background BCE — summed over anchors and classes,
+    normalized by the alignment-weight sum (R4) — at a trainable magnitude instead of exploding on the first batch.
 
     Examples:
         ```pycon
@@ -295,12 +267,10 @@ def _build_cls_stem(channels: int, num_classes: int) -> nn.Sequential:
 def _build_coeff_stem(channels: int, num_coeffs: int) -> nn.Sequential:
     """Build one level's mask-coefficient stem without classification bias init.
 
-    The coefficient-stem internals are unspecified by the method paper, so this
-    follows the symmetric Fig. S2 class stem selected by assumption A34: two
-    depthwise-separable units project and retain the shared hidden width, then a
-    1x1 convolution emits ``num_coeffs`` channels. Unlike class logits, these
-    outputs are tanh regressands, so the prior-probability bias initialization
-    for sigmoid classification has no meaning here.
+    The coefficient-stem internals are unspecified by the method paper, so this follows the symmetric Fig. S2 class
+    stem selected by assumption A34: two depthwise-separable units project and retain the shared hidden width, then a
+    1x1 convolution emits ``num_coeffs`` channels. Unlike class logits, these outputs are tanh regressands, so the
+    prior-probability bias initialization for sigmoid classification has no meaning here.
 
     Args:
         channels: Input channel count of the level.
@@ -329,16 +299,13 @@ def _build_coeff_stem(channels: int, num_coeffs: int) -> nn.Sequential:
 def _angle_stem_width(channels: int) -> int:
     """Return the hidden width of an orientation stem: ``max(16, channels // 2)``.
 
-    Deliberately **not** :func:`_stem_width`. The box and class stems keep A28's
-    ``channels // 3``; only the angle stem is half the level width, and the split
-    is what the R1 Table S11 fidelity gate selected.
+    Deliberately **not** :func:`_stem_width`. The box and class stems keep A28's ``channels // 3``; only the angle
+    stem is half the level width, and the split is what the R1 Table S11 fidelity gate selected.
 
-    Both divisors were measured across all five scales rather than reasoned about,
-    because Table S11 rounds its parameter column to 0.1 M and that rounding is
-    what decides which scales can discriminate at all. Expressed as the ratio of
-    the measured angle-branch cost to the increment Table S11 implies over Table 7
-    (after correcting for the 80 -> 15 class saving), with the rounding
-    uncertainty that increment carries:
+    Both divisors were measured across all five scales rather than reasoned about, because Table S11 rounds its
+    parameter column to 0.1 M and that rounding is what decides which scales can discriminate at all. Expressed as the
+    ratio of the measured angle-branch cost to the increment Table S11 implies over Table 7 (after correcting for the
+    80 -> 15 class saving), with the rounding uncertainty that increment carries:
 
     ==========  ==========  ==========  ============
     variant     ``// 3``    ``// 2``    uncertainty
@@ -350,21 +317,17 @@ def _angle_stem_width(channels: int) -> int:
     x           0.63        1.04        +/-3.5%
     ==========  ==========  ==========  ============
 
-    At ``n`` and ``s`` the published increment is so small that rounding swamps
-    the comparison and neither divisor is discriminable. At ``m``, ``l`` and
-    ``x`` it is not: ``// 3`` lands at 0.63-0.66 of the published increment, far
-    outside the uncertainty, while ``// 2`` lands at 1.04-1.09, inside or beside
-    it. ``x`` is the most precise point in the table at +/-3.5% and it selects
-    ``// 2`` decisively.
+    At ``n`` and ``s`` the published increment is so small that rounding swamps the comparison and neither divisor is
+    discriminable. At ``m``, ``l`` and ``x`` it is not: ``// 3`` lands at 0.63-0.66 of the published increment, far
+    outside the uncertainty, while ``// 2`` lands at 1.04-1.09, inside or beside it. ``x`` is the most precise point in
+    the table at +/-3.5% and it selects ``// 2`` decisively.
 
-    **Neither divisor is uniformly right**, and that is the honest reading rather
-    than a caveat: ``// 3`` undershoots the large scales and ``// 2`` overshoots
-    ``s`` (ratio 1.62, though at +/-21% that is much weaker evidence than ``x``).
-    The published angle cost therefore does not follow any one fraction of the
-    level width, and this is the rule that matches the evidence where the evidence
-    discriminates — not a recovery of the paper's structure. Anyone tempted to
-    "restore" symmetry with :func:`_stem_width` should re-measure first: doing so
-    moves ``x`` from -1.65% to -3.07% against Table S11.
+    **Neither divisor is uniformly right**, and that is the honest reading rather than a caveat: ``// 3`` undershoots
+    the large scales and ``// 2`` overshoots ``s`` (ratio 1.62, though at +/-21% that is much weaker evidence than
+    ``x``). The published angle cost therefore does not follow any one fraction of the level width, and this is the
+    rule that matches the evidence where the evidence discriminates — not a recovery of the paper's structure. Anyone
+    tempted to "restore" symmetry with :func:`_stem_width` should re-measure first: doing so moves ``x`` from -1.65%
+    to -3.07% against Table S11.
 
     Args:
         channels: Input channel count of the level.
@@ -387,23 +350,18 @@ def _angle_stem_width(channels: int) -> int:
 def _build_angle_stem(channels: int) -> nn.Sequential:
     """Build one level's orientation stem: two depthwise-separable units then a 1x1 to 1.
 
-    A20's structure for R1 sec. 3.4.3's "separate branch ... to predict the
-    orientation angle": a third stem beside the box and class stems, sharing their
-    *shape* (Fig. S2 shows one stem shape, not one per output kind) and ending at
-    a 1x1 that emits a **single** scalar per location.
+    A20's structure for R1 sec. 3.4.3's "separate branch ... to predict the orientation angle": a third stem beside
+    the box and class stems, sharing their *shape* (Fig. S2 shows one stem shape, not one per output kind) and ending
+    at a 1x1 that emits a **single** scalar per location.
 
-    The shape is shared; the width is not. The hidden width comes from
-    :func:`_angle_stem_width` (``channels // 2``), not from A28's
-    :func:`_stem_width` (``channels // 3``) — the Table S11 gate selected the
-    wider stem, and that function's docstring holds the per-scale measurement and
-    the reason a uniform width does not exist.
+    The shape is shared; the width is not. The hidden width comes from :func:`_angle_stem_width` (``channels // 2``),
+    not from A28's :func:`_stem_width` (``channels // 3``) — the Table S11 gate selected the wider stem, and that
+    function's docstring holds the per-scale measurement and the reason a uniform width does not exist.
 
-    Nothing follows that 1x1. R1 Eq. 13 sets ``theta_hat = z`` — the previous
-    versions' Eq. 12 squashing, ``theta_hat = (sigmoid(z) - 0.25) * pi``, is
-    exactly what YOLO26 removes — so an activation here would reintroduce the
-    bounded range the paper deletes. The consequence is that the emitted angle is
-    unbounded; :func:`~lucid_yolo.models.heads.obb.decode_rboxes` is where it is
-    brought into the canonical range (A23), not here.
+    Nothing follows that 1x1. R1 Eq. 13 sets ``theta_hat = z`` — the previous versions' Eq. 12 squashing,
+    ``theta_hat = (sigmoid(z) - 0.25) * pi``, is exactly what YOLO26 removes — so an activation here would reintroduce
+    the bounded range the paper deletes. The consequence is that the emitted angle is unbounded;
+    :func:`~lucid_yolo.models.heads.obb.decode_rboxes` is where it is brought into the canonical range (A23), not here.
 
     Args:
         channels: Input channel count of the level.
@@ -433,22 +391,18 @@ def _build_angle_stem(channels: int) -> nn.Sequential:
 def _build_keypoint_stem(channels: int, num_keypoints: int) -> nn.Sequential:
     """Build one level's raw coordinate-and-uncertainty keypoint stem.
 
-    The stem follows the shared two-depthwise-separable-unit shape used by the
-    coefficient stem, with :func:`_stem_width` providing A28's
-    ``max(16, channels // 3)`` hidden width. That width was chosen (WP-122) on
-    the belief that no allowlisted measurement covers a keypoint task; R1 Table
-    S10 does, and against it this stem measures 13.0% under the paper's ``n``
-    params and 26.5% under its FLOPs, converging by ``l``/``x`` (A77, measured
-    2026-09-17). The width is unchanged here — a size gate does not yet exist for
-    it, and choosing one is WP-180's job, the way A20's angle-stem width was
-    chosen against Table S11 rather than by hand. R1 sec. 3.4.2 names the branch
-    ("a parallel sigma branch predicts per-axis uncertainty") and gives no width.
+    The stem follows the shared two-depthwise-separable-unit shape used by the coefficient stem, with
+    :func:`_stem_width` providing A28's ``max(16, channels // 3)`` hidden width. That width was chosen (WP-122) on the
+    belief that no allowlisted measurement covers a keypoint task; R1 Table S10 does, and against it this stem
+    measures 13.0% under the paper's ``n`` params and 26.5% under its FLOPs, converging by ``l``/``x`` (A77, measured
+    2026-09-17). The width is unchanged here — a size gate does not yet exist for it, and choosing one is WP-180's
+    job, the way A20's angle-stem width was chosen against Table S11 rather than by hand. R1 sec. 3.4.2 names the
+    branch ("a parallel sigma branch predicts per-axis uncertainty") and gives no width.
 
-    The final 1x1 emits four raw channels per point in point-major order: for
-    zero-based point ``i``, channels ``4*i`` through ``4*i+3`` are
-    ``(x_offset, y_offset, sigma_x, sigma_y)``. Nothing follows the convolution.
-    Coordinates are unbounded offsets like the angle, and sigma is equally raw
-    and unbounded here; WP-123's RLE loss owns any positivity mapping (A65).
+    The final 1x1 emits four raw channels per point in point-major order: for zero-based point ``i``, channels ``4*i``
+    through ``4*i+3`` are ``(x_offset, y_offset, sigma_x, sigma_y)``. Nothing follows the convolution. Coordinates are
+    unbounded offsets like the angle, and sigma is equally raw and unbounded here; WP-123's RLE loss owns any
+    positivity mapping (A65).
 
     Args:
         channels: Input channel count of the level.
@@ -500,13 +454,11 @@ def _flatten_level(feature_map: Tensor) -> Tensor:
     return feature_map.flatten(2).transpose(1, 2)
 
 
-#: The two branches a caller can ask :class:`DualDetectionHead` for by name. Spelled as a
-#: ``Literal`` beside a runtime tuple for the same reason
-#: :data:`~lucid_yolo.predict.DECODE_PATHS` is: the ``Literal`` protects statically-checked
-#: callers, and the tuple is what :func:`~lucid_yolo.validate.require_one_of` checks the
-#: ones that are not against. A branch name is the kind of argument whose violation is
-#: otherwise silent -- ``"O2O"`` or a typo would fall through an ``if``/``else`` to the
-#: *other* branch and answer with a plausible tensor nothing marks as wrong.
+#: The two branches a caller can ask :class:`DualDetectionHead` for by name. Spelled as a ``Literal`` beside a runtime
+#: tuple for the same reason :data:`~lucid_yolo.predict.DECODE_PATHS` is: the ``Literal`` protects statically-checked
+#: callers, and the tuple is what :func:`~lucid_yolo.validate.require_one_of` checks the ones that are not against. A
+#: branch name is the kind of argument whose violation is otherwise silent -- ``"O2O"`` or a typo would fall through
+#: an ``if``/``else`` to the *other* branch and answer with a plausible tensor nothing marks as wrong.
 BranchName = Literal["o2o", "o2m"]
 BRANCH_NAMES: tuple[BranchName, ...] = ("o2o", "o2m")
 
@@ -515,35 +467,29 @@ BRANCH_NAMES: tuple[BranchName, ...] = ("o2o", "o2m")
 class BranchOutput:
     """Dense predictions of a single detection branch.
 
-    One branch's half of :class:`DualHeadOutput`, with the branch prefix dropped:
-    :class:`DualDetectionHead` builds its twelve fields from two of these. The
-    per-field contract is the same one :class:`DualHeadOutput` documents — raw
-    class logits, raw ltrb distances in stride units, tanh-activated
-    coefficients, unactivated angles, and raw unbounded keypoint coordinates and
-    sigma.
+    One branch's half of :class:`DualHeadOutput`, with the branch prefix dropped: :class:`DualDetectionHead` builds its
+    twelve fields from two of these. The per-field contract is the same one :class:`DualHeadOutput` documents — raw
+    class logits, raw ltrb distances in stride units, tanh-activated coefficients, unactivated angles, and raw
+    unbounded keypoint coordinates and sigma.
 
-    It is a dataclass rather than the tuple this used to be because the tuple
-    fixed only its *width*. Six positional slots, four of them optional and all
-    but two typed ``Tensor | None``, were destructured at five call sites, four
-    of them with underscore placeholders that made the shape of what was skipped
-    invisible. Inserting or reordering an output silently rebound every one of
-    them, and nothing — not the annotations, not the type checker — would have
-    said so. Naming the fields is what makes that class of change loud, and it is
-    the same reasoning that made the enclosing :class:`DualHeadOutput` a
-    dataclass one layer up.
+    It is a dataclass rather than the tuple this used to be because the tuple fixed only its *width*. Six positional
+    slots, four of them optional and all but two typed ``Tensor | None``, were destructured at five call sites, four of
+    them with underscore placeholders that made the shape of what was skipped invisible. Inserting or reordering an
+    output silently rebound every one of them, and nothing — not the annotations, not the type checker — would have
+    said so. Naming the fields is what makes that class of change loud, and it is the same reasoning that made the
+    enclosing :class:`DualHeadOutput` a dataclass one layer up.
 
     Attributes:
         cls: Class logits, shape ``(B, A, num_classes)``, raw.
         box: Raw ltrb distances, shape ``(B, A, 4)``, in stride units.
-        coeff: Tanh mask coefficients, shape ``(B, A, num_coeffs)``, or ``None``
-            when the branch was built without coefficient stems.
-        angle: Raw orientation angles in radians, shape ``(B, A, 1)``, or
-            ``None`` when the branch was built without orientation stems.
-        keypoints: Raw point-coordinate offsets, shape ``(B, A, K, 2)``, or
-            ``None`` when the branch was built without keypoint stems.
-        keypoint_sigma: Raw, unbounded per-axis uncertainty, shape
-            ``(B, A, K, 2)``, or ``None`` when the branch was built without
+        coeff: Tanh mask coefficients, shape ``(B, A, num_coeffs)``, or ``None`` when the branch was built without
+            coefficient stems.
+        angle: Raw orientation angles in radians, shape ``(B, A, 1)``, or ``None`` when the branch was built without
+            orientation stems.
+        keypoints: Raw point-coordinate offsets, shape ``(B, A, K, 2)``, or ``None`` when the branch was built without
             keypoint stems.
+        keypoint_sigma: Raw, unbounded per-axis uncertainty, shape ``(B, A, K, 2)``, or ``None`` when the branch was
+            built without keypoint stems.
     """
 
     cls: Tensor
@@ -569,32 +515,27 @@ class _PredictionRunner(Protocol):
 class _DetectionBranch(nn.Module):
     """One prediction branch: per-level box/class stems plus optional extra stems.
 
-    Owns three box stems and three class stems (one pair per level, strides
-    8/16/32). :class:`DualDetectionHead` holds two of these — the one-to-one and
-    one-to-many branches — with disjoint parameters. Forward flattens and
-    concatenates the per-level maps into dense ``(B, A, num_classes)`` scores and
-    ``(B, A, 4)`` raw ltrb distances. Three further stem sets are built only when
-    explicitly requested: mask-coefficient stems emitting tanh-bounded
-    ``(B, A, num_coeffs)`` vectors (WP-047), orientation stems emitting the raw
-    ``(B, A, 1)`` angle of A20 (WP-062), and keypoint stems emitting raw
-    coordinates and uncertainty as ``(B, A, K, 2)`` tensors (WP-122).
+    Owns three box stems and three class stems (one pair per level, strides 8/16/32). :class:`DualDetectionHead` holds
+    two of these — the one-to-one and one-to-many branches — with disjoint parameters. Forward flattens and
+    concatenates the per-level maps into dense ``(B, A, num_classes)`` scores and ``(B, A, 4)`` raw ltrb distances.
+    Three further stem sets are built only when explicitly requested: mask-coefficient stems emitting tanh-bounded
+    ``(B, A, num_coeffs)`` vectors (WP-047), orientation stems emitting the raw ``(B, A, 1)`` angle of A20 (WP-062),
+    and keypoint stems emitting raw coordinates and uncertainty as ``(B, A, K, 2)`` tensors (WP-122).
 
-    Optional stems are constructed **after** the box and class stems, and a new
-    optional stem is constructed after any other already-enabled optional stem.
-    A previously accepted configuration therefore draws exactly the random
-    numbers it drew before: enabling a later stem set must not perturb the
-    initialization of parameters that already existed.
+    Optional stems are constructed **after** the box and class stems, and a new optional stem is constructed after any
+    other already-enabled optional stem. A previously accepted configuration therefore draws exactly the random
+    numbers it drew before: enabling a later stem set must not perturb the initialization of parameters that already
+    existed.
 
     Args:
-        in_channels: Per-level input channel counts ``(N3, N4, N5)`` in stride
-            order (8, 16, 32).
+        in_channels: Per-level input channel counts ``(N3, N4, N5)`` in stride order (8, 16, 32).
         num_classes: Number of object classes.
-        num_coeffs: Optional mask-coefficient count. ``None`` leaves the module
-            tree and prediction computation detection-only.
-        predict_angle: Build the orientation stems (A20). ``False`` leaves the
-            module tree and prediction computation angle-free.
-        num_keypoints: Optional generic point count. ``None`` leaves the module
-            tree and prediction computation keypoint-free.
+        num_coeffs: Optional mask-coefficient count. ``None`` leaves the module tree and prediction computation
+            detection-only.
+        predict_angle: Build the orientation stems (A20). ``False`` leaves the module tree and prediction computation
+            angle-free.
+        num_keypoints: Optional generic point count. ``None`` leaves the module tree and prediction computation
+            keypoint-free.
     """
 
     def __init__(
@@ -625,18 +566,16 @@ class _DetectionBranch(nn.Module):
     ) -> BranchOutput:
         """Predict dense scores, ltrb distances, and whichever optional outputs exist.
 
-        The result carries a **fixed** set of named fields whatever the branch
-        was built with, the disabled outputs coming back as ``None``. A shape
-        that varied with the enabled stem sets would make a three-value result
-        ambiguous between coefficients and angles, which is precisely the kind
-        of confusion that pairs one output with another's consumer — and the
-        names close the half of that hole a fixed-width tuple left open, where
-        the *order* was still positional at every call site.
+        The result carries a **fixed** set of named fields whatever the branch was built with, the disabled outputs
+        coming back as ``None``. A shape that varied with the enabled stem sets would make a three-value result
+        ambiguous between coefficients and angles, which is precisely the kind of confusion that pairs one output with
+        another's consumer — and the names close the half of that hole a fixed-width tuple left open, where the
+        *order* was still positional at every call site.
 
         Args:
             features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32.
-            _runner: Private scheduling seam of the opt-in CUDA prediction replay, not
-                public API. ``None``, the default, calls every stem natively.
+            _runner: Private scheduling seam of the opt-in CUDA prediction replay, not public API. ``None``, the
+                default, calls every stem natively.
 
         Returns:
             A :class:`BranchOutput` whose ``cls`` is raw class logits ``(B, A,
@@ -664,9 +603,8 @@ class _DetectionBranch(nn.Module):
     ) -> tuple[Tensor, Tensor]:
         """Run the existing interleaved box/class stems and concatenate each output.
 
-        Kept apart from coefficients so a scheduling adapter cannot materialize
-        mask-parameter gradients when the native mask loss reads no coefficients.
-        The per-level order, flattening and concatenations are unchanged.
+        Kept apart from coefficients so a scheduling adapter cannot materialize mask-parameter gradients when the
+        native mask loss reads no coefficients. The per-level order, flattening and concatenations are unchanged.
         """
         cls_levels: list[Tensor] = []
         box_levels: list[Tensor] = []
@@ -700,9 +638,8 @@ class _DetectionBranch(nn.Module):
     def _angles(self, features: tuple[Tensor, Tensor, Tensor]) -> Tensor | None:
         """Run the orientation stems unactivated, or return ``None`` if absent.
 
-        No activation is applied: R1 Eq. 13 predicts ``theta_hat = z`` directly,
-        deleting the Eq. 12 sigmoid squashing of the previous versions. The
-        unbounded scalar is normalized at decode time
+        No activation is applied: R1 Eq. 13 predicts ``theta_hat = z`` directly, deleting the Eq. 12 sigmoid squashing
+        of the previous versions. The unbounded scalar is normalized at decode time
         (:func:`~lucid_yolo.models.heads.obb.decode_rboxes`, A23), never here.
 
         Args:
@@ -725,9 +662,8 @@ class _DetectionBranch(nn.Module):
         """Run the keypoint stems unactivated, or return ``(None, None)`` if absent.
 
         Each flattened level follows the stem's point-major channel convention:
-        ``(x_offset, y_offset, sigma_x, sigma_y)`` per point. Reshaping makes the
-        point axis explicit before the first two and last two values are split.
-        Neither side receives an activation; in particular sigma remains raw and
+        ``(x_offset, y_offset, sigma_x, sigma_y)`` per point. Reshaping makes the point axis explicit before the first
+        two and last two values are split. Neither side receives an activation; in particular sigma remains raw and
         unbounded until WP-123's RLE loss decides its positivity mapping (A65).
 
         Args:
@@ -753,44 +689,35 @@ class _DetectionBranch(nn.Module):
 class DualHeadOutput:
     """Dense predictions of both detection branches.
 
-    Every field is a dense per-anchor tensor with the ``A`` axis ordered
-    level-by-level in row-major order (matching
-    :func:`~lucid_yolo.assign.grid.make_anchor_points`). Class fields are raw
-    logits; box fields are raw ltrb distances in stride units (decode them with
-    :func:`decode_ltrb`). Coefficient fields, when enabled, are already
-    tanh-activated in the head and lie in ``[-1, 1]``. This deliberate asymmetry
-    from the raw class and box outputs keeps the activation with its regression
-    head; a later mask loss must not move it. Angle fields go the other way and
-    are deliberately **unactivated and unbounded**: R1 Eq. 13 predicts
-    ``theta_hat = z``, so any range normalization belongs to the decode
-    (:func:`~lucid_yolo.models.heads.obb.decode_rboxes`, A23), not here.
-    Keypoint-coordinate fields are likewise raw offsets. Keypoint-sigma fields
-    are raw and unbounded: no range or positivity normalization happens anywhere
-    in this head, and WP-123's RLE loss owns that mapping (A65).
+    Every field is a dense per-anchor tensor with the ``A`` axis ordered level-by-level in row-major order (matching
+    :func:`~lucid_yolo.assign.grid.make_anchor_points`). Class fields are raw logits; box fields are raw ltrb
+    distances in stride units (decode them with :func:`decode_ltrb`). Coefficient fields, when enabled, are already
+    tanh-activated in the head and lie in ``[-1, 1]``. This deliberate asymmetry from the raw class and box outputs
+    keeps the activation with its regression head; a later mask loss must not move it. Angle fields go the other way
+    and are deliberately **unactivated and unbounded**: R1 Eq. 13 predicts ``theta_hat = z``, so any range
+    normalization belongs to the decode (:func:`~lucid_yolo.models.heads.obb.decode_rboxes`, A23), not here.
+    Keypoint-coordinate fields are likewise raw offsets. Keypoint-sigma fields are raw and unbounded: no range or
+    positivity normalization happens anywhere in this head, and WP-123's RLE loss owns that mapping (A65).
 
     Attributes:
         o2m_cls: One-to-many class logits, shape ``(B, A, num_classes)``.
         o2m_box: One-to-many raw ltrb distances, shape ``(B, A, 4)``.
         o2o_cls: One-to-one class logits, shape ``(B, A, num_classes)``.
         o2o_box: One-to-one raw ltrb distances, shape ``(B, A, 4)``.
-        o2m_coeff: One-to-many tanh mask coefficients, shape ``(B, A, K)``, or
-            ``None`` when coefficients are disabled.
-        o2o_coeff: One-to-one tanh mask coefficients, shape ``(B, A, K)``, or
-            ``None`` when coefficients are disabled.
-        o2m_angle: One-to-many raw orientation angles in radians, shape
-            ``(B, A, 1)``, or ``None`` when the angle branch is disabled.
-        o2o_angle: One-to-one raw orientation angles in radians, shape
-            ``(B, A, 1)``, or ``None`` when the angle branch is disabled.
+        o2m_coeff: One-to-many tanh mask coefficients, shape ``(B, A, K)``, or ``None`` when coefficients are disabled.
+        o2o_coeff: One-to-one tanh mask coefficients, shape ``(B, A, K)``, or ``None`` when coefficients are disabled.
+        o2m_angle: One-to-many raw orientation angles in radians, shape ``(B, A, 1)``, or ``None`` when the angle
+            branch is disabled.
+        o2o_angle: One-to-one raw orientation angles in radians, shape ``(B, A, 1)``, or ``None`` when the angle
+            branch is disabled.
         o2m_keypoints: One-to-many raw point-coordinate offsets, shape ``(B, A,
             K, 2)``, or ``None`` when keypoints are disabled.
         o2o_keypoints: One-to-one raw point-coordinate offsets, shape ``(B, A,
             K, 2)``, or ``None`` when keypoints are disabled.
-        o2m_keypoint_sigma: One-to-many raw, unbounded per-axis uncertainty,
-            shape ``(B, A, K, 2)``, or ``None`` when keypoints are disabled.
-            WP-123's RLE loss owns the positivity mapping.
-        o2o_keypoint_sigma: One-to-one raw, unbounded per-axis uncertainty,
-            shape ``(B, A, K, 2)``, or ``None`` when keypoints are disabled.
-            WP-123's RLE loss owns the positivity mapping.
+        o2m_keypoint_sigma: One-to-many raw, unbounded per-axis uncertainty, shape ``(B, A, K, 2)``, or ``None`` when
+            keypoints are disabled. WP-123's RLE loss owns the positivity mapping.
+        o2o_keypoint_sigma: One-to-one raw, unbounded per-axis uncertainty, shape ``(B, A, K, 2)``, or ``None`` when
+            keypoints are disabled. WP-123's RLE loss owns the positivity mapping.
     """
 
     o2m_cls: Tensor
@@ -810,25 +737,21 @@ class DualHeadOutput:
 class DualDetectionHead(nn.Module):
     """Anchor-free dual detection head with direct ltrb regression (reg_max=1).
 
-    Builds the R1 sec. 3.2.1-3.2.2 / Fig. S2 head: two branches
-    (:attr:`o2o` for the NMS-free one-to-one path, :attr:`o2m` for dense
-    one-to-many training supervision) share the neck features ``(N3, N4, N5)``
-    and each own per-level box and class stems over strides 8/16/32. Boxes are
-    predicted as 4 raw ltrb scalars per anchor with no DFL (``reg_max = 1``).
+    Builds the R1 sec. 3.2.1-3.2.2 / Fig. S2 head: two branches (:attr:`o2o` for the NMS-free one-to-one path,
+    :attr:`o2m` for dense one-to-many training supervision) share the neck features ``(N3, N4, N5)`` and each own
+    per-level box and class stems over strides 8/16/32. Boxes are predicted as 4 raw ltrb scalars per anchor with no
+    DFL (``reg_max = 1``).
 
     Args:
-        in_channels: Neck output channel counts ``(N3, N4, N5)`` in stride order
-            (8, 16, 32) — typically :attr:`DetectionNeck.channels`.
+        in_channels: Neck output channel counts ``(N3, N4, N5)`` in stride order (8, 16, 32) — typically
+            :attr:`DetectionNeck.channels`.
         num_classes: Number of object classes.
-        num_coeffs: Optional mask-coefficient count. ``None`` preserves the
-            detection-only head exactly; callers explicitly pass
-            :data:`DEFAULT_NUM_COEFFS` to enable coefficients.
-        predict_angle: Build both branches' orientation stems (A20). ``False``
-            preserves the detection-only head exactly; the oriented model passes
-            ``True``.
-        num_keypoints: Optional generic point count. ``None`` preserves the
-            existing head exactly; passing ``K`` builds coordinate-and-sigma
-            stems on both branches.
+        num_coeffs: Optional mask-coefficient count. ``None`` preserves the detection-only head exactly; callers
+            explicitly pass :data:`DEFAULT_NUM_COEFFS` to enable coefficients.
+        predict_angle: Build both branches' orientation stems (A20). ``False`` preserves the detection-only head
+            exactly; the oriented model passes ``True``.
+        num_keypoints: Optional generic point count. ``None`` preserves the existing head exactly; passing ``K``
+            builds coordinate-and-sigma stems on both branches.
 
     Examples:
         ```pycon
@@ -878,29 +801,26 @@ class DualDetectionHead(nn.Module):
     ) -> BranchOutput:
         """Run **one** named branch over the neck features.
 
-        :meth:`forward` runs both because training needs both: the one-to-many branch
-        supplies the dense assignment's targets and the one-to-one branch the E2E ones.
-        Inference does not. Every decode path reads exactly one branch -- the top-k path
-        the one-to-one, the suppression path the one-to-many -- and the other branch's
-        stems are computed, materialized and then dropped. This is the seam that lets a
-        caller ask for only the half it will read.
+        :meth:`forward` runs both because training needs both: the one-to-many branch supplies the dense assignment's
+        targets and the one-to-one branch the E2E ones. Inference does not. Every decode path reads exactly one branch
+        -- the top-k path the one-to-one, the suppression path the one-to-many -- and the other branch's stems are
+        computed, materialized and then dropped. This is the seam that lets a caller ask for only the half it will
+        read.
 
-        ``branch`` is validated rather than dispatched on directly, because its violation
-        is otherwise silent: a bare ``if branch == "o2o"`` maps ``"O2O"``, ``"o2o "`` or a
-        typo onto the *other* branch and returns a well-shaped tensor that no downstream
-        check can recognise as the wrong one.
+        ``branch`` is validated rather than dispatched on directly, because its violation is otherwise silent: a bare
+        ``if branch == "o2o"`` maps ``"O2O"``, ``"o2o "`` or a typo onto the *other* branch and returns a well-shaped
+        tensor that no downstream check can recognise as the wrong one.
 
         Args:
-            features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32, with
-                channel counts matching the constructor's ``in_channels``.
+            features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32, with channel counts matching the
+                constructor's ``in_channels``.
             branch: Which branch to run, one of :data:`BRANCH_NAMES`.
-            _runner: Private scheduling seam of the opt-in CUDA prediction replay, passed
-                on to the branch; not public API. ``None``, the default, is the native call.
+            _runner: Private scheduling seam of the opt-in CUDA prediction replay, passed on to the branch; not public
+                API. ``None``, the default, is the native call.
 
         Returns:
-            That branch's :class:`BranchOutput`: dense class logits, raw ltrb distances,
-            and whichever of the optional coefficient, angle and keypoint tensors the
-            head was built with.
+            That branch's :class:`BranchOutput`: dense class logits, raw ltrb distances, and whichever of the optional
+            coefficient, angle and keypoint tensors the head was built with.
 
         Raises:
             ValueError: If ``branch`` is not one of :data:`BRANCH_NAMES`.
@@ -931,16 +851,15 @@ class DualDetectionHead(nn.Module):
         """Run both branches over the neck features.
 
         Args:
-            features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32,
-                with channel counts matching the constructor's ``in_channels``.
-            _runner: Private scheduling seam of the opt-in CUDA prediction replay, passed
-                on to both branches; not public API. ``None``, the default, is the native call.
+            features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32, with channel counts matching the
+                constructor's ``in_channels``.
+            _runner: Private scheduling seam of the opt-in CUDA prediction replay, passed on to both branches; not
+                public API. ``None``, the default, is the native call.
 
         Returns:
-            A :class:`DualHeadOutput` with dense class logits, raw ltrb
-            distances, and — for whichever optional stems were built — tanh mask
-            coefficients, raw orientation angles, and raw point-coordinate and
-            uncertainty tensors, for both branches.
+            A :class:`DualHeadOutput` with dense class logits, raw ltrb distances, and — for whichever optional stems
+            were built — tanh mask coefficients, raw orientation angles, and raw point-coordinate and uncertainty
+            tensors, for both branches.
         """
         o2m = self.forward_branch(features, "o2m", _runner=_runner)
         o2o = self.forward_branch(features, "o2o", _runner=_runner)
@@ -963,20 +882,17 @@ class DualDetectionHead(nn.Module):
 def decode_ltrb(distances: Tensor, anchor_points: Tensor, strides: Tensor) -> Tensor:
     """Decode raw ltrb distances into ``xyxy`` boxes against an anchor grid.
 
-    Each distance quadruple ``(l, t, r, b)`` gives the left/top/right/bottom
-    offsets from its anchor centre in stride units; the box corners are the
-    anchor centre displaced by those offsets scaled to input pixels::
+    Each distance quadruple ``(l, t, r, b)`` gives the left/top/right/bottom offsets from its anchor centre in stride
+    units; the box corners are the anchor centre displaced by those offsets scaled to input pixels::
 
         x1 = ax - l * s    y1 = ay - t * s
         x2 = ax + r * s    y2 = ay + b * s
 
-    Corner order is ``[x1, y1, x2, y2]`` (A9). Pure function — shared by both
-    branches and by the WP-041 E2E decoder.
+    Corner order is ``[x1, y1, x2, y2]`` (A9). Pure function — shared by both branches and by the WP-041 E2E decoder.
 
     Args:
         distances: Raw ltrb distances of shape ``(B, A, 4)`` (order l, t, r, b).
-        anchor_points: Anchor-centre ``(x, y)`` coordinates of shape ``(A, 2)``
-            in input pixels, as returned by
+        anchor_points: Anchor-centre ``(x, y)`` coordinates of shape ``(A, 2)`` in input pixels, as returned by
             :func:`~lucid_yolo.assign.grid.make_anchor_points`.
         strides: Per-anchor level stride of shape ``(A,)``.
 
@@ -1007,15 +923,12 @@ def decode_ltrb(distances: Tensor, anchor_points: Tensor, strides: Tensor) -> Te
 def o2o_topk_with_indices(scores: Tensor, boxes: Tensor, k: int = _DEFAULT_TOPK) -> tuple[Tensor, Tensor]:
     """Reduce the one-to-one branch to the top-k detections *and* the anchors kept.
 
-    The selection itself is :func:`o2o_topk`'s — this is the one place it is
-    written. The extra return is the anchor index each kept detection came from,
-    which any per-anchor quantity that is **not** part of the A9 tuple must be
-    gathered by: the segmentation decode reads its mask coefficients from the
-    dense ``(B, A, K)`` coefficient map, and a coefficient row paired with the
-    wrong anchor's box yields a perfectly plausible mask of the wrong object.
-    Ranking the scores a second time in a separate helper is exactly how such a
-    pairing goes silently wrong, so :func:`o2o_topk` is a wrapper over this
-    function rather than a second copy.
+    The selection itself is :func:`o2o_topk`'s — this is the one place it is written. The extra return is the anchor
+    index each kept detection came from, which any per-anchor quantity that is **not** part of the A9 tuple must be
+    gathered by: the segmentation decode reads its mask coefficients from the dense ``(B, A, K)`` coefficient map, and
+    a coefficient row paired with the wrong anchor's box yields a perfectly plausible mask of the wrong object.
+    Ranking the scores a second time in a separate helper is exactly how such a pairing goes silently wrong, so
+    :func:`o2o_topk` is a wrapper over this function rather than a second copy.
 
     Args:
         scores: Raw class logits of shape ``(B, A, C)``.
@@ -1057,15 +970,13 @@ def o2o_topk_with_indices(scores: Tensor, boxes: Tensor, k: int = _DEFAULT_TOPK)
 def o2o_topk(scores: Tensor, boxes: Tensor, k: int = _DEFAULT_TOPK) -> Tensor:
     """Reduce the one-to-one branch to the top-k score-ranked detections.
 
-    Convenience for the NMS-free path: score each anchor by its maximum class
-    confidence (after a sigmoid), keep the ``k`` highest-scoring anchors per
-    image, and emit the A9 detection tuple ``[x1, y1, x2, y2, score, class]``.
-    The full E2E decode module lands in WP-041 and reuses this helper. When the
-    anchor count ``A`` is below ``k`` every anchor is returned.
+    Convenience for the NMS-free path: score each anchor by its maximum class confidence (after a sigmoid), keep the
+    ``k`` highest-scoring anchors per image, and emit the A9 detection tuple ``[x1, y1, x2, y2, score, class]``. The
+    full E2E decode module lands in WP-041 and reuses this helper. When the anchor count ``A`` is below ``k`` every
+    anchor is returned.
 
-    Thin wrapper over :func:`o2o_topk_with_indices`, which owns the selection and
-    additionally reports which anchors were kept; callers needing only the
-    detection tuple use this name.
+    Thin wrapper over :func:`o2o_topk_with_indices`, which owns the selection and additionally reports which anchors
+    were kept; callers needing only the detection tuple use this name.
 
     Args:
         scores: Raw class logits of shape ``(B, A, C)``.

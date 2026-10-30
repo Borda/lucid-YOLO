@@ -1,122 +1,100 @@
 # SPDX-License-Identifier: Apache-2.0
 """Rotated mAP50-95 for the DOTA-v1.0 validation protocol (WP-063, A24).
 
-The oriented acceptance instrument of the blueprint: rotated mAP50-95 on the DOTA-v1.0
-**validation** split, scored with **exact polygon-intersection IoU** rather than a
-Gaussian surrogate. :mod:`lucid_yolo.losses.probiou` approximates a rotated box by its
-uniform-density Gaussian because a loss needs a smooth gradient; a metric needs the area
-itself, so the area is computed exactly — Sutherland-Hodgman convex clipping of one
-quadrilateral against the other, then the shoelace formula.
+The oriented acceptance instrument of the blueprint: rotated mAP50-95 on the DOTA-v1.0 **validation** split, scored
+with **exact polygon-intersection IoU** rather than a Gaussian surrogate. :mod:`lucid_yolo.losses.probiou`
+approximates a rotated box by its uniform-density Gaussian because a loss needs a smooth gradient; a metric needs
+the area itself, so the area is computed exactly — Sutherland-Hodgman convex clipping of one quadrilateral against
+the other, then the shoelace formula.
 
-That kernel is :func:`~lucid_yolo.data.rotated_geom.rotated_iou`, and it lives in the
-geometry module rather than here (WP-091c): it is pure geometry with no evaluation
-content, and :class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` suppresses with the
-same function, so putting it beside :func:`~lucid_yolo.data.rotated_geom.canonicalize`
-keeps an evaluation module off the decode path's import graph. It is imported **and
-re-exported** here deliberately, not as a leftover alias awaiting removal: the protocol
-this module defines is stated in terms of that overlap measure, so a caller reproducing
-the protocol reaches for the two through one import, exactly as
-:func:`~lucid_yolo.data.rotated_geom.canonicalize` is reachable from both
+That kernel is :func:`~lucid_yolo.data.rotated_geom.rotated_iou`, and it lives in the geometry module rather than
+here (WP-091c): it is pure geometry with no evaluation content, and
+:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` suppresses with the same function, so putting it beside
+:func:`~lucid_yolo.data.rotated_geom.canonicalize` keeps an evaluation module off the decode path's import graph.
+It is imported **and re-exported** here deliberately, not as a leftover alias awaiting removal: the protocol
+this module defines is stated in terms of that overlap measure, so a caller reproducing the protocol reaches for
+the two through one import, exactly as :func:`~lucid_yolo.data.rotated_geom.canonicalize` is reachable from both
 :mod:`lucid_yolo.data` and its own module.
 
-Three pieces compose the protocol, mirroring the axis-aligned
-:mod:`lucid_yolo.eval.coco_eval`:
+Three pieces compose the protocol, mirroring the axis-aligned :mod:`lucid_yolo.eval.coco_eval`:
 
-- :func:`rotated_iou` — the exact pairwise overlap kernel, defined in
-  :mod:`lucid_yolo.data.rotated_geom` and re-exported here.
+- :func:`rotated_iou` — the exact pairwise overlap kernel, defined in :mod:`lucid_yolo.data.rotated_geom` and
+  re-exported here.
 - :func:`evaluate_rotated_map` — the COCO-style accumulator running on that kernel.
-- :func:`rotated_detections_to_predictions` and :func:`tiled_targets_to_ground_truth` —
-  the adapters from the A45 oriented detection tuple and from WP-057's tiled targets.
+- :func:`rotated_detections_to_predictions` and :func:`tiled_targets_to_ground_truth` — the adapters from the A45
+  oriented detection tuple and from WP-057's tiled targets.
 
 Scope — what this module is **not** (WP-107):
-    It scores predictions against ground truth **as supplied**, one evaluation unit at a
-    time. It does **not** merge detections from the overlapping 1024 px tiles of
-    :func:`~lucid_yolo.data.tiling.tile_windows` back onto whole DOTA images. That step is
-    genuinely underspecified on an NMS-free path — two overlapping tiles both detect the
-    same object at full confidence and there is no suppression stage to remove the
-    duplicate — so it needs a policy decided rather than inherited. WP-063 deferred it to
-    WP-088, whose scope never took it up, and 0.3.0 shipped without it; it now lives in
-    :mod:`lucid_yolo.eval.tile_merge` (WP-107), which states the rule and argues it. What
-    this module scores is whatever evaluation unit it is handed: hand it tiles and the
-    honest reading is **per-tile** mAP, hand it merged source images and it is whole-image
-    mAP, and the two are not interchangeable — a tile-level score never pays the
-    duplicate-detection cost that whole-image evaluation charges.
+    It scores predictions against ground truth **as supplied**, one evaluation unit at a time. It does **not** merge
+    detections from the overlapping 1024 px tiles of :func:`~lucid_yolo.data.tiling.tile_windows` back onto whole
+    DOTA images. That step is genuinely underspecified on an NMS-free path — two overlapping tiles both detect the
+    same object at full confidence and there is no suppression stage to remove the duplicate — so it needs a
+    policy decided rather than inherited. WP-063 deferred it to WP-088, whose scope never took it up, and 0.3.0 shipped
+    without it; it now lives in :mod:`lucid_yolo.eval.tile_merge` (WP-107), which states the rule and argues it. What
+    this module scores is whatever evaluation unit it is handed: hand it tiles and the honest reading is **per-tile**
+    mAP, hand it merged source images and it is whole-image mAP, and the two are not interchangeable — a tile-level
+    score never pays the duplicate-detection cost that whole-image evaluation charges.
 
 Protocol constants, fixed here as decisions:
-    R1 states the evaluation target ("rotated mAP50-95 on DOTA-v1.0 val", Tables 10-11)
-    but settles none of the five constants below. Each is pinned in code and named where
-    it lives, so a reader learns the protocol from the module rather than from a report.
+    R1 states the evaluation target ("rotated mAP50-95 on DOTA-v1.0 val", Tables 10-11) but settles none of the five
+    constants below. Each is pinned in code and named where it lives, so a reader learns the protocol from the module
+    rather than from a report.
 
     1. **Ten IoU thresholds**, 0.50 to 0.95 in steps of 0.05 (:data:`IOU_THRESHOLDS`).
-    2. **101-point interpolated recall** (:data:`RECALL_POINTS`), the COCO convention.
-       Chosen so this instrument and the axis-aligned one — which is COCOeval-faithful
-       through its ``faster_coco_eval`` backend — define mAP the same way, and a reader
-       comparing the two reports is comparing numbers rather than definitions. Whether
-       they actually did depended on the dtype each grid was built in, because sampling
-       "has recall reached ``k/100``" is an equality test that rounding can settle::
+    2. **101-point interpolated recall** (:data:`RECALL_POINTS`), the COCO convention. Chosen so this instrument and the
+       axis-aligned one — which is COCOeval-faithful through its ``faster_coco_eval`` backend — define mAP the
+       same way, and a reader comparing the two reports is comparing numbers rather than definitions. Whether they
+       actually did depended on the dtype each grid was built in, because sampling "has recall reached ``k/100``" is
+       an equality test that rounding can settle::
 
            torch.linspace float32  (torchmetrics default, no longer used)  36 missed
            numpy.linspace float64  (raw pycocotools / faster_coco_eval)    10 missed
            exact integers          (this module)                            0 missed
 
-       A "missed" boundary is one where the stored grid value exceeds the correctly
-       rounded ``k/100``, so a class whose recall reaches exactly ``k/100`` fails the
-       comparison and forfeits that point — ``1/101`` of that class's AP, always
-       downward. Until WP-092 that made ``evaluate_bbox`` the lower of the two at 36
-       boundaries; it now supplies the metric an exact grid through its documented
-       ``rec_thresholds`` argument, so the axis-aligned instrument forfeits none either
-       and the two agree at every boundary they can reach. They arrive there by
-       different arithmetic — int64 rationals here, correctly rounded float64 division
-       there — so the agreement is a measured property rather than a shared code path,
-       which is why both sides pin it. :func:`_average_precision` documents the
-       arithmetic; ``tests/eval/test_dota_eval.py`` pins the exact values and the
-       agreement, and ``tests/eval/test_coco_eval.py`` pins the dependency defect so
-       that a torchmetrics which fixes its own grid is noticed rather than worked
-       around forever.
-    3. **maxDets = 300** (:data:`MAX_DETECTIONS`), not COCO's 100. The oriented output
-       caps at 300 detections per image
-       (:func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk`), so a 100 cap would
-       silently discard two thirds of what the model emits and report the remainder as
-       the model's recall.
-    4. **Classes with zero ground truths are excluded** from the mean, the COCO
-       convention, rather than scored as zero — and "zero" counts *non-difficult* ground
-       truths, since a class whose instances are all difficult has an empty recall
-       denominator and averaging a 0/0 into the mean would be arithmetic, not a
-       measurement.
-    5. **Difficult ground truths follow R18's devkit convention** (VOC-style): a detection
-       matched to a difficult ground truth is neither a true positive nor a false positive
-       — it is discarded — and difficult instances do not count towards the recall
-       denominator. See the difficult-flag note below; this is load-bearing, not
+       A "missed" boundary is one where the stored grid value exceeds the correctly rounded ``k/100``, so a class
+       whose recall reaches exactly ``k/100`` fails the comparison and forfeits that point — ``1/101`` of that class's
+       AP, always downward. Until WP-092 that made ``evaluate_bbox`` the lower of the two at 36 boundaries; it now
+       supplies the metric an exact grid through its documented ``rec_thresholds`` argument, so the axis-aligned
+       instrument forfeits none either and the two agree at every boundary they can reach. They arrive there by
+       different arithmetic — int64 rationals here, correctly rounded float64 division there — so the agreement is a
+       measured property rather than a shared code path, which is why both sides pin it. :func:`_average_precision`
+       documents the arithmetic; ``tests/eval/test_dota_eval.py`` pins the exact values and the agreement, and
+       ``tests/eval/test_coco_eval.py`` pins the dependency defect so that a torchmetrics which fixes its own grid
+       is noticed rather than worked around forever.
+    3. **maxDets = 300** (:data:`MAX_DETECTIONS`), not COCO's 100. The oriented output caps at 300 detections per
+       image (:func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk`), so a 100 cap would silently discard two thirds
+       of what the model emits and report the remainder as the model's recall.
+    4. **Classes with zero ground truths are excluded** from the mean, the COCO convention, rather than scored as
+       zero — and "zero" counts *non-difficult* ground truths, since a class whose instances are all difficult has an
+       empty recall denominator and averaging a 0/0 into the mean would be arithmetic, not a measurement.
+    5. **Difficult ground truths follow R18's devkit convention** (VOC-style): a detection matched to a difficult
+       ground truth is neither a true positive nor a false positive — it is discarded — and difficult instances do
+       not count towards the recall denominator. See the difficult-flag note below; this is load-bearing, not
        decorative.
 
 The difficult flag, and what the caller must do about it:
     :func:`~lucid_yolo.data.tiling.crop_targets` flags every instance clipped below
-    :data:`~lucid_yolo.data.tiling.DIFFICULT_AREA_FRACTION` of its original area as
-    difficult, so real DOTA val tiles carry difficult instances whether or not the source
-    label file did. The evaluation loader must therefore read labels with
-    ``keep_difficult=True`` (:func:`~lucid_yolo.data.dota.load_dota_targets`) and pass the
-    flags through: dropping difficult instances at load does not make them neutral, it
-    converts every detection that finds one into a **false positive** against a ground
-    truth that was silently deleted.
+    :data:`~lucid_yolo.data.tiling.DIFFICULT_AREA_FRACTION` of its original area as difficult, so real DOTA val tiles
+    carry difficult instances whether or not the source label file did. The evaluation loader must therefore read
+    labels with ``keep_difficult=True`` (:func:`~lucid_yolo.data.dota.load_dota_targets`) and pass the flags through:
+    dropping difficult instances at load does not make them neutral, it converts every detection that finds one
+    into a **false positive** against a ground truth that was silently deleted.
 
-    The matching rule implemented here prefers a non-difficult match: a detection takes
-    the best *unmatched non-difficult* ground truth at or above the threshold; failing
-    that, an overlap with any difficult ground truth discards it; failing that it is a
-    false positive. The literal VOC devkit instead takes the argmax over *all* ground
-    truths and only then inspects the flag, so the two differ in one corner — a difficult
-    instance overlapping a detection more than a matchable non-difficult one shadows it,
-    costing a true positive. Difficult instances are never consumed, so several detections
-    may be discarded against the same one, which is the devkit's behaviour.
+    The matching rule implemented here prefers a non-difficult match: a detection takes the best *unmatched
+    non-difficult* ground truth at or above the threshold; failing that, an overlap with any difficult ground truth
+    discards it; failing that it is a false positive. The literal VOC devkit instead takes the argmax over *all*
+    ground truths and only then inspects the flag, so the two differ in one corner — a difficult instance overlapping
+    a detection more than a matchable non-difficult one shadows it, costing a true positive. Difficult instances
+    are never consumed, so several detections may be discarded against the same one, which is the devkit's behaviour.
 
 Precision, and why there is no float64 anywhere on this path:
-    Evaluation runs on MPS, which has no float64, so the overlap kernel cannot buy its
-    conditioning the way :mod:`lucid_yolo.data.tiling` does. It buys it structurally
-    instead, by re-centring each pair on its own midpoint before expanding corners. The
-    argument and the error measurements that fix the order of those two steps travel with
-    the kernel — see :mod:`lucid_yolo.data.rotated_geom`.
+    Evaluation runs on MPS, which has no float64, so the overlap kernel cannot buy its conditioning the way
+    :mod:`lucid_yolo.data.tiling` does. It buys it structurally instead, by re-centring each pair on its own midpoint
+    before expanding corners. The argument and the error measurements that fix the order of those two steps travel
+    with the kernel — see :mod:`lucid_yolo.data.rotated_geom`.
 
-Provenance: R1 Tables 10-11, R12 (the 101-point and zero-GT conventions), R13, R18 sec. 4
-and its devkit. Assumptions: A21, A23, A24, A39, A45.
+Provenance: R1 Tables 10-11, R12 (the 101-point and zero-GT conventions), R13, R18 sec. 4 and its devkit. Assumptions:
+A21, A23, A24, A39, A45.
 """
 
 from __future__ import annotations
@@ -145,21 +123,20 @@ __all__ = [
     "tiled_targets_to_ground_truth",
 ]
 
-#: The ten IoU thresholds of the protocol, 0.50 to 0.95 in steps of 0.05 (decision 1).
-#: Built by arithmetic rather than written out so the step is the definition.
+#: The ten IoU thresholds of the protocol, 0.50 to 0.95 in steps of 0.05 (decision 1). Built by arithmetic rather
+#: than written out so the step is the definition.
 IOU_THRESHOLDS: tuple[float, ...] = tuple(round(0.50 + 0.05 * step, 2) for step in range(10))
 
 #: Recall sample count of the interpolated average precision (decision 2): the COCO
 #: 101-point grid ``0.00, 0.01, ..., 1.00``, matching :mod:`lucid_yolo.eval.coco_eval`.
 RECALL_POINTS = 101
 
-#: The four summary statistics. ``map``/``map_50``/``map_75`` carry the names
-#: :mod:`lucid_yolo.eval.coco_eval` gives the same quantities, so the oriented and
-#: axis-aligned reports share one vocabulary where they overlap. ``mar_300`` is the
-#: honest analogue of its ``mar_100`` — the cap differs, so the name does too. The
-#: ``*_small``/``*_medium``/``*_large`` breakdown is deliberately absent: those buckets
-#: are COCO area constants (R12), and this protocol does not define area ranges for
-#: oriented boxes, so reporting them would be inventing a threshold rather than citing one.
+#: The four summary statistics. ``map``/``map_50``/``map_75`` carry the names :mod:`lucid_yolo.eval.coco_eval` gives
+#: the same quantities, so the oriented and axis-aligned reports share one vocabulary where they overlap. ``mar_300``
+#: is the honest analogue of its ``mar_100`` — the cap differs, so the name does too. The
+#: ``*_small``/``*_medium``/``*_large`` breakdown is deliberately absent: those buckets are COCO area constants
+#: (R12), and this protocol does not define area ranges for oriented boxes, so reporting them would be inventing
+#: a threshold rather than citing one.
 _METRIC_KEYS: tuple[str, ...] = ("map", "map_50", "map_75", "mar_300")
 
 #: Index of the 0.50 and 0.75 thresholds within :data:`IOU_THRESHOLDS`.
@@ -179,17 +156,14 @@ _DETECTION_WIDTH = 7
 def rotated_detections_to_predictions(detections: Tensor, score_floor: float = 0.0) -> list[dict[str, Tensor]]:
     """Convert a fixed-size oriented detection batch into per-image prediction dicts.
 
-    Each row of the ``(B, N, 7)`` batch is the A45 tuple
-    ``[cx, cy, w, h, theta, score, class]`` that
-    :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` emits. A row survives when its
-    ``score`` is strictly above ``score_floor``, which at the default ``0.0`` drops the
-    score-zero padding rows that fill the fixed shape — the same rule
-    :func:`~lucid_yolo.eval.coco_eval.detections_to_predictions` applies to the
-    axis-aligned tuple.
+    Each row of the ``(B, N, 7)`` batch is the A45 tuple ``[cx, cy, w, h, theta, score, class]`` that
+    :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` emits. A row survives when its ``score`` is strictly above
+    ``score_floor``, which at the default ``0.0`` drops the score-zero padding rows that fill the fixed shape — the
+    same rule :func:`~lucid_yolo.eval.coco_eval.detections_to_predictions` applies to the axis-aligned tuple.
 
-    Unlike the COCO path there is no label remapping. DOTA class ids are already the
-    contiguous indices into :data:`~lucid_yolo.data.dota.DOTA_CLASSES` that the head
-    predicts, so a mapping table would be the identity and one more thing to keep aligned.
+    Unlike the COCO path there is no label remapping. DOTA class ids are already the contiguous indices into
+    :data:`~lucid_yolo.data.dota.DOTA_CLASSES` that the head predicts, so a mapping table would be the identity and
+    one more thing to keep aligned.
 
     Args:
         detections: Oriented detections of shape ``(B, N, 7)``, typically ``(B, 300, 7)``.
@@ -232,10 +206,9 @@ def rotated_detections_to_predictions(detections: Tensor, score_floor: float = 0
 def tiled_targets_to_ground_truth(tiled: TiledTargets) -> dict[str, Tensor]:
     """Convert one tile's :class:`~lucid_yolo.data.tiling.TiledTargets` into a target dict.
 
-    The rotated boxes, class labels and difficult flags travel together on the single
-    instance axis WP-056 establishes and WP-057 preserves, so the flag reaching the
-    accumulator is provably the flag of the box beside it. That flag is the R18 one OR-ed
-    with "this part fell below 70% of its original area", which is why the evaluation
+    The rotated boxes, class labels and difficult flags travel together on the single instance axis WP-056
+    establishes and WP-057 preserves, so the flag reaching the accumulator is provably the flag of the box beside it.
+    That flag is the R18 one OR-ed with "this part fell below 70% of its original area", which is why the evaluation
     loader must keep difficult instances rather than filter them (module docstring).
 
     Args:
@@ -280,17 +253,15 @@ def evaluate_rotated_map(
 ) -> dict[str, float]:
     """Score oriented predictions against oriented ground truth with rotated mAP50-95.
 
-    Implements the five protocol decisions of the module docstring: ten IoU thresholds,
-    101-point interpolated recall, a 300-detection cap per image, exclusion of classes
-    without non-difficult ground truth, and R18's difficult-instance rule. Matching is
-    greedy and one-to-one — within each class and threshold, detections are taken in
-    descending score order and each claims the best still-unmatched ground truth at or
-    above the threshold.
+    Implements the five protocol decisions of the module docstring: ten IoU thresholds, 101-point interpolated recall,
+    a 300-detection cap per image, exclusion of classes without non-difficult ground truth, and R18's
+    difficult-instance rule. Matching is greedy and one-to-one — within each class and threshold, detections are
+    taken in descending score order and each claims the best still-unmatched ground truth at or above the
+    threshold.
 
-    Matching is performed per image and the resulting decisions are then merged in global
-    score order for the precision-recall curve. That is not an approximation: a ground
-    truth can only be claimed by a detection in its own image, so the per-image order and
-    the global order consume ground truths identically.
+    Matching is performed per image and the resulting decisions are then merged in global score order for the
+    precision-recall curve. That is not an approximation: a ground truth can only be claimed by a detection in its
+    own image, so the per-image order and the global order consume ground truths identically.
 
     Args:
         preds: Per-image prediction dicts with ``rboxes`` (``(M, 5)``), ``scores``
@@ -390,9 +361,9 @@ def _image_to_prediction(detections: Tensor, score_floor: float) -> dict[str, Te
 def _cap_detections(prediction: Mapping[str, Tensor], cap: int | None) -> Mapping[str, Tensor]:
     """Keep at most ``cap`` rows of one image, the highest-scoring ones.
 
-    The cap is applied across all classes at once, as COCO's ``maxDets`` is: it models
-    what the detector may emit for the image, not what it may emit per class. ``None``
-    disables it for an evaluation unit whose detections were already capped at emission.
+    The cap is applied across all classes at once, as COCO's ``maxDets`` is: it models what the detector may emit
+    for the image, not what it may emit per class. ``None`` disables it for an evaluation unit whose detections
+    were already capped at emission.
 
     Examples:
         ```pycon
@@ -436,9 +407,9 @@ def _difficult_flags(target: Mapping[str, Tensor]) -> Tensor:
 def _scorable_labels(targets: Sequence[Mapping[str, Tensor]]) -> list[int]:
     """Return the class labels carrying at least one non-difficult ground truth.
 
-    Decision 4: a class without them has an empty recall denominator, so it is excluded
-    from the mean rather than contributing a zero. That covers both the class absent from
-    the ground truth entirely and the class whose every instance is flagged difficult.
+    Decision 4: a class without them has an empty recall denominator, so it is excluded from the mean rather than
+    contributing a zero. That covers both the class absent from the ground truth entirely and the class whose every
+    instance is flagged difficult.
 
     Examples:
         ```pycon
@@ -463,8 +434,8 @@ def _split_class(
 ) -> _ImageSplit:
     """Restrict one image's detections and ground truths to ``label`` and pair them up.
 
-    The detections are sorted by descending score here, once, rather than inside the
-    per-threshold matching: the order is a property of the image, not of the threshold.
+    The detections are sorted by descending score here, once, rather than inside the per-threshold matching: the
+    order is a property of the image, not of the threshold.
 
     Examples:
         ```pycon
@@ -495,8 +466,8 @@ def _split_class(
 def _class_curves(splits: Sequence[_ImageSplit]) -> tuple[Tensor, Tensor]:
     """Return one class's average precision and recall at each of the ten thresholds.
 
-    Called only for a label :func:`_scorable_labels` returned, so ``splits`` is non-empty
-    and carries at least one non-difficult ground truth between them.
+    Called only for a label :func:`_scorable_labels` returned, so ``splits`` is non-empty and carries at least one
+    non-difficult ground truth between them.
 
     Examples:
         ```pycon
@@ -544,25 +515,22 @@ def _threshold_curve(true_positive: Tensor, false_positive: Tensor, positives: i
 def _match_image(split: _ImageSplit) -> tuple[Tensor, Tensor]:
     """Greedily assign one image's detections to its ground truths, at every threshold at once.
 
-    Decision 5 lives here. A detection claims the best still-unmatched **non-difficult**
-    ground truth at or above the threshold; failing that, an overlap with any difficult
-    ground truth discards it (neither true nor false positive, and the difficult instance
-    stays available for further detections); failing that it is a false positive.
+    Decision 5 lives here. A detection claims the best still-unmatched **non-difficult** ground truth at or above
+    the threshold; failing that, an overlap with any difficult ground truth discards it (neither true nor false
+    positive, and the difficult instance stays available for further detections); failing that it is a false
+    positive.
 
-    The ten thresholds are matched **together** rather than in ten passes (WP-104). They
-    share the overlap matrix and the score order and differ only in what counts as a hit,
-    so a pass per threshold re-walks the same detections ten times to consume a different
-    subset of the same ground truths; carrying the availability state as ``(T, G)`` walks
-    them once. The greedy order is unchanged — it is still descending score within the
-    image, resolved independently per threshold — which is why this is a restructuring
-    and not a redefinition.
+    The ten thresholds are matched **together** rather than in ten passes (WP-104). They share the overlap matrix
+    and the score order and differ only in what counts as a hit, so a pass per threshold re-walks the same
+    detections ten times to consume a different subset of the same ground truths; carrying the availability state as
+    ``(T, G)`` walks them once. The greedy order is unchanged — it is still descending score within the image,
+    resolved independently per threshold — which is why this is a restructuring and not a redefinition.
 
-    Detections that reach no ground truth at the **lowest** threshold skip the walk
-    entirely. Such a detection cannot become a true positive at any threshold, cannot be
-    discarded by a difficult instance at any threshold, and consumes nothing, so it is a
-    false positive everywhere and the zero-initialised rows already say so. On an
-    early-epoch model, where almost every one of the 300 emitted detections lands nowhere
-    near a target, that is nearly the whole loop.
+    Detections that reach no ground truth at the **lowest** threshold skip the walk entirely. Such a detection
+    cannot become a true positive at any threshold, cannot be discarded by a difficult instance at any threshold, and
+    consumes nothing, so it is a false positive everywhere and the zero-initialised rows already say so. On an
+    early-epoch model, where almost every one of the 300 emitted detections lands nowhere near a target, that is
+    nearly the whole loop.
 
     Args:
         split: One image's detections, overlaps and difficult flags for a single class.
@@ -609,37 +577,31 @@ def _match_image(split: _ImageSplit) -> tuple[Tensor, Tensor]:
 def _average_precision(true_positive: Tensor, false_positive: Tensor, positives: int) -> tuple[float, float]:
     """Reduce a score-ordered match sequence to interpolated AP and attained recall.
 
-    Decision 2: the precision-recall curve is made monotone by a running maximum from the
-    right and then sampled at :data:`RECALL_POINTS` evenly spaced recall values, each
-    taking the precision of the first point whose recall reaches it and zero when none
-    does. That is COCO's definition, so this AP and
+    Decision 2: the precision-recall curve is made monotone by a running maximum from the right and then sampled
+    at :data:`RECALL_POINTS` evenly spaced recall values, each taking the precision of the first point whose recall
+    reaches it and zero when none does. That is COCO's definition, so this AP and
     :func:`~lucid_yolo.eval.coco_eval.evaluate_bbox`'s are the same statistic.
 
     Why the recall comparison is integer arithmetic:
-        Both sides of "has recall reached this grid point" are **rationals** — attained
-        recall is ``hits / positives``, the grid point is ``i / 100`` — and the sample is
-        decided by whether they are equal, which floating point may not be able to
-        represent. In float32 the case ``hits = 13``, ``positives = 20``, ``i = 65`` is
-        decided **wrongly**: ``13 / 20`` rounds to ``0.6499999761581421`` while
-        ``linspace(0, 1, 101)[65]`` rounds to ``0.6500000357627869``, so the point that
-        should sample the curve's last precision falls off the end and samples zero
-        instead. Attained recall landing exactly on a grid point is **common**, not
-        exotic — any ``positives`` dividing 100 hits it routinely — and each occurrence
-        silently removes ``1/101`` of that class's average precision.
+        Both sides of "has recall reached this grid point" are **rationals** — attained recall is
+        ``hits / positives``, the grid point is ``i / 100`` — and the sample is decided by whether they are equal,
+        which floating point may not be able to represent. In float32 the case ``hits = 13``, ``positives = 20``,
+        ``i = 65`` is decided **wrongly**: ``13 / 20`` rounds to ``0.6499999761581421`` while
+        ``linspace(0, 1, 101)[65]`` rounds to ``0.6500000357627869``, so the point that should sample the curve's
+        last precision falls off the end and samples zero instead. Attained recall landing exactly on a grid point
+        is **common**, not exotic — any ``positives`` dividing 100 hits it routinely — and each occurrence silently
+        removes ``1/101`` of that class's average precision.
 
-        Comparing ``hits * 100 >= i * positives`` in int64 decides the same question
-        exactly, for every input, in every dtype, on every device. It is not a tolerance:
-        there is no epsilon to choose and no precision that could be insufficient. The
-        float64 the reference implementation uses happens to decide this case correctly,
-        which is why the bug surfaced as a fixture-dependent near-miss against it rather
-        than as an obvious break.
+        Comparing ``hits * 100 >= i * positives`` in int64 decides the same question exactly, for every input, in
+        every dtype, on every device. It is not a tolerance: there is no epsilon to choose and no precision that
+        could be insufficient. The float64 the reference implementation uses happens to decide this case correctly,
+        which is why the bug surfaced as a fixture-dependent near-miss against it rather than as an obvious break.
 
-    The empty guard covers two cases of unequal standing. A class with no detections at
-    all is ordinary and reachable — it scores zero. ``positives == 0`` should be
-    unreachable, since :func:`_scorable_labels` admits only classes with a non-difficult
-    instance; it is nonetheless checked because the consequence of being wrong is a
-    division by zero, and torch answers that with a silent ``inf`` rather than an
-    exception. A guard against a silently corrupted metric is worth its line.
+    The empty guard covers two cases of unequal standing. A class with no detections at all is ordinary and
+    reachable — it scores zero. ``positives == 0`` should be unreachable, since :func:`_scorable_labels` admits only
+    classes with a non-difficult instance; it is nonetheless checked because the consequence of being wrong is a
+    division by zero, and torch answers that with a silent ``inf`` rather than an exception. A guard against a silently
+    corrupted metric is worth its line.
 
     Examples:
         ```pycon

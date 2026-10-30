@@ -1,24 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Private gathering metrics and image identity for Lightning validation.
 
-Holds the whole-epoch rotated mAP and OKS AP metrics and the dataset-position
-identity the validation reader attaches. The datamodule wraps its sequential reader
-in ``_ValidationDataset``, and the Lightning module feeds decoded tensors to the
-task metric. The metrics call the existing scoring functions without changing their
-protocols and return their float dictionaries. ``ptl.module``, ``ptl.datamodule``
-and private target transport use these records; mismatched prediction, target and
-identity counts raise before accumulation.
+Holds the whole-epoch rotated mAP and OKS AP metrics and the dataset-position identity the validation reader
+attaches. The datamodule wraps its sequential reader in ``_ValidationDataset``, and the Lightning module feeds decoded
+tensors to the task metric. The metrics call the existing scoring functions without changing their protocols and
+return their float dictionaries. ``ptl.module``, ``ptl.datamodule`` and private target transport use these records;
+mismatched prediction, target and identity counts raise before accumulation.
 
-Records travel as byte views with integer shape/dtype metadata in two cat-reduced
-list states. This lets ragged per-image tensors pass through ordinary tensor
-collectives while keeping their original precision, including empty keypoint
-shapes. States follow the metric's device so a CUDA metric does not ask NCCL to
-gather CPU tensors.
+Records travel as byte views with integer shape/dtype metadata in two cat-reduced list states. This lets ragged
+per-image tensors pass through ordinary tensor collectives while keeping their original precision, including empty
+keypoint shapes. States follow the metric's device so a CUDA metric does not ask NCCL to gather CPU tensors.
 
-The first occurrence of each identity is kept. Local calls retain insertion order;
-after a gather the module sorts by dataset position, the order its sequential
-validation loader already traverses. Restoring that order also preserves stable
-score ties after DistributedSampler sharding.
+The first occurrence of each identity is kept. Local calls retain insertion order; after a gather the module sorts
+by dataset position, the order its sequential validation loader already traverses. Restoring that order also
+preserves stable score ties after DistributedSampler sharding.
 """
 
 from __future__ import annotations

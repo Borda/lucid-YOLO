@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for WP-098 dataset-layout resolution.
 
-Covers each convention :data:`lucid_yolo.data.layout.CANDIDATES` names, the precedence
-between them, the requirement that a candidate's directory *and* annotation file both
-exist, the COCO 2017 fallback, and the two consumers that stop open-coding the rule:
-:class:`~lucid_yolo.ptl.datamodule.DetectionDataModule` and the oriented evaluator's
-datamodule builder.
+Covers each convention :data:`lucid_yolo.data.layout.CANDIDATES` names, the precedence between them, the requirement
+that a candidate's directory *and* annotation file both exist, the COCO 2017 fallback, and the two consumers that stop
+open-coding the rule: :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule` and the oriented evaluator's datamodule
+builder.
 
-No dataset is read: every root here is an empty directory tree written in ``tmp_path``,
-because resolution is a naming question and answering it must not require an image.
+No dataset is read: every root here is an empty directory tree written in ``tmp_path``, because resolution is a
+naming question and answering it must not require an image.
 """
 
 from __future__ import annotations
@@ -63,9 +62,8 @@ def test_every_named_layout_resolves_to_itself(tmp_path: Path, images: str, anno
 def test_unknown_layout_falls_back_to_coco_2017_names(tmp_path: Path) -> None:
     """A root matching nothing resolves to COCO 2017, so the reader reports the path it wanted.
 
-    Resolution is a naming rule, not an existence check: raising here would turn every
-    mistyped root into this module's error instead of the reader's, and the reader's
-    names the file it failed to open.
+    Resolution is a naming rule, not an existence check: raising here would turn every mistyped root into this
+    module's error instead of the reader's, and the reader's names the file it failed to open.
     """
     images_dir, annotation_file = resolve_split(tmp_path, "train")
 

@@ -2,21 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Draw one checkpoint's predictions over the image they were made on (WP-067, WP-152).
 
-The command-line face of :mod:`lucid_yolo._viz.overlay` (WP-189): the four drawing
-functions, the renderer table and the checkpoint-to-axes path live there, where the
-notebooks share them and the gate tests them, and this script owns the argument parse
-and the file write. The release's worked example: a checkpoint, an image, and a figure
-showing what the model actually answered — boxes for a ``detect`` checkpoint, boxes and
-instance masks for a ``segment`` one, rotated quadrilaterals for an ``obb`` one, boxes
-with their point sets for a ``keypoints`` one. Why each is drawn the way it is — and why
-a rotated box is never an upright rectangle — is documented on the module that draws it.
+The command-line face of :mod:`lucid_yolo._viz.overlay` (WP-189): the four drawing functions, the renderer table
+and the checkpoint-to-axes path live there, where the notebooks share them and the gate tests them, and this script
+owns the argument parse and the file write. The release's worked example: a checkpoint, an image, and a figure
+showing what the model actually answered — boxes for a ``detect`` checkpoint, boxes and instance masks for a
+``segment`` one, rotated quadrilaterals for an ``obb`` one, boxes with their point sets for a ``keypoints`` one. Why
+each is drawn the way it is — and why a rotated box is never an upright rectangle — is documented on the module
+that draws it.
 
 Assumptions:
-    ``--task`` defaults to **the checkpoint's own task**, as ``lucid-predict`` reads it,
-    rather than being required. A named task selects an entry point, and the library then
-    refuses a checkpoint that does not match it by name (a ``segment`` checkpoint drawn as
-    ``detect`` would answer plausibly with its mask branch unread), so the flag can narrow
-    the choice and cannot silently mislead.
+    ``--task`` defaults to **the checkpoint's own task**, as ``lucid-predict`` reads it, rather than being required.
+    A named task selects an entry point, and the library then refuses a checkpoint that does not match it by name (a
+    ``segment`` checkpoint drawn as ``detect`` would answer plausibly with its mask branch unread), so the flag can
+    narrow the choice and cannot silently mislead.
 
 Examples:
     ```console

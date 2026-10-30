@@ -1,44 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
 """Detection :class:`~pytorch_lightning.LightningDataModule` over either dataset layout (WP-014).
 
-:class:`DetectionDataModule` wires the WP-014 :class:`~lucid_yolo.data.coco.CocoDetectionDataset`
-into the Phase 1 augmentation pipeline and exposes train/val
-:class:`~torch.utils.data.DataLoader` s. It builds both splits from the COCO 2017
-layout of blueprint sec. 14.3 (``train2017/`` + ``annotations/instances_train2017.json``
-and the matching ``val2017``) and, per the dataset contract (AGENTS.md sec. 3),
-contains **no download logic**: a missing or mis-shaped root is validated by
-``lucid-data check`` before any ``[DATA]`` run, never fetched here.
+:class:`DetectionDataModule` wires the WP-014 :class:`~lucid_yolo.data.coco.CocoDetectionDataset` into the Phase 1
+augmentation pipeline and exposes train/val :class:`~torch.utils.data.DataLoader` s. It builds both splits from the
+COCO 2017 layout of blueprint sec. 14.3 (``train2017/`` + ``annotations/instances_train2017.json`` and the matching
+``val2017``) and, per the dataset contract (AGENTS.md sec. 3), contains **no download logic**: a missing or mis-shaped
+root is validated by ``lucid-data check`` before any ``[DATA]`` run, never fetched here.
 
 Layout dispatch (WP-099b):
-    ``data_root`` may also be a YOLO root — a ``data.yaml`` beside per-split ``images``/
-    ``labels`` trees — in which case both splits are built by
-    :class:`~lucid_yolo.data.yolo.YoloDetectionDataset` instead, and everything downstream is
-    unchanged because both readers emit the same
-    :class:`~lucid_yolo.data.targets.Targets`. WP-099 delivered that reader and left the
-    choice unmade, which meant a YOLO root was reachable from a library call and not from
-    ``lucid-yolo fit``. Which reader a root gets is decided in three steps:
+    ``data_root`` may also be a YOLO root — a ``data.yaml`` beside per-split ``images``/ ``labels`` trees — in which
+    case both splits are built by :class:`~lucid_yolo.data.yolo.YoloDetectionDataset` instead, and everything
+    downstream is unchanged because both readers emit the same :class:`~lucid_yolo.data.targets.Targets`. WP-099
+    delivered that reader and left the choice unmade, which meant a YOLO root was reachable from a library call and
+    not from ``lucid-yolo fit``. Which reader a root gets is decided in three steps:
 
-    1. an explicit ``layout`` wins outright — it is the only way to name a layout the
-       filesystem cannot be asked about (see :attr:`DetectionDataModule.layout`);
-    2. otherwise, naming any of the four ``*_images_dir``/``*_ann_file`` overrides *is* a
-       statement of the COCO layout, since an annotation file is a concept only that
-       convention has;
+    1. an explicit ``layout`` wins outright — it is the only way to name a layout the filesystem cannot be asked about
+       (see :attr:`DetectionDataModule.layout`);
+    2. otherwise, naming any of the four ``*_images_dir``/``*_ann_file`` overrides *is* a statement of the
+       COCO layout, since an annotation file is a concept only that convention has;
     3. otherwise the root is probed by :func:`~lucid_yolo.data.layout.detect_layout`, which
        raises rather than guess when the root satisfies neither convention or both.
 
-    The probe runs at :meth:`DetectionDataModule.setup`, not at construction: constructing
-    this class is a pure configuration act — ``LightningCLI(run=False)`` instantiates every
-    shipped config, whose ``data_root`` is a placeholder path on the machine that parses it —
-    so a filesystem verdict there would fail runs that have not yet been pointed at data.
-    Steps 1 and 2 need no filesystem and are settled in ``__init__``, which is why a layout
-    the YOLO path cannot serve is rejected there.
+    The probe runs at :meth:`DetectionDataModule.setup`, not at construction: constructing this class is a pure
+    configuration act — ``LightningCLI(run=False)`` instantiates every shipped config, whose ``data_root`` is a
+    placeholder path on the machine that parses it — so a filesystem verdict there would fail runs that have not yet
+    been pointed at data. Steps 1 and 2 need no filesystem and are settled in ``__init__``, which is why a layout the
+    YOLO path cannot serve is rejected there.
 
 Multi-image augmentation composition:
-    Mosaic, mixup and copy-paste each consume *several* images, so they cannot be
-    ordinary single-image :class:`~lucid_yolo.data.transforms.GeometricTransform` s
-    chained in a :class:`~lucid_yolo.data.transforms.Compose`. They are composed
-    instead by :class:`_TrainPipeline`, a wrapper :class:`~torch.utils.data.Dataset`
-    that, for each requested index, draws the extra source indices it needs from a
+    Mosaic, mixup and copy-paste each consume *several* images, so they cannot be ordinary single-image
+    :class:`~lucid_yolo.data.transforms.GeometricTransform` s chained in a
+    :class:`~lucid_yolo.data.transforms.Compose`. They are composed instead by :class:`_TrainPipeline`, a wrapper
+    :class:`~torch.utils.data.Dataset` that, for each requested index, draws the extra source indices it needs from a
     single seeded :class:`torch.Generator` and assembles the sample:
 
         1. geometric base — with probability :attr:`_TrainPipeline.mosaic_p` a
@@ -52,57 +45,44 @@ Multi-image augmentation composition:
         4. photometric :class:`~lucid_yolo.data.augment.HSVJitter` and
            :class:`~lucid_yolo.data.augment.HorizontalFlip` finish the sample.
 
-    The per-sample mixup/copy-paste probabilities come from
-    :func:`~lucid_yolo.data.coco.build_scale_policy` (size-aware, [R1] Table S3);
-    mosaic runs at ``p=1.0`` (blueprint sec. 5.9). Because every draw comes from
-    one seeded generator, a fixed ``seed`` and a deterministic access order
-    (``num_workers=0``) give byte-identical epochs. With workers the pipeline is
-    seeded *per worker and per epoch* by :func:`_init_worker` (WP-079) — a fresh
-    stream each time, still fully determined by ``seed``.
+    The per-sample mixup/copy-paste probabilities come from :func:`~lucid_yolo.data.coco.build_scale_policy`
+    (size-aware, [R1] Table S3); mosaic runs at ``p=1.0`` (blueprint sec. 5.9). Because every draw comes from one
+    seeded generator, a fixed ``seed`` and a deterministic access order (``num_workers=0``) give byte-identical epochs.
+    With workers the pipeline is seeded *per worker and per epoch* by :func:`_init_worker` (WP-079) — a fresh stream
+    each time, still fully determined by ``seed``.
 
-    **Reproducibility is a function of** ``(seed, num_workers)`` **jointly, not of**
-    ``seed`` **alone.** Both regimes above are deterministic, and they are
-    deterministically *different*: at ``num_workers=0`` every draw comes from the
-    parent generator in index order, while at ``num_workers=N`` torch derives each
-    worker's seed as ``base_seed + worker_id`` from the loader's own generator at
-    every iterator creation, so the augmentation parameters a given sample receives
-    depend on which worker happened to own its index. A run at 32 workers therefore
-    does **not** reproduce the same seed at 0 workers, and does not reproduce it at
-    16 either. Reproducing a published run means matching its worker count as well
-    as its seed; the tier recipes in ``docs/TRAINING.md`` state both for that reason.
+    **Reproducibility is a function of** ``(seed, num_workers)`` **jointly, not of** ``seed`` **alone.** Both regimes
+    above are deterministic, and they are deterministically *different*: at ``num_workers=0`` every draw comes from
+    the parent generator in index order, while at ``num_workers=N`` torch derives each worker's seed as
+    ``base_seed + worker_id`` from the loader's own generator at every iterator creation, so the augmentation
+    parameters a given sample receives depend on which worker happened to own its index. A run at 32 workers
+    therefore does **not** reproduce the same seed at 0 workers, and does not reproduce it at 16 either. Reproducing
+    a published run means matching its worker count as well as its seed; the tier recipes in ``docs/TRAINING.md``
+    state both for that reason.
 
 Batch contract:
     Two forms, split by the DataLoader worker boundary:
 
-    * **Transport form** (what :func:`collate_detection` returns): the equal-sized
-      (letterboxed) images stacked and quantized into a single
-      ``(B, C, img_size, img_size)`` **uint8** tensor — each post-augmentation float
-      pixel in ``[0, 1]`` rounded to a ``1/255`` step (:data:`~lucid_yolo.data._quantization._PIXEL_QUANT_MAX`) —
-      paired with a :class:`PackedTargets`, the batch's ragged per-image
-      :class:`~lucid_yolo.data.targets.Targets` flattened into a fixed set of
-      dense tensors. A worker ships each distinct tensor as its own shared-memory
-      segment: the natural ``list[Targets]`` (with its per-image *list* of polygon
-      rings) would explode into hundreds of tiny segments and exhaust the consumer's
-      mmap budget, so packing bounds the batch to a handful; the uint8 images are a
-      quarter of the float32 bytes, keeping the in-flight worker queue inside the
-      container's shared-memory budget. Both the augmented train path and the
-      letterbox-only val path go through this collate, so both transport uint8 (val
-      images already start from a JPEG-decoded uint8 source, so their letterbox
-      interpolation loses no more than the same bounded half-step).
-      With ``device_hsv=True`` on CUDA, training instead transports float32 pixels
-      and one ``(B, 3)`` gain tensor; the consumer applies HSV before the same
-      quantization. This spends four times the image transport bytes to remove
-      colour conversion from the workers. The worker cap budgets float32 bytes, but
-      only for a count the module chooses (``num_workers`` unset) in one process: a
-      named ``num_workers`` is neither capped nor warned, and each DDP rank reads the
-      free shm on its own.
-    * **Consumer form** (what every downstream step sees): the pair
-      ``(images, list[Targets])`` with float32 ``[0, 1]`` images unchanged.
-      :meth:`DetectionDataModule.on_after_batch_transfer` restores the images
-      (``uint8 -> float32 / 255``) and unpacks the transport targets on the
-      destination device, so the module and everything downstream keep consuming a
-      ragged length-``B`` target list exactly as before. A direct (non-Lightning)
-      consumer converts the whole pair with :func:`unpack_batch`.
+    * **Transport form** (what :func:`collate_detection` returns): the equal-sized (letterboxed) images stacked and
+      quantized into a single ``(B, C, img_size, img_size)`` **uint8** tensor — each post-augmentation float pixel in
+      ``[0, 1]`` rounded to a ``1/255`` step (:data:`~lucid_yolo.data._quantization._PIXEL_QUANT_MAX`) — paired with a
+      :class:`PackedTargets`, the batch's ragged per-image :class:`~lucid_yolo.data.targets.Targets` flattened into a
+      fixed set of dense tensors. A worker ships each distinct tensor as its own shared-memory segment: the natural
+      ``list[Targets]`` (with its per-image *list* of polygon rings) would explode into hundreds of tiny segments and
+      exhaust the consumer's mmap budget, so packing bounds the batch to a handful; the uint8 images are a quarter of
+      the float32 bytes, keeping the in-flight worker queue inside the container's shared-memory budget. Both the
+      augmented train path and the letterbox-only val path go through this collate, so both transport uint8 (val
+      images already start from a JPEG-decoded uint8 source, so their letterbox interpolation loses no more than the
+      same bounded half-step). With ``device_hsv=True`` on CUDA, training instead transports float32 pixels and one
+      ``(B, 3)`` gain tensor; the consumer applies HSV before the same quantization. This spends four times the image
+      transport bytes to remove colour conversion from the workers. The worker cap budgets float32 bytes, but only for
+      a count the module chooses (``num_workers`` unset) in one process: a named ``num_workers`` is neither capped nor
+      warned, and each DDP rank reads the free shm on its own.
+    * **Consumer form** (what every downstream step sees): the pair ``(images, list[Targets])`` with float32
+      ``[0, 1]`` images unchanged. :meth:`DetectionDataModule.on_after_batch_transfer` restores the images
+      (``uint8 -> float32 / 255``) and unpacks the transport targets on the destination device, so the module and
+      everything downstream keep consuming a ragged length-``B`` target list exactly as before. A direct
+      (non-Lightning) consumer converts the whole pair with :func:`unpack_batch`.
 """
 
 from __future__ import annotations
@@ -161,64 +141,55 @@ __all__ = [
     "unpack_targets",
 ]
 
-# The batch transport and the worker pipeline moved out to `_transport` and `_pipeline`;
-# tests, `scripts/golden_producers.py` and `scripts/dump_debug_grid.py` still import their
-# names from this module. Each import above written `from m import X as X`, with PLC0414
-# suppressed as a re-export, is one of those names this module would not otherwise bind, or
-# one a mypy-checked script imports: the redundant alias is the explicit re-export both
-# mypy's strict mode and ruff's unused-import check read.
+# The batch transport and the worker pipeline moved out to `_transport` and `_pipeline`; tests,
+# `scripts/golden_producers.py` and `scripts/dump_debug_grid.py` still import their names from this module. Each
+# import above written `from m import X as X`, with PLC0414 suppressed as a re-export, is one of those names this
+# module would not otherwise bind, or one a mypy-checked script imports: the redundant alias is the explicit
+# re-export both mypy's strict mode and ruff's unused-import check read.
 
-#: Default per-worker prefetched batches (the DataLoader default). The whole
-#: queue — ``num_workers x prefetch_factor`` batches — lives in POSIX shared
-#: memory, so a deeper default multiplies /dev/shm pressure by batch size and
-#: worker count and ENOMEMs containerized runs (Colab) at large batches; raise
-#: it per run via ``--data.prefetch_factor`` only when shm headroom allows.
+#: Default per-worker prefetched batches (the DataLoader default). The whole queue — ``num_workers x prefetch_factor``
+#: batches — lives in POSIX shared memory, so a deeper default multiplies /dev/shm pressure by batch size and worker
+#: count and ENOMEMs containerized runs (Colab) at large batches; raise it per run via ``--data.prefetch_factor`` only
+#: when shm headroom allows.
 _PREFETCH_FACTOR = 2
 
 
-#: Workers that saturate a letterbox-only validation loader at :data:`_VAL_REFERENCE_SIDE`
-#: (WP-073) — a throughput target, not a memory ceiling, and it is only ever *applied* as a
-#: bound because the alternative it replaces (inheriting an auto-chosen train count) is
-#: larger. Val samples are letterbox-only, so few workers saturate them, while inheriting a
-#: large train count doubles the resident worker-process population every epoch boundary
-#: (train workers are persistent) — the observed Colab host-OOM trigger on long runs. The
-#: memory side of the question is :func:`_shm_capped_workers`, which is a ceiling.
+#: Workers that saturate a letterbox-only validation loader at :data:`_VAL_REFERENCE_SIDE` (WP-073) — a throughput
+#: target, not a memory ceiling, and it is only ever *applied* as a bound because the alternative it replaces
+#: (inheriting an auto-chosen train count) is larger. Val samples are letterbox-only, so few workers saturate them,
+#: while inheriting a large train count doubles the resident worker-process population every epoch boundary (train
+#: workers are persistent) — the observed Colab host-OOM trigger on long runs. The memory side of the question is
+#: :func:`_shm_capped_workers`, which is a ceiling.
 _VAL_MAX_WORKERS = 4
-#: Letterbox side the target above was measured at. Decode cost scales with the pixel count,
-#: so the target scales with it too — *up*, not down: the constant encodes "how many workers
-#: saturate a letterbox-only loader", and a 1024 px sample costs more decode per worker, so
-#: it takes more of them, which is where "a fraction of the train pipeline's work" stopped
-#: being true at 640 (WP-102). This is why :func:`_val_worker_target` grows with ``img_size``
+#: Letterbox side the target above was measured at. Decode cost scales with the pixel count, so the target scales
+#: with it too — *up*, not down: the constant encodes "how many workers saturate a letterbox-only loader", and a
+#: 1024 px sample costs more decode per worker, so it takes more of them, which is where "a fraction of the train
+#: pipeline's work" stopped being true at 640 (WP-102). This is why :func:`_val_worker_target` grows with ``img_size``
 #: while a ceiling would shrink.
 _VAL_REFERENCE_SIDE = 640
 
 
-#: Fraction of currently-free ``/dev/shm`` the worker queue may claim. Worker
-#: batches travel to the main process as shared-memory segments, so the queue's
-#: worst case — ``num_workers x prefetch_factor`` stacked image batches — must
-#: fit the shm tmpfs with headroom for the ragged target tensors and everything
-#: else sharing it, or workers die mid-epoch with tiny-mmap ENOMEM.
+#: Fraction of currently-free ``/dev/shm`` the worker queue may claim. Worker batches travel to the main process as
+#: shared-memory segments, so the queue's worst case — ``num_workers x prefetch_factor`` stacked image batches — must
+#: fit the shm tmpfs with headroom for the ragged target tensors and everything else sharing it, or workers die
+#: mid-epoch with tiny-mmap ENOMEM.
 _SHM_BUDGET_FRACTION = 0.5
 
 
 def _shm_capped_workers(workers: int, batch_size: int, img_size: int, prefetch: int) -> int:
     """Cap a worker count so the prefetch queue fits the free ``/dev/shm`` budget.
 
-    On Linux every batch a worker hands over is backed by shared memory, so the
-    in-flight queue claims about ``workers x prefetch x batch_bytes`` of the shm
-    tmpfs; a many-core host with a large batch fills it before the first step
-    (observed: 64-vCPU Colab, batch 64 -> 30+ GB queued -> ``unable to mmap ...
-    Cannot allocate memory``). The cap bounds the queue to
-    :data:`_SHM_BUDGET_FRACTION` of the *currently free* shm space. Hosts
-    without ``/dev/shm`` (macOS, Windows) are returned unchanged.
+    On Linux every batch a worker hands over is backed by shared memory, so the in-flight queue claims about
+    ``workers x prefetch x batch_bytes`` of the shm tmpfs; a many-core host with a large batch fills it before the
+    first step (observed: 64-vCPU Colab, batch 64 -> 30+ GB queued -> ``unable to mmap ...
+    Cannot allocate memory``). The cap bounds the queue to :data:`_SHM_BUDGET_FRACTION` of the *currently free* shm
+    space. Hosts without ``/dev/shm`` (macOS, Windows) are returned unchanged.
 
-    ``batch_bytes`` counts four bytes per image element, so the float32 batches a
-    deferred-HSV run ships fit the same budget. The cap applies only where it is
-    called: the train count the module chooses at construction (``num_workers``
-    unset) and the val count :meth:`DetectionDataModule._val_loader_workers`
-    inherits. A named train count bypasses it. Each process reads ``statvfs`` on
-    its own, so N ranks sharing one host can jointly claim N times the fraction —
-    a known limit of a per-process budget.
+    ``batch_bytes`` counts four bytes per image element, so the float32 batches a deferred-HSV run ships fit the same
+    budget. The cap applies only where it is called: the train count the module chooses at construction
+    (``num_workers`` unset) and the val count :meth:`DetectionDataModule._val_loader_workers` inherits. A named train
+    count bypasses it. Each process reads ``statvfs`` on its own, so N ranks sharing one host can jointly claim N
+    times the fraction — a known limit of a per-process budget.
 
     Args:
         workers: The worker count before the cap.
@@ -245,19 +216,17 @@ def _shm_capped_workers(workers: int, batch_size: int, img_size: int, prefetch: 
 def _val_worker_target(img_size: int) -> int:
     """Return the worker count that saturates a letterbox-only val loader at ``img_size``.
 
-    This is a *target*, not a ceiling: it grows with the pixel count, because decode cost
-    per sample does, so a larger letterbox side takes more workers to keep the loader fed.
-    A ceiling would move the other way. The caller
-    (:meth:`DetectionDataModule._resolve_val_workers`) applies it as an upper bound only
-    because the number it is bounding — an auto-chosen train worker count — is the larger
-    of the two; the memory-driven ceiling is :func:`_shm_capped_workers`.
+    This is a *target*, not a ceiling: it grows with the pixel count, because decode cost per sample does, so a larger
+    letterbox side takes more workers to keep the loader fed. A ceiling would move the other way. The caller
+    (:meth:`DetectionDataModule._resolve_val_workers`) applies it as an upper bound only because the number it is
+    bounding — an auto-chosen train worker count — is the larger of the two; the memory-driven ceiling is
+    :func:`_shm_capped_workers`.
 
     Args:
         img_size: Square letterbox side of every emitted sample.
 
     Returns:
-        :data:`_VAL_MAX_WORKERS` scaled by the pixel count relative to
-        :data:`_VAL_REFERENCE_SIDE`, at least 1.
+        :data:`_VAL_MAX_WORKERS` scaled by the pixel count relative to :data:`_VAL_REFERENCE_SIDE`, at least 1.
 
     Examples:
         ```pycon
@@ -273,14 +242,12 @@ def _val_worker_target(img_size: int) -> int:
 def _check_shared_label_space(train_map: dict[int, int], val_map: dict[int, int]) -> None:
     """Refuse two COCO splits whose ``categories`` lists disagree (WP-172).
 
-    Each split's contiguous labels are derived from its own file alone —
-    ``_build_category_maps`` sorts that file's category ids and numbers them from zero — so
-    the two mappings are independent derivations that nothing downstream ever compares. One
-    category present in only one file renumbers every label above it, and the failure is
-    silent by construction: the model trains against one numbering, is scored against
-    another, and reports a perfectly plausible number for the wrong question. This is the
-    only place both mappings are in hand, so it is the only place the disagreement is
-    visible.
+    Each split's contiguous labels are derived from its own file alone — ``_build_category_maps`` sorts that file's
+    category ids and numbers them from zero — so the two mappings are independent derivations that nothing downstream
+    ever compares. One category present in only one file renumbers every label above it, and the failure is silent by
+    construction: the model trains against one numbering, is scored against another, and reports a perfectly plausible
+    number for the wrong question. This is the only place both mappings are in hand, so it is the only place the
+    disagreement is visible.
 
     Comparing the id *sets* is sufficient rather than merely necessary: the mapping is a
     function of the sorted id set, so equal sets imply equal mappings. That is why the error
@@ -291,8 +258,7 @@ def _check_shared_label_space(train_map: dict[int, int], val_map: dict[int, int]
         val_map: The val split's ``category_id_to_label``.
 
     Raises:
-        ValueError: If the splits declare different category ids, naming the ids each side
-            holds alone.
+        ValueError: If the splits declare different category ids, naming the ids each side holds alone.
 
     Examples:
         ```pycon
@@ -318,75 +284,56 @@ def _check_shared_label_space(train_map: dict[int, int], val_map: dict[int, int]
 class DetectionDataModule(LightningDataModule):
     """Detection datamodule assembling the Phase 1 augmentation pipeline (WP-014).
 
-    Train and val splits are built from the COCO 2017 layout under ``data_root``
-    (``train2017/`` + ``annotations/instances_train2017.json`` and the ``val2017``
-    equivalents); each split path may be overridden explicitly (used by the offline
-    fixture tests, which have a single Roboflow-style split). A ``data_root`` written in
-    the YOLO convention instead is read by
-    :class:`~lucid_yolo.data.yolo.YoloDetectionDataset` — see the module docstring for the
-    three-step dispatch (WP-099b). Training samples pass
-    through :class:`_TrainPipeline` (mosaic/mixup/copy-paste/affine/hsv/flip +
-    letterbox); validation is letterbox-only. No split is ever downloaded.
+    Train and val splits are built from the COCO 2017 layout under ``data_root`` (``train2017/`` +
+    ``annotations/instances_train2017.json`` and the ``val2017`` equivalents); each split path may be overridden
+    explicitly (used by the offline fixture tests, which have a single Roboflow-style split). A ``data_root`` written
+    in the YOLO convention instead is read by :class:`~lucid_yolo.data.yolo.YoloDetectionDataset` — see the module
+    docstring for the three-step dispatch (WP-099b). Training samples pass through :class:`_TrainPipeline`
+    (mosaic/mixup/copy-paste/affine/hsv/flip + letterbox); validation is letterbox-only. No split is ever downloaded.
 
     Args:
         data_root: Dataset root: a COCO 2017 root (holding ``train2017``, ``val2017``,
             ``annotations``), any other layout :data:`~lucid_yolo.data.layout.CANDIDATES`
             names, or a YOLO root (a ``data.yaml`` beside ``images``/``labels`` trees).
         batch_size: Samples per batch for both loaders.
-        num_workers: DataLoader worker processes. ``None`` (default) resolves
-            to ``min(batch_size, cpu count)``, further capped so the in-flight
-            worker queue fits the free ``/dev/shm`` budget on Linux
-            (:func:`_shm_capped_workers`) — a many-core host with a large batch
-            otherwise fills the shm tmpfs before the first step. Determinism of
-            the seeded pipeline is guaranteed only at an explicit ``0`` (a
+        num_workers: DataLoader worker processes. ``None`` (default) resolves to ``min(batch_size, cpu count)``,
+            further capped so the in-flight worker queue fits the free ``/dev/shm`` budget on Linux
+            (:func:`_shm_capped_workers`) — a many-core host with a large batch otherwise fills the shm tmpfs
+            before the first step. Determinism of the seeded pipeline is guaranteed only at an explicit ``0`` (a
             single in-process generator).
         variant: Model size letter selecting the augmentation strength policy
             (``"n"``…``"x"``); validated at construction.
-        img_size: Square letterbox side for every emitted sample. Defaults to 640, and
-            must be a positive multiple of every head stride — validated at construction,
-            for the reason ``variant`` is.
-        train_images_dir: Override for the train images directory. Defaults to
-            whichever of ``data_root/"train2017"`` and ``data_root/"train"``
-            :func:`~lucid_yolo.data.layout.resolve_split` finds, so a tiled
-            oriented root needs no override at all.
+        img_size: Square letterbox side for every emitted sample. Defaults to 640, and must be a positive multiple of
+            every head stride — validated at construction, for the reason ``variant`` is.
+        train_images_dir: Override for the train images directory. Defaults to whichever of
+            ``data_root/"train2017"`` and ``data_root/"train"`` :func:`~lucid_yolo.data.layout.resolve_split` finds,
+            so a tiled oriented root needs no override at all.
         train_ann_file: Override for the train annotation JSON. Resolved
             alongside the images directory, never independently of it.
-        val_images_dir: Override for the val images directory. Resolved as the
-            train one is.
-        val_ann_file: Override for the val annotation JSON. Resolved alongside
-            the val images directory.
+        val_images_dir: Override for the val images directory. Resolved as the train one is.
+        val_ann_file: Override for the val annotation JSON. Resolved alongside the val images directory.
         seed: Seed for the training pipeline's generator and loader shuffling.
-        pin_memory: Whether loader batches land in page-locked host memory for
-            async host-to-device copies. ``None`` (default) resolves to ``True``
-            exactly when CUDA is available — MPS and CPU runs get ``False``
-            (pinning buys nothing there and MPS warns on it).
-        prefetch_factor: Batches each worker keeps prefetched (defaults to
-            :data:`_PREFETCH_FACTOR`); ignored at ``num_workers=0`` where the
-            DataLoader forbids it.
-        val_num_workers: Worker count for the validation loader only, capped by
-            nothing — the flag an operator states to spend the whole machine on
-            validation. ``None`` (default) resolves to an auto-chosen
-            ``num_workers`` bounded by :func:`_val_worker_target` (WP-073, WP-102), and
-            to a *named* ``num_workers`` bounded by the in-flight memory budget of
-            :meth:`_val_loader_workers` (WP-103) — letterbox-only val samples need
-            few workers, and both worker populations are resident at the epoch
-            boundary where validation runs.
-        persistent_workers: Keep loader workers alive across epochs. Defaults
-            to ``False`` (WP-076): respawning costs seconds per epoch while a
-            persistent pool accumulates per-worker memory for the whole run —
-            the observed slow-creep OOM on long containerized runs.
-        cache_train_images: Decode the training split once during :meth:`setup`
-            and retain read-only RGB tensors — ``uint8`` for 8-bit sources, ``uint16``
-            (twice the bytes) for a 16-bit PNG. Defaults to ``False``;
-            enabling it trades the uncompressed split size in host RAM for removing
-            image decode from every augmented draw in every epoch. :meth:`setup`
-            only pays this cost for a ``"fit"``/``None`` stage, so a
-            ``"validate"``/``"test"``/``"predict"`` call never decodes the train
-            split it will not read. The decode draws a progress bar and reports the
-            cache's size as a ``UserWarning`` — before decoding on a COCO root, from
-            the annotation file's image sizes, and after it on a YOLO root, which
-            states none — so an undersized host sees the figure rather than a silent
-            stall ending in an out-of-memory kill.
+        pin_memory: Whether loader batches land in page-locked host memory for async host-to-device copies. ``None``
+            (default) resolves to ``True`` exactly when CUDA is available — MPS and CPU runs get ``False`` (pinning
+            buys nothing there and MPS warns on it).
+        prefetch_factor: Batches each worker keeps prefetched (defaults to :data:`_PREFETCH_FACTOR`); ignored at
+            ``num_workers=0`` where the DataLoader forbids it.
+        val_num_workers: Worker count for the validation loader only, capped by nothing — the flag an operator states
+            to spend the whole machine on validation. ``None`` (default) resolves to an auto-chosen ``num_workers``
+            bounded by :func:`_val_worker_target` (WP-073, WP-102), and to a *named* ``num_workers`` bounded by the
+            in-flight memory budget of :meth:`_val_loader_workers` (WP-103) — letterbox-only val samples need few
+            workers, and both worker populations are resident at the epoch boundary where validation runs.
+        persistent_workers: Keep loader workers alive across epochs. Defaults to ``False`` (WP-076): respawning costs
+            seconds per epoch while a persistent pool accumulates per-worker memory for the whole run — the observed
+            slow-creep OOM on long containerized runs.
+        cache_train_images: Decode the training split once during :meth:`setup` and retain read-only RGB tensors —
+            ``uint8`` for 8-bit sources, ``uint16`` (twice the bytes) for a 16-bit PNG. Defaults to ``False``;
+            enabling it trades the uncompressed split size in host RAM for removing image decode from every augmented
+            draw in every epoch. :meth:`setup` only pays this cost for a ``"fit"``/``None`` stage, so a
+            ``"validate"``/``"test"``/``"predict"`` call never decodes the train split it will not read. The decode
+            draws a progress bar and reports the cache's size as a ``UserWarning`` — before decoding on a COCO root,
+            from the annotation file's image sizes, and after it on a YOLO root, which states none — so an undersized
+            host sees the figure rather than a silent stall ending in an out-of-memory kill.
         cache_prepared_train_images: Retain float32, fill-centred source images
             instead of repeatedly converting bytes and centring each random mosaic.
             Off by default. Takes precedence over ``cache_train_images``, with a
@@ -397,15 +344,12 @@ class DetectionDataModule(LightningDataModule):
             fill-restored pixels, targets and RNG draws stay unchanged. Fit setup
             builds it once, drawing a progress bar; other stages release it. Host RAM
             must hold the split.
-        device_hsv: Apply training HSV and quantization on CUDA, in batches, under
-            float32 or mixed precision. Off by default; other backends and precisions
-            retain worker-side colour augmentation. The workers
-            keep their RNG draws and transport float32 images plus the stated gains,
-            using four times the default image IPC and transfer bytes. The worker cap
-            budgets float32 images only for a count chosen here (``num_workers``
-            unset) in one process; a named ``num_workers`` is neither capped nor
-            warned, and each DDP rank budgets the free shm on its own. Validation
-            stays uint8.
+        device_hsv: Apply training HSV and quantization on CUDA, in batches, under float32 or mixed precision. Off by
+            default; other backends and precisions retain worker-side colour augmentation. The workers keep their RNG
+            draws and transport float32 images plus the stated gains, using four times the default image IPC and
+            transfer bytes. The worker cap budgets float32 images only for a count chosen here (``num_workers``
+            unset) in one process; a named ``num_workers`` is neither capped nor warned, and each DDP rank budgets
+            the free shm on its own. Validation stays uint8.
         fused_hsv: Let the transfer hook restore a deferred-HSV batch with the fused
             Triton kernel where the host supports it (:mod:`lucid_yolo.data._hsv_cuda`).
             On by default, so a supported host takes it whenever Triton and a host C
@@ -515,12 +459,10 @@ class DetectionDataModule(LightningDataModule):
         self._rotated_targets = bool(rotated_targets)
         self._keypoint_targets = bool(keypoint_targets)
         self._batch_size = int(batch_size)
-        # Checked here because this is where the side enters a run: every image the two
-        # loaders emit is letterboxed to it, and the head divides that canvas by its own
-        # strides. A side the strides do not divide floors to a feature map the neck
-        # cannot concatenate, which surfaces as a shape error inside the first training
-        # step -- an hour into a queued run, and about a tensor rather than about the YAML
-        # key that set it (WP-171).
+        # Checked here because this is where the side enters a run: every image the two loaders emit is letterboxed to
+        # it, and the head divides that canvas by its own strides. A side the strides do not divide floors to a
+        # feature map the neck cannot concatenate, which surfaces as a shape error inside the first training step --
+        # an hour into a queued run, and about a tensor rather than about the YAML key that set it (WP-171).
         require_grid_side("img_size", img_size)
         self._img_size = int(img_size)
         self._prefetch_factor = int(prefetch_factor)
@@ -610,11 +552,10 @@ class DetectionDataModule(LightningDataModule):
     def _check_layout_support(self, layout: DatasetLayout) -> None:
         """Reject a request the resolved layout's reader cannot serve.
 
-        Both such requests today are on a YOLO root: segmentation supervision, and keypoint
-        supervision. Each is refused rather than downgraded because the failure it replaces is
-        silent in the worst way — the rings the mask targets rasterise, and the point fields the
-        pose targets read, are simply never there (WP-099), so the run would train a head on
-        empty supervision and report a plausible detection number.
+        Both such requests today are on a YOLO root: segmentation supervision, and keypoint supervision. Each is
+        refused rather than downgraded because the failure it replaces is silent in the worst way — the rings the mask
+        targets rasterise, and the point fields the pose targets read, are simply never there (WP-099), so the run
+        would train a head on empty supervision and report a plausible detection number.
 
         Args:
             layout: The layout that will be read.
@@ -669,17 +610,15 @@ class DetectionDataModule(LightningDataModule):
     def _resolve_val_workers(self, requested: int | None, workers_were_chosen_here: bool) -> int:
         """Decide the validation loader's *intended* worker count.
 
-        The letterbox cap applies to what this class chose, never to what a caller named.
-        An operator who writes ``--data.num_workers 16`` has stated how much of the
-        machine this run may use, and silently running validation on a quarter of it is
-        the library second-guessing a decision that was not its to make — the surprise
-        costs more than the OOM it was avoiding, because it shows up as an idle GPU with
-        no message. When the count was auto-chosen the cap still applies, because then
-        the library owns the consequences of its own guess.
+        The letterbox cap applies to what this class chose, never to what a caller named. An operator who writes
+        ``--data.num_workers 16`` has stated how much of the machine this run may use, and silently running
+        validation on a quarter of it is the library second-guessing a decision that was not its to make — the
+        surprise costs more than the OOM it was avoiding, because it shows up as an idle GPU with no message. When
+        the count was auto-chosen the cap still applies, because then the library owns the consequences of its own
+        guess.
 
-        An *inherited* count — named for training, never stated for validation — is
-        neither, and :meth:`_val_loader_workers` bounds it by the memory budget when the
-        loader is built (WP-103).
+        An *inherited* count — named for training, never stated for validation — is neither, and
+        :meth:`_val_loader_workers` bounds it by the memory budget when the loader is built (WP-103).
 
         Args:
             requested: Explicit ``val_num_workers``, or ``None`` to derive one.
@@ -697,20 +636,17 @@ class DetectionDataModule(LightningDataModule):
     def _val_loader_workers(self) -> int:
         """Return the worker count this validation loader may actually start (WP-103).
 
-        A count *inherited* from a named ``num_workers`` is bounded here by
-        :func:`_shm_capped_workers`, loudly. WP-102 was right that an operator's number
-        should reach the val loader and wrong about what to do with the guard: it deleted
-        the cap rather than the silence, and a named 32 at 1024 px queues about 51 GB for
-        validation alone (``32 x 2 x 4 x 3 x 64 x 1024**2``) on top of a train pool that
-        is still resident — the host dies. Parallelism is what an operator states with
-        that flag; gigabytes are what the flag *costs*, and the second is this class's
-        arithmetic to do. Naming ``val_num_workers`` outright is still sovereign, capped
-        by nothing, which is where an operator who wants the whole machine says so.
+        A count *inherited* from a named ``num_workers`` is bounded here by :func:`_shm_capped_workers`, loudly. WP-102
+        was right that an operator's number should reach the val loader and wrong about what to do with the
+        guard: it deleted the cap rather than the silence, and a named 32 at 1024 px queues about 51 GB for validation
+        alone (``32 x 2 x 4 x 3 x 64 x 1024**2``) on top of a train pool that is still resident — the host dies.
+        Parallelism is what an operator states with that flag; gigabytes are what the flag *costs*, and the second is
+        this class's arithmetic to do. Naming ``val_num_workers`` outright is still sovereign, capped by nothing,
+        which is where an operator who wants the whole machine says so.
 
-        The budget is read **when the loader is built**, not at construction: by then the
-        training queue is resident, so :func:`os.statvfs` reports the space the second
-        pool will actually find rather than the space that existed before the first one
-        spawned. The overlap of the two pools is the failure mode, so it is the state the
+        The budget is read **when the loader is built**, not at construction: by then the training queue is resident,
+        so :func:`os.statvfs` reports the space the second pool will actually find rather than the space that existed
+        before the first one spawned. The overlap of the two pools is the failure mode, so it is the state the
         decision has to be made against.
 
         Returns:
@@ -743,21 +679,17 @@ class DetectionDataModule(LightningDataModule):
         path tried.
 
         Args:
-            stage: The Lightning stage (``"fit"``/``"validate"``/…). Both splits are
-                always built, so a repeated call yields the same splits and a fresh train
-                pipeline — mosaic probability and draw generator back at their initial
-                state. ``cache_train_images`` only decodes the train split when ``stage``
-                is ``"fit"`` or ``None``: a ``"validate"``/``"test"``/``"predict"`` call
-                never pays to cache a split it will not read, and releases a cache an
-                earlier fit-stage call built. A repeat ``"fit"``/``None`` call with the
-                cache on keeps the already-decoded train reader rather than decoding the
-                split again beside it, so the result is idempotent and the decode cost is
-                paid once, not once per call.
+            stage: The Lightning stage (``"fit"``/``"validate"``/…). Both splits are always built, so a repeated
+                call yields the same splits and a fresh train pipeline — mosaic probability and draw generator
+                back at their initial state. ``cache_train_images`` only decodes the train split when ``stage`` is
+                ``"fit"`` or ``None``: a ``"validate"``/``"test"``/``"predict"`` call never pays to cache a split it
+                will not read, and releases a cache an earlier fit-stage call built. A repeat ``"fit"``/``None`` call
+                with the cache on keeps the already-decoded train reader rather than decoding the split again beside
+                it, so the result is idempotent and the decode cost is paid once, not once per call.
 
-                A call that raises installs nothing it built: the val dataset and both
-                caches keep their previous values, and no train pipeline is left behind,
-                so :meth:`train_dataloader` raises rather than serving the pipeline an
-                earlier stage built.
+                A call that raises installs nothing it built: the val dataset and both caches keep their previous
+                values, and no train pipeline is left behind, so :meth:`train_dataloader` raises rather than serving
+                the pipeline an earlier stage built.
 
         Raises:
             FileNotFoundError: If the root satisfies neither dataset convention.
@@ -771,11 +703,10 @@ class DetectionDataModule(LightningDataModule):
         yolo = self.layout is DatasetLayout.YOLO
         prepare_train = self._cache_prepared_train_images and stage in {None, "fit"}
         cache_train_images = self._cache_train_images and stage in {None, "fit"} and not prepare_train
-        # A second decoded reader would hold two copies of the split until the first one is
-        # released, and decode every image again for an identical result. The reader is
-        # immutable and its paths are fixed at construction, so reusing it changes nothing a
-        # caller can see: val and the augmentation pipeline around the reader are rebuilt as
-        # before. A stage that reads no train images keeps nothing, which lets the cache go.
+        # A second decoded reader would hold two copies of the split until the first one is released, and decode every
+        # image again for an identical result. The reader is immutable and its paths are fixed at construction, so
+        # reusing it changes nothing a caller can see: val and the augmentation pipeline around the reader are rebuilt
+        # as before. A stage that reads no train images keeps nothing, which lets the cache go.
         kept_train = self._cached_train_base if cache_train_images or prepare_train else None
         base, val = (
             self._build_yolo_splits(cache_train_images, kept_train)
@@ -803,26 +734,22 @@ class DetectionDataModule(LightningDataModule):
     def _defer_hsv(self, stage: str | None) -> bool:
         """Select CUDA colour augmentation when input precision preserves the transport.
 
-        The worker still samples HSV before sampling the flip. A pointwise colour
-        transform commutes with that pixel permutation, so applying the colour
-        operations after transfer keeps both the geometry and the RNG sequence.
-        When the worker count is auto-chosen, its shared-memory cap already budgets
-        four bytes per image element. A named ``num_workers`` is not capped, and each
-        process reads the free space on its own, so DDP ranks each claim that budget.
+        The worker still samples HSV before sampling the flip. A pointwise colour transform commutes with that pixel
+        permutation, so applying the colour operations after transfer keeps both the geometry and the RNG sequence.
+        When the worker count is auto-chosen, its shared-memory cap already budgets four bytes per image element.
+        A named ``num_workers`` is not capped, and each process reads the free space on its own, so DDP ranks each
+        claim that budget.
 
-        Lightning passes every batch through the precision plugin's ``convert_input``
-        before this hook, so the precision label alone does not decide: deferral also
-        needs that conversion to keep float32 images and float64 gains
-        (:func:`_transport_survives`). True-half and double plugins cast both, and the
-        FSDP and DeepSpeed plugins cast at least the gains under every accepted
-        precision, so all of them keep worker-side HSV rather than rounding images or
-        stated gains first. The plugin is probed only when the trainer exposes one;
-        the precision allowlist applies either way.
+        Lightning passes every batch through the precision plugin's ``convert_input`` before this hook, so the
+        precision label alone does not decide: deferral also needs that conversion to keep float32 images and
+        float64 gains (:func:`_transport_survives`). True-half and double plugins cast both, and the FSDP and
+        DeepSpeed plugins cast at least the gains under every accepted precision, so all of them keep worker-side HSV
+        rather than rounding images or stated gains first. The plugin is probed only when the trainer exposes one; the
+        precision allowlist applies either way.
 
-        Without an attached trainer the answer is provisional: Lightning attaches its
-        trainer before calling ``setup`` again, which re-evaluates it. That case returns
-        ``False`` silently and leaves the once-per-module warning unspent, so a later
-        genuine fallback still warns rather than an early call claiming "off CUDA".
+        Without an attached trainer the answer is provisional: Lightning attaches its trainer before calling ``setup``
+        again, which re-evaluates it. That case returns ``False`` silently and leaves the once-per-module warning
+        unspent, so a later genuine fallback still warns rather than an early call claiming "off CUDA".
         """
         if not self._device_hsv or stage not in {None, "fit"}:
             return False
@@ -856,17 +783,15 @@ class DetectionDataModule(LightningDataModule):
     ) -> tuple[_DetectionSource, _DetectionSource]:
         """Build both splits from the resolved (or overridden) COCO paths.
 
-        Each reader derives its own contiguous label space from its own file, so the two are
-        compared here before either is served: two disagreeing ``categories`` lists is a
-        wrong-dataset error that otherwise trains to completion and reports a metric
-        (:func:`_check_shared_label_space`). The comparison runs before the train images
-        are cached, so a mismatched pair fails in the seconds two JSON reads take rather
-        than after the whole train split has been decoded.
+        Each reader derives its own contiguous label space from its own file, so the two are compared here before
+        either is served: two disagreeing ``categories`` lists is a wrong-dataset error that otherwise trains to
+        completion and reports a metric (:func:`_check_shared_label_space`). The comparison runs before the train
+        images are cached, so a mismatched pair fails in the seconds two JSON reads take rather than after the whole
+        train split has been decoded.
 
         Args:
-            cache_train_images: Decode and retain the train split's images, once both
-                label spaces agree. The caller already narrows this to the stages that read
-                the train split.
+            cache_train_images: Decode and retain the train split's images, once both label spaces agree. The caller
+                already narrows this to the stages that read the train split.
             kept_train: The train reader an earlier fit-stage call already decoded, reused
                 as it stands, or ``None`` to read the annotation file into a fresh one.
 
@@ -941,22 +866,17 @@ class DetectionDataModule(LightningDataModule):
     ) -> tuple[Tensor, list[Targets], list[Tensor] | None]:
         """Restore the float images and ``list[Targets]`` consumer contract on-device.
 
-        Lightning calls this after moving the batch to the accelerator, so both the
-        uint8 images and the :class:`PackedTargets` tensor fields are already
-        on-device: the images are dequantized to the attached module's dtype
-        (:meth:`_consumer_dtype` — ``code / 255`` at that precision,
-        :func:`_dequantize_images`) and the packed targets are unpacked, all on the
-        same device the module trains on, with no extra host-to-device hop.
-        A deferred training batch first applies its stated HSV gains and quantizes
-        the result, then reaches this same dequantization. Matching
-        the module dtype keeps a ``"16-true"``/``"bf16-true"`` run's half weights and
-        inputs aligned; ``"16-mixed"`` leaves the module float32 and lets autocast
-        cast. Already-float images and already-list targets (a non-packed direct
-        feed) pass through untouched, so the hook is safe to run over either form.
-        Both the train and val loaders share this single restore. On CUDA the
-        restored images are made ``channels_last``, the layout the module's
-        parameters take in :meth:`DetectionLitModule.setup`; masks and every other
-        device keep the default layout.
+        Lightning calls this after moving the batch to the accelerator, so both the uint8 images and the
+        :class:`PackedTargets` tensor fields are already on-device: the images are dequantized to the attached
+        module's dtype (:meth:`_consumer_dtype` — ``code / 255`` at that precision, :func:`_dequantize_images`) and
+        the packed targets are unpacked, all on the same device the module trains on, with no extra host-to-device
+        hop. A deferred training batch first applies its stated HSV gains and quantizes the result, then reaches this
+        same dequantization. Matching the module dtype keeps a ``"16-true"``/``"bf16-true"`` run's half weights and
+        inputs aligned; ``"16-mixed"`` leaves the module float32 and lets autocast cast. Already-float images and
+        already-list targets (a non-packed direct feed) pass through untouched, so the hook is safe to run over
+        either form. Both the train and val loaders share this single restore. On CUDA the restored images are made
+        ``channels_last``, the layout the module's parameters take in :meth:`DetectionLitModule.setup`; masks and
+        every other device keep the default layout.
 
         Args:
             batch: The transferred ``(uint8 images, PackedTargets)`` transport batch,
@@ -964,11 +884,10 @@ class DetectionDataModule(LightningDataModule):
             dataloader_idx: The loader index (unused; the conversion is uniform).
 
         Returns:
-            The ``(images, list[Targets], masks)`` consumer batch — ``[0, 1]`` images
-            at the module's dtype, the ragged per-image targets, and the per-image
-            mask stacks a segmentation loader rasterised in its workers (``None`` on
-            a detection loader, or on any already-restored feed, which is the signal
-            the module rasterises the masks itself).
+            The ``(images, list[Targets], masks)`` consumer batch — ``[0, 1]`` images at the module's dtype, the
+            ragged per-image targets, and the per-image mask stacks a segmentation loader rasterised in its workers
+            (``None`` on a detection loader, or on any already-restored feed, which is the signal the module
+            rasterises the masks itself).
 
         Raises:
             TypeError: If a deferred-HSV batch arrives cast away from float32 images
@@ -1002,12 +921,10 @@ class DetectionDataModule(LightningDataModule):
     def _consumer_dtype(self) -> torch.dtype:
         """Resolve the floating-point dtype the dequantized images should take.
 
-        Returns the attached :class:`~pytorch_lightning.LightningModule`'s parameter
-        dtype so the restored images match the trainer's precision: a
-        ``"16-true"``/``"bf16-true"`` run holds half weights the inputs must match,
-        while ``"16-mixed"`` leaves the module float32 (autocast casts as needed).
-        Falls back to ``torch.float32`` when no trainer or module is attached — the
-        path a direct :func:`unpack_batch` consumer never reaches.
+        Returns the attached :class:`~pytorch_lightning.LightningModule`'s parameter dtype so the restored images
+        match the trainer's precision: a ``"16-true"``/``"bf16-true"`` run holds half weights the inputs must match,
+        while ``"16-mixed"`` leaves the module float32 (autocast casts as needed). Falls back to ``torch.float32``
+        when no trainer or module is attached — the path a direct :func:`unpack_batch` consumer never reaches.
 
         Returns:
             The attached module's dtype, or ``torch.float32`` when unattached.
@@ -1021,24 +938,21 @@ class DetectionDataModule(LightningDataModule):
     def _loader_kwargs(self) -> dict[str, object]:
         """Return the streaming DataLoader kwargs shared by both loaders.
 
-        Accelerator-aware: ``pin_memory`` is on only where it helps (resolved in
-        the constructor — CUDA yes, MPS/CPU no), ``prefetch_factor`` and the
-        the per-worker init (:func:`_init_worker` — thread cap plus RNG re-seed)
+        Accelerator-aware: ``pin_memory`` is on only where it helps (resolved in the constructor — CUDA yes, MPS/CPU
+        no), ``prefetch_factor`` and the per-worker init (:func:`_init_worker` — thread cap plus RNG re-seed)
         apply only with workers, so the ``num_workers=0`` path is untouched.
 
-        Workers are **recycled every epoch** unless ``persistent_workers=True``
-        was requested (WP-076): a respawn costs seconds per epoch, while a
-        persistent pool accumulates per-worker memory — allocator high-water
-        growth, arena fragmentation, residual copy-on-write pages — for the
-        whole run, the observed slow-creep OOM on long containerized runs.
+        Workers are **recycled every epoch** unless ``persistent_workers=True`` was requested (WP-076): a respawn
+        costs seconds per epoch, while a persistent pool accumulates per-worker memory — allocator high-water growth,
+        arena fragmentation, residual copy-on-write pages — for the whole run, the observed slow-creep OOM on long
+        containerized runs.
         """
         workers = self._num_workers > 0
         return {
             "batch_size": self._batch_size,
             "num_workers": self._num_workers,
-            # A partial, not a closure or a lambda: the worker start method pickles
-            # `collate_fn`, and `functools.partial` over a module-level function is
-            # picklable where a local function is not.
+            # A partial, not a closure or a lambda: the worker start method pickles `collate_fn`, and
+            # `functools.partial` over a module-level function is picklable where a local function is not.
             "collate_fn": partial(collate_detection, mask_targets=self._mask_targets),
             "persistent_workers": self._persistent_workers and workers,
             "pin_memory": self._pin_memory,
@@ -1049,12 +963,10 @@ class DetectionDataModule(LightningDataModule):
     def train_dataloader(self) -> DataLoader[tuple[Tensor, PackedTargets]]:
         """Return the shuffled training loader with the packed batch transport.
 
-        DataLoader's type parameter describes dataset items, while this collate
-        returns a different form. The cast records the collated boundary rather
-        than exposing the pipeline's private deferred-sample union to consumers.
-        The loader collates through :func:`_collate_training`, the private twin of
-        :func:`collate_detection` that also accepts that union, so the public collate
-        keeps its ``(image, Targets)`` signature.
+        DataLoader's type parameter describes dataset items, while this collate returns a different form. The cast
+        records the collated boundary rather than exposing the pipeline's private deferred-sample union to consumers.
+        The loader collates through :func:`_collate_training`, the private twin of :func:`collate_detection` that also
+        accepts that union, so the public collate keeps its ``(image, Targets)`` signature.
         """
         if self._train is None:
             raise RuntimeError("setup() must be called before train_dataloader()")
@@ -1084,11 +996,10 @@ class DetectionDataModule(LightningDataModule):
     def _unmet_prefetch_gate(self, trainer: Trainer) -> str | None:
         """Name the first condition that keeps the ordinary training loader, or ``None``.
 
-        The early reset needs a persistent pool to reuse and complete single-CUDA epochs
-        whose count it can trust: a limit, a step bound, overfitting, a reload or a
-        distributed sampler would each make the prepared epoch the wrong one. The
-        conditions are checked in that order and the first one unmet is named, so the
-        caller's warning points at the setting to change.
+        The early reset needs a persistent pool to reuse and complete single-CUDA epochs whose count it can trust:
+        a limit, a step bound, overfitting, a reload or a distributed sampler would each make the prepared epoch the
+        wrong one. The conditions are checked in that order and the first one unmet is named, so the caller's warning
+        points at the setting to change.
 
         The CUDA condition marks the edge of the measurements (an L4), not a known
         failure of other accelerators; widening it needs its own measurement.
@@ -1116,9 +1027,8 @@ class DetectionDataModule(LightningDataModule):
     ) -> DataLoader[tuple[Tensor, PackedTargets]]:
         """Build the training loader that prepares each next epoch during the current one's end.
 
-        The predicate holds the trainer weakly, so a kept loader never keeps the model
-        alive, and stops preparing at the configured final epoch or once training was
-        asked to stop.
+        The predicate holds the trainer weakly, so a kept loader never keeps the model alive, and stops preparing at
+        the configured final epoch or once training was asked to stop.
         """
         max_epochs = trainer.max_epochs or 0
         weak_trainer = ref(trainer)
@@ -1139,11 +1049,10 @@ class DetectionDataModule(LightningDataModule):
     def val_dataloader(self) -> DataLoader[tuple[Tensor, PackedTargets]]:
         """Return the unshuffled validation loader (letterbox-only samples).
 
-        The loader runs on its own worker count — ``val_num_workers``, defaulting to a
-        pixel-scaled cap on an auto-chosen train count (WP-073, WP-102) and to the
-        memory budget of :meth:`_val_loader_workers` on a named one (WP-103): letterbox
-        only samples need a fraction of the train pipeline's CPU, and both worker
-        populations are resident at the epoch boundary where validation runs.
+        The loader runs on its own worker count — ``val_num_workers``, defaulting to a pixel-scaled cap on an
+        auto-chosen train count (WP-073, WP-102) and to the memory budget of :meth:`_val_loader_workers` on a named
+        one (WP-103): letterbox only samples need a fraction of the train pipeline's CPU, and both worker populations
+        are resident at the epoch boundary where validation runs.
 
         Annotated with the collated ``(images, PackedTargets)`` transport, as
         :meth:`train_dataloader` is: the dataset yields ``(image, Targets)`` pairs, and
@@ -1192,19 +1101,16 @@ class DetectionDataModule(LightningDataModule):
     def set_mosaic_prob(self, prob: float) -> None:
         """Set the training pipeline's mosaic probability.
 
-        This is the seam ``CloseMosaicCallback`` (WP-036) drives to disable mosaic
-        for the final training epochs: it sets ``prob=0``. The value lands on the
-        main-process pipeline, which loader worker processes copy when they start:
-        in-process loading (``num_workers=0``) uses it from the next sample, and a
-        pool started after this call — every later epoch's pool under the default
-        ``persistent_workers=False`` — samples with it. Persistent workers keep the
-        copy they started with and never see the change; with ``epoch_prefetch``
-        also requested, a change of value warns once, since the next epoch's first
-        batches are also already queued by then. Repeat calls are harmless.
+        This is the seam ``CloseMosaicCallback`` (WP-036) drives to disable mosaic for the final training epochs: it
+        sets ``prob=0``. The value lands on the main-process pipeline, which loader worker processes copy when they
+        start: in-process loading (``num_workers=0``) uses it from the next sample, and a pool started after this call
+        — every later epoch's pool under the default ``persistent_workers=False`` — samples with it. Persistent
+        workers keep the copy they started with and never see the change; with ``epoch_prefetch`` also requested,
+        a change of value warns once, since the next epoch's first batches are also already queued by then. Repeat
+        calls are harmless.
 
         Args:
-            prob: The new mosaic probability, forwarded to
-                :attr:`_TrainPipeline.mosaic_p`.
+            prob: The new mosaic probability, forwarded to :attr:`_TrainPipeline.mosaic_p`.
 
         Raises:
             RuntimeError: If :meth:`setup` has not built the training pipeline yet.

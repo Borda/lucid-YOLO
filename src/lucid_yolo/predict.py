@@ -1,90 +1,72 @@
 # SPDX-License-Identifier: Apache-2.0
 """Single-image inference from a trained checkpoint (WP-089, WP-090, WP-091, WP-152).
 
-One image file in, detections out, in the **original** image's coordinates. Everything
-between is already written somewhere else and is called rather than restated: the
-preprocessing is :func:`~lucid_yolo.eval.annotations.read_letterboxed_image`, the same
-read-scale-letterbox chain the evaluator feeds val2017 through; the two decode paths are
-:class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` and
-:class:`~lucid_yolo.decode.nms_path.NMSDecoder`, with
-:class:`~lucid_yolo.decode.topk_e2e.RotatedTopKDecoder` and
-:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` as their oriented twins; the
-per-anchor masks and points are gathered through :mod:`lucid_yolo.decode.per_task`, the
-composition :mod:`lucid_yolo.export` and the evaluator decode through too; and the way
-back to original pixels is :func:`~lucid_yolo.decode.common.to_letterboxed_original` and
-its point twin :func:`~lucid_yolo.decode.common.points_to_letterboxed_original`, which
-recover the ratio and the pads from :class:`~lucid_yolo.data.letterbox.Letterbox`'s own
-geometry.
+One image file in, detections out, in the **original** image's coordinates. Everything between is already written
+somewhere else and is called rather than restated: the preprocessing is
+:func:`~lucid_yolo.eval.annotations.read_letterboxed_image`, the same read-scale-letterbox chain the evaluator feeds
+val2017 through; the two decode paths are :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` and
+:class:`~lucid_yolo.decode.nms_path.NMSDecoder`, with :class:`~lucid_yolo.decode.topk_e2e.RotatedTopKDecoder` and
+:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` as their oriented twins; the per-anchor masks and points are
+gathered through :mod:`lucid_yolo.decode.per_task`, the composition :mod:`lucid_yolo.export` and the evaluator decode
+through too; and the way back to original pixels is :func:`~lucid_yolo.decode.common.to_letterboxed_original` and its
+point twin :func:`~lucid_yolo.decode.common.points_to_letterboxed_original`, which recover the ratio and the pads from
+:class:`~lucid_yolo.data.letterbox.Letterbox`'s own geometry.
 
-That last one is the point of this module existing rather than a twenty-line script. A
-letterbox inverse written a second time is the WP-053a defect class: two copies of one
-transform, each with its own passing tests, free to disagree by a pad the day either
-side's rounding changes. Nothing here computes a ratio, a pad or a corner.
+That last one is the point of this module existing rather than a twenty-line script. A letterbox inverse written a
+second time is the WP-053a defect class: two copies of one transform, each with its own passing tests, free to
+disagree by a pad the day either side's rounding changes. Nothing here computes a ratio, a pad or a corner.
 
-Four tasks, four entry points. :func:`predict_image` answers with axis-aligned boxes;
-:func:`predict_segmentation` answers with boxes **and** their instance masks;
-:func:`predict_oriented` answers with rotated boxes; :func:`predict_keypoints` answers
-with boxes and their point sets. The fourth arrived at WP-152, a release after the task
-it serves: 0.5.0 shipped keypoints with no shipped way to run a checkpoint on an image.
-Each refuses the other tasks by name
-rather than falling through, and the refusal is here in the library rather than in the
-command, because :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward` returns a
-:class:`~lucid_yolo.models.heads.detect.DualHeadOutput` for *every* task. A segmentation
-or oriented checkpoint handed to :func:`predict_image` would otherwise produce boxes,
-silently, with its mask or angle branch never consulted: plausible output, no error, and
-the masks or the headings the caller asked for absent.
+Four tasks, four entry points. :func:`predict_image` answers with axis-aligned boxes; :func:`predict_segmentation`
+answers with boxes **and** their instance masks; :func:`predict_oriented` answers with rotated boxes;
+:func:`predict_keypoints` answers with boxes and their point sets. The fourth arrived at WP-152, a release after the
+task it serves: 0.5.0 shipped keypoints with no shipped way to run a checkpoint on an image. Each refuses the other
+tasks by name rather than falling through, and the refusal is here in the library rather than in the command,
+because :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward` returns a
+:class:`~lucid_yolo.models.heads.detect.DualHeadOutput` for *every* task. A segmentation or oriented checkpoint
+handed to :func:`predict_image` would otherwise produce boxes, silently, with its mask or angle branch never
+consulted: plausible output, no error, and the masks or the headings the caller asked for absent.
 
-Four functions rather than one that switches on the task, because the four answers are
-different shapes: a ``(N, 6)`` A9 tuple, that tuple beside a mask stack, a ``(N, 7)``
-A45 tuple whose box columns are not corners at all, and that A9 tuple beside a
-``(N, K, 2)`` point stack. A single function returning a union
-does not remove the switch, it moves it into every caller — and into every caller's type
-checker, which can only see the union. The split is the one
+Four functions rather than one that switches on the task, because the four answers are different shapes: a ``(N, 6)``
+A9 tuple, that tuple beside a mask stack, a ``(N, 7)`` A45 tuple whose box columns are not corners at all, and that
+A9 tuple beside a ``(N, K, 2)`` point stack. A single function returning a union does not remove the switch, it moves
+it into every caller — and into every caller's type checker, which can only see the union. The split is the one
 :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward` and
 :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward_segmentation` already make one
 layer down, for the same reason.
 
 Module ownership:
-    All four entry points **mutate the module they are given**. Each runs
-    ``module.to(run_on).eval()`` before its forward pass, which moves the parameters and
-    buffers of the caller's own object and switches its training flag — both in place,
-    both still in effect after the function returns. A caller who hands over a CUDA
-    module and passes ``device=torch.device("cpu")`` gets its detections and a module
-    left on the CPU; a caller who was mid-training and reuses the module afterwards
-    finds it in eval mode, with batch-norm reading its running statistics instead of the
-    batch's.
+    All four entry points **mutate the module they are given**. Each runs ``module.to(run_on).eval()`` before its
+    forward pass, which moves the parameters and buffers of the caller's own object and switches its training flag —
+    both in place, both still in effect after the function returns. A caller who hands over a CUDA module and passes
+    ``device=torch.device("cpu")`` gets its detections and a module left on the CPU; a caller who was mid-training
+    and reuses the module afterwards finds it in eval mode, with batch-norm reading its running statistics instead of
+    the batch's.
 
-    This is deliberate and not worth copying around: a module is the large object in the
-    call and the normal caller — :mod:`lucid_yolo.cli.predict` — loads it, predicts, and
-    drops it, so a defensive :func:`copy.deepcopy` would double peak memory for every
-    such caller to protect one who has another use for the object. It is recorded here
-    because it is invisible at the call site. A caller who does need the module back
-    unchanged copies it, or restores it with ``module.to(previous_device).train()``.
+    This is deliberate and not worth copying around: a module is the large object in the call and the normal caller —
+    :mod:`lucid_yolo.cli.predict` — loads it, predicts, and drops it, so a defensive :func:`copy.deepcopy` would
+    double peak memory for every such caller to protect one who has another use for the object. It is recorded here
+    because it is invisible at the call site. A caller who does need the module back unchanged copies it, or restores
+    it with ``module.to(previous_device).train()``.
 
 Assumptions:
-    Labels come out as **contiguous class indices**, not dataset category ids. The
-    evaluator maps them back through the annotation file's category order, and a single
-    image has no annotation file; the checkpoint carries ``num_classes`` and no names. A
-    caller who knows which dataset trained the checkpoint owns that mapping.
+    Labels come out as **contiguous class indices**, not dataset category ids. The evaluator maps them back through
+    the annotation file's category order, and a single image has no annotation file; the checkpoint carries
+    ``num_classes`` and no names. A caller who knows which dataset trained the checkpoint owns that mapping.
 
-    The mask threshold (A37) is **not** a parameter here, unlike ``conf_threshold``. The
-    two look alike and are not: a confidence cut answers the caller's own question — how
-    much of the low-scoring tail counts as "in this picture" — while the mask threshold
-    is the neutral cut of a sigmoid trained with BCE, the calibration constant every
-    reported segm mAP was measured at. Moving it drops no object and silently dilates or
-    erodes every mask instead. It stays defined once, in
-    :mod:`lucid_yolo.eval.segment_decode`, so a predicted mask and a scored mask are the
+    The mask threshold (A37) is **not** a parameter here, unlike ``conf_threshold``. The two look alike and are not:
+    a confidence cut answers the caller's own question — how much of the low-scoring tail counts as "in this picture"
+    — while the mask threshold is the neutral cut of a sigmoid trained with BCE, the calibration constant every
+    reported segm mAP was measured at. Moving it drops no object and silently dilates or erodes every mask instead.
+    It stays defined once, in :mod:`lucid_yolo.eval.segment_decode`, so a predicted mask and a scored mask are the
     same object; a caller who genuinely wants another cut calls
     :func:`~lucid_yolo.eval.segment_decode.decode_instance_masks` directly.
 
-    Oriented output is **canonical** (A23) and stays canonical: the angle is normalized
-    inside :func:`~lucid_yolo.models.heads.obb.decode_rboxes`, and the letterbox inverse
-    that follows is one isotropic scale plus a translation, which preserves both ``w >= h``
-    and ``theta``. :func:`predict_oriented` therefore re-normalizes nothing — see its
-    docstring for why that seam is the decode rather than this module.
+    Oriented output is **canonical** (A23) and stays canonical: the angle is normalized inside
+    :func:`~lucid_yolo.models.heads.obb.decode_rboxes`, and the letterbox inverse that follows is one isotropic scale
+    plus a translation, which preserves both ``w >= h`` and ``theta``. :func:`predict_oriented` therefore
+    re-normalizes nothing — see its docstring for why that seam is the decode rather than this module.
 
-Provenance: R1 sec. 3.2.1, R1 Eq. 7, R1 Eq. 13, R3 sec. 4, R14. Assumptions: A9, A10,
-A23, A37, A45, A61, A64.
+Provenance: R1 sec. 3.2.1, R1 Eq. 7, R1 Eq. 13, R3 sec. 4, R14. Assumptions: A9, A10, A23, A37, A45, A61, A64.
 """
 
 from __future__ import annotations
@@ -137,19 +119,17 @@ __all__ = [
     "predict_segmentation",
 ]
 
-#: The two selectable decode paths, spelled as
-#: :func:`~lucid_yolo.eval.detect_eval.run` already prints and reports them, so one
-#: vocabulary covers scoring and inference.
+#: The two selectable decode paths, spelled as :func:`~lucid_yolo.eval.detect_eval.run` already prints and reports
+#: them, so one vocabulary covers scoring and inference.
 DecodePath = Literal["e2e", "nms"]
 
 #: The same two strings as a runtime tuple, for a caller validating outside the type
 #: system (a report writer, a test) without re-spelling them.
 DECODE_PATHS: tuple[DecodePath, ...] = ("e2e", "nms")
 
-#: Score below which a detection is dropped. Deliberately **not** the evaluator's
-#: ``0.001``: that threshold exists so the mAP integration sees the low-confidence tail,
-#: and a caller looking at one image wants the objects, not the tail — 300 rows of noise
-#: per image is the wrong answer to "what is in this picture".
+#: Score below which a detection is dropped. Deliberately **not** the evaluator's ``0.001``: that threshold exists so
+#: the mAP integration sees the low-confidence tail, and a caller looking at one image wants the objects, not the
+#: tail — 300 rows of noise per image is the wrong answer to "what is in this picture".
 DEFAULT_CONF_THRESHOLD = 0.25
 
 #: Letterbox side :func:`predict_oriented` defaults to. The oriented tier trains on
@@ -158,26 +138,23 @@ DEFAULT_CONF_THRESHOLD = 0.25
 #: from too, so the library and the command cannot drift apart.
 DEFAULT_ORIENTED_IMG_SIZE = Task.OBB.spec.img_size
 
-#: The decode path :func:`predict_oriented` defaults to, and the one an oriented tier
-#: report quotes as its headline number: the suppression-free branch is what this
-#: architecture exists to demonstrate. Until WP-091b it was the *only* path an oriented
-#: checkpoint could be read through and the other was refused by name; the refusal is
-#: lifted now that :class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` suppresses by
-#: rotated overlap rather than by upright envelopes.
+#: The decode path :func:`predict_oriented` defaults to, and the one an oriented tier report quotes as its headline
+#: number: the suppression-free branch is what this architecture exists to demonstrate. Until WP-091b it was the
+#: *only* path an oriented checkpoint could be read through and the other was refused by name; the refusal is lifted
+#: now that :class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` suppresses by rotated overlap rather than by
+#: upright envelopes.
 ORIENTED_DECODE_PATH: DecodePath = "e2e"
 
-#: Each task's entry point and what that entry point answers with, in the wording its
-#: siblings' refusals quote. One row per task, and every refusal below is composed from
-#: the rows it does *not* own, so a message cannot name a subset of its siblings.
+#: Each task's entry point and what that entry point answers with, in the wording its siblings' refusals quote. One
+#: row per task, and every refusal below is composed from the rows it does *not* own, so a message cannot name a
+#: subset of its siblings.
 #:
-#: This is the table because the hand-written form failed exactly once and silently.
-#: Three of these functions predate the fourth; each was written naming the two siblings
-#: that existed then, and WP-152 added ``predict_keypoints`` — whose own message names
-#: all three — without revisiting the three that now had a sibling they never mentioned.
-#: A reader holding a pose checkpoint and calling :func:`predict_image` was told about
-#: segmentation and orientation and not about the function they wanted. A fifth task is
-#: one row here and appears in all four messages at once; the keys are
-#: :class:`~lucid_yolo.tasks.Task` members, so the row cannot be keyed by a misspelling.
+#: This is the table because the hand-written form failed exactly once and silently. Three of these functions predate
+#: the fourth; each was written naming the two siblings that existed then, and WP-152 added ``predict_keypoints`` —
+#: whose own message names all three — without revisiting the three that now had a sibling they never mentioned. A
+#: reader holding a pose checkpoint and calling :func:`predict_image` was told about segmentation and orientation and
+#: not about the function they wanted. A fifth task is one row here and appears in all four messages at once; the
+#: keys are :class:`~lucid_yolo.tasks.Task` members, so the row cannot be keyed by a misspelling.
 _TASK_ENTRY_POINTS: dict[Task, tuple[str, str]] = {
     Task.DETECT: ("predict_image", "answers with axis-aligned corners and nothing beside them"),
     Task.SEGMENT: ("predict_segmentation", "returns each object's instance mask beside its box"),
@@ -189,12 +166,10 @@ _TASK_ENTRY_POINTS: dict[Task, tuple[str, str]] = {
 def _wrong_task_message(handled: str, found: str) -> str:
     """Compose the refusal one entry point raises for a checkpoint of another task.
 
-    The message names the function that was called, the task it serves, the task the
-    checkpoint actually carries, and **every** other entry point with what it answers
-    with — built from :data:`_TASK_ENTRY_POINTS` rather than written out, so no message
-    can go stale when a task is added. The point of naming all of them is that the
-    caller's next move is in the message: they are holding a checkpoint and want the
-    function that reads it.
+    The message names the function that was called, the task it serves, the task the checkpoint actually carries, and
+    **every** other entry point with what it answers with — built from :data:`_TASK_ENTRY_POINTS` rather than written
+    out, so no message can go stale when a task is added. The point of naming all of them is that the caller's next
+    move is in the message: they are holding a checkpoint and want the function that reads it.
 
     Args:
         handled: The task the calling entry point serves.
@@ -233,18 +208,16 @@ def _wrong_task_message(handled: str, found: str) -> str:
 def _check_predict_arguments(decoder: DecodePath, conf_threshold: float, img_size: int) -> None:
     """Refuse the three argument values every entry point below would otherwise answer plausibly for.
 
-    One helper rather than a guard per function: the same three arguments appear in all
-    four signatures, and a check written four times is four chances to later fix three of
-    them. It runs at the entry point rather than at the dispatch, because the dispatch is
-    a forward pass later — a canvas the strides do not divide fails inside the neck's
-    concatenation before the decode is reached at all.
+    One helper rather than a guard per function: the same three arguments appear in all four signatures, and a check
+    written four times is four chances to later fix three of them. It runs at the entry point rather than at the
+    dispatch, because the dispatch is a forward pass later — a canvas the strides do not divide fails inside
+    the neck's concatenation before the decode is reached at all.
 
-    ``decoder`` is the one whose violation is silent. Every dispatch below reads
-    ``decoder == "e2e"`` and takes the one-to-many branch for anything else, so ``"E2E"``,
-    ``"nms "`` or a typo answers with the other branch's boxes — and, in
-    :func:`predict_oriented`, the other branch's headings — with nothing in the output to
-    read as wrong. :data:`DECODE_PATHS` is the runtime spelling of the ``Literal`` that
-    protects statically-checked callers only, and this is the check it exists for.
+    ``decoder`` is the one whose violation is silent. Every dispatch below reads ``decoder == "e2e"`` and takes the
+    one-to-many branch for anything else, so ``"E2E"``, ``"nms "`` or a typo answers with the other branch's boxes —
+    and, in :func:`predict_oriented`, the other branch's headings — with nothing in the output to read as wrong.
+    :data:`DECODE_PATHS` is the runtime spelling of the ``Literal`` that protects statically-checked callers only, and
+    this is the check it exists for.
 
     Args:
         decoder: The requested decode path.
@@ -274,15 +247,14 @@ def _check_predict_arguments(decoder: DecodePath, conf_threshold: float, img_siz
 def _branch_for(decoder: DecodePath) -> BranchName:
     """Return the head branch the named decode path reads.
 
-    The one place that states the pairing, so the four entry points cannot disagree about
-    it: the top-k path reads the one-to-one branch and the suppression path the dense one,
-    which is what every decode helper below already assumed field by field. Stating it once
-    is what lets the module run a single branch — the other one used to be computed and
-    dropped.
+    The one place that states the pairing, so the four entry points cannot disagree about it: the top-k path reads the
+    one-to-one branch and the suppression path the dense one, which is what every decode helper below already assumed
+    field by field. Stating it once is what lets the module run a single branch — the other one used to be computed
+    and dropped.
 
-    The ``== "e2e"`` test and the one-to-many fallback are deliberately the same shape the
-    decode helpers use, and :func:`_check_predict_arguments` has already rejected anything
-    that is neither, so the fallback here is reached only by a genuine ``"nms"``.
+    The ``== "e2e"`` test and the one-to-many fallback are deliberately the same shape the decode helpers use, and
+    :func:`_check_predict_arguments` has already rejected anything that is neither, so the fallback here is reached
+    only by a genuine ``"nms"``.
 
     Args:
         decoder: The decode path, already validated.
@@ -304,10 +276,9 @@ def _branch_for(decoder: DecodePath) -> BranchName:
 class _Prepared:
     """One image read, letterboxed and batched for a single forward pass.
 
-    What every entry point holds between its argument checks and its decode: the batch
-    the module sees, the canvas it fills, the original size the answer goes back to, the
-    letterbox that produced the canvas — whose ``allow_upscale`` the inverse must match —
-    and the canvas's anchor grid on the run device.
+    What every entry point holds between its argument checks and its decode: the batch the module sees, the canvas it
+    fills, the original size the answer goes back to, the letterbox that produced the canvas — whose ``allow_upscale``
+    the inverse must match — and the canvas's anchor grid on the run device.
     """
 
     batch: Tensor
@@ -329,12 +300,11 @@ def _prepare(
 ) -> _Prepared:
     """Run the preamble all four entry points share, up to the forward pass.
 
-    Refuses a checkpoint of another task by name, refuses out-of-domain arguments, reads
-    (or takes) and letterboxes the image, batches it onto the run device, puts the module there in
-    eval mode — the in-place move the module docstring's *Module ownership* describes —
-    and builds the canvas's anchor grid. One copy rather than four, so a fix to any step
-    reaches every task at once. The forward pass itself stays with each entry point,
-    because the segmentation one calls a different forward.
+    Refuses a checkpoint of another task by name, refuses out-of-domain arguments, reads (or takes) and letterboxes
+    the image, batches it onto the run device, puts the module there in eval mode — the in-place move the module
+    docstring's *Module ownership* describes — and builds the canvas's anchor grid. One copy rather than four,
+    so a fix to any step reaches every task at once. The forward pass itself stays with each entry point, because the
+    segmentation one calls a different forward.
     """
     if module.task != task:
         raise ValueError(_wrong_task_message(task, module.task))
@@ -362,39 +332,31 @@ def predict_image(
 ) -> Tensor:
     """Detect objects in one image and return them in original-image coordinates.
 
-    The image is letterboxed into an ``img_size`` square canvas, run through the module
-    once, decoded by the selected path, and mapped back onto the original pixel grid by
-    the exact analytic inverse of the letterbox that produced the canvas (A10). Rows
-    below ``conf_threshold`` are dropped, which also removes the score-zero padding rows
-    both decoders emit to keep their output shape fixed.
+    The image is letterboxed into an ``img_size`` square canvas, run through the module once, decoded by the selected
+    path, and mapped back onto the original pixel grid by the exact analytic inverse of the letterbox that produced
+    the canvas (A10). Rows below ``conf_threshold`` are dropped, which also removes the score-zero padding rows both
+    decoders emit to keep their output shape fixed.
 
     Args:
-        module: An eval-mode ``detect`` module, as
-            :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
+        module: An eval-mode ``detect`` module, as :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
             **Mutated in place** — see the module docstring's *Module ownership*.
-        image: Path to the image file to read, or an already-decoded ``(3, H, W)`` RGB
-            tensor: ``uint8``/``uint16`` codes, or floating point in ``[0, 1]``
-            (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`).
+        image: Path to the image file to read, or an already-decoded ``(3, H, W)`` RGB tensor: ``uint8``/``uint16``
+            codes, or floating point in ``[0, 1]`` (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`).
         img_size: Letterbox side the model sees. Defaults to ``640`` (R1 sec. 4.4).
-        decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one
-            branch, ``"nms"`` for the confidence-threshold plus class-wise suppression
-            path over the dense branch.
-        conf_threshold: Detections at or below this score are dropped. Defaults to
-            :data:`DEFAULT_CONF_THRESHOLD`.
+        decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one branch, ``"nms"`` for the
+            confidence-threshold plus class-wise suppression path over the dense branch.
+        conf_threshold: Detections at or below this score are dropped. Defaults to :data:`DEFAULT_CONF_THRESHOLD`.
         device: Device to run on. Defaults to CPU; the command resolves ``auto`` through
             :func:`~lucid_yolo.eval.checkpoint.pick_device` and passes the result.
 
     Returns:
-        A CPU tensor of shape ``(N, 6)`` whose rows are the A9 tuple
-        ``[x1, y1, x2, y2, score, class]`` in original-image pixels, score-descending.
-        ``class`` is a contiguous class index (see the module docstring).
+        A CPU tensor of shape ``(N, 6)`` whose rows are the A9 tuple ``[x1, y1, x2, y2, score, class]``
+        in original-image pixels, score-descending. ``class`` is a contiguous class index (see the module docstring).
 
     Raises:
-        ValueError: If the module's task is not ``detect``, naming the task it is; or if
-            ``decoder``, ``conf_threshold`` or ``img_size`` is outside its domain, per
-            :func:`_check_predict_arguments`.
-        ValueError: If a tensor ``image`` is not ``(3, H, W)``, or is floating point
-            outside ``[0, 1]``.
+        ValueError: If the module's task is not ``detect``, naming the task it is; or if ``decoder``,
+            ``conf_threshold`` or ``img_size`` is outside its domain, per :func:`_check_predict_arguments`.
+        ValueError: If a tensor ``image`` is not ``(3, H, W)``, or is floating point outside ``[0, 1]``.
         TypeError: If a tensor ``image`` holds signed integer or boolean values.
 
     Examples:
@@ -406,9 +368,8 @@ def predict_image(
     """
     prepared = _prepare(module, Task.DETECT, image, img_size, decoder, conf_threshold, device)
     with torch.no_grad():
-        # One branch, not both: the decode below reads a single branch's logits and boxes,
-        # and running the other one's stems only to drop them is the cost this asks the
-        # module not to pay.
+        # One branch, not both: the decode below reads a single branch's logits and boxes, and running the other one's
+        # stems only to drop them is the cost this asks the module not to pay.
         branch_out = module.forward_branch(prepared.batch, _branch_for(decoder))
     detections = _box_decoder(decoder, conf_threshold)(
         branch_out.cls, branch_out.box, prepared.anchor_points, prepared.strides
@@ -427,17 +388,15 @@ def predict_image(
 class SegmentedPrediction:
     """One image's detections and their instance masks, both in original coordinates.
 
-    A frozen pair rather than a bare tuple, because the two fields are only meaningful
-    **row-aligned**: mask ``n`` belongs to detection ``n``, and a tuple invites a caller
-    to pass one of them onward alone or to unpack the two the wrong way round. That
-    pairing is the failure this whole path is most exposed to — a mask attached to the
-    neighbouring object is a plausible answer no shape check catches — so it is stated in
-    a type rather than in a comment.
+    A frozen pair rather than a bare tuple, because the two fields are only meaningful **row-aligned**: mask ``n``
+    belongs to detection ``n``, and a tuple invites a caller to pass one of them onward alone or to unpack the two the
+    wrong way round. That pairing is the failure this whole path is most exposed to — a mask attached to the
+    neighbouring object is a plausible answer no shape check catches — so it is stated in a type rather than in
+    a comment.
 
     Attributes:
-        detections: A CPU tensor of shape ``(N, 6)`` whose rows are the A9 tuple
-            ``[x1, y1, x2, y2, score, class]`` in original-image pixels,
-            score-descending, exactly as :func:`predict_image` returns them.
+        detections: A CPU tensor of shape ``(N, 6)`` whose rows are the A9 tuple ``[x1, y1, x2, y2, score, class]`` in
+            original-image pixels, score-descending, exactly as :func:`predict_image` returns them.
         masks: Boolean instance masks ``(N, orig_height, orig_width)`` on the original
             pixel grid (A10), row ``n`` being detection ``n``'s. Each is already cropped
             to its own detection's box (A11) and binarized at the A37 threshold.
@@ -466,34 +425,28 @@ def predict_segmentation(
 ) -> SegmentedPrediction:
     """Segment objects in one image and return boxes and masks in original coordinates.
 
-    :func:`predict_image` plus Eq. 7, in the order
-    :class:`~lucid_yolo.eval.coco_eval.DualPathEvaluator` established and for its reason:
-    the model runs once, the selected path decodes boxes **and** reports the anchor each
-    row came from, each surviving detection's mask coefficients are gathered by *that*
-    index, the masks are assembled while the boxes are still on the letterboxed canvas
-    — which is the frame
-    :func:`~lucid_yolo.eval.segment_decode.decode_instance_masks` crops in — and only
-    then are boxes and masks each landed on the original pixel grid. Cropping after the
-    inverse letterbox would leave every box right and every mask quietly wrong.
+    :func:`predict_image` plus Eq. 7, in the order :class:`~lucid_yolo.eval.coco_eval.DualPathEvaluator` established
+    and for its reason: the model runs once, the selected path decodes boxes **and** reports the anchor each row came
+    from, each surviving detection's mask coefficients are gathered by *that* index, the masks are assembled while the
+    boxes are still on the letterboxed canvas — which is the frame
+    :func:`~lucid_yolo.eval.segment_decode.decode_instance_masks` crops in — and only then are boxes and masks each
+    landed on the original pixel grid. Cropping after the inverse letterbox would leave every box right and every mask
+    quietly wrong.
 
-    Rows below ``conf_threshold`` are dropped **before** the masks are assembled, which
-    is where this differs from the evaluator: the evaluator needs a fixed-length output
-    per image and pays for a mask per padding row, while a caller looking at one picture
-    wants a mask per object. At 640 px the difference is 300 canvas-resolution masks
-    instead of a handful, which is measured in hundreds of megabytes of transient float.
+    Rows below ``conf_threshold`` are dropped **before** the masks are assembled, which is where this differs from the
+    evaluator: the evaluator needs a fixed-length output per image and pays for a mask per padding row, while a caller
+    looking at one picture wants a mask per object. At 640 px the difference is 300 canvas-resolution masks instead of
+    a handful, which is measured in hundreds of megabytes of transient float.
 
     Args:
-        module: An eval-mode ``segment`` module, as
-            :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
+        module: An eval-mode ``segment`` module, as :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
             **Mutated in place** — see the module docstring's *Module ownership*.
-        image: Path to the image file to read, or an already-decoded ``(3, H, W)`` RGB
-            tensor: ``uint8``/``uint16`` codes, or floating point in ``[0, 1]``
-            (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`).
+        image: Path to the image file to read, or an already-decoded ``(3, H, W)`` RGB tensor: ``uint8``/``uint16``
+            codes, or floating point in ``[0, 1]`` (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`).
         img_size: Letterbox side the model sees. Defaults to ``640`` (R1 sec. 4.4).
-        decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one
-            branch, ``"nms"`` for the confidence-threshold plus class-wise suppression
-            path over the dense branch. The choice reaches the masks too: each path reads
-            the mask coefficients of its **own** branch.
+        decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one branch, ``"nms"`` for the
+            confidence-threshold plus class-wise suppression path over the dense branch. The choice reaches the masks
+            too: each path reads the mask coefficients of its **own** branch.
         conf_threshold: Detections at or below this score are dropped, with their masks.
             Defaults to :data:`DEFAULT_CONF_THRESHOLD`.
         device: Device to run on. Defaults to CPU; the command resolves ``auto`` through
@@ -504,12 +457,10 @@ def predict_segmentation(
         ``(N, orig_height, orig_width)`` boolean masks, row-aligned.
 
     Raises:
-        ValueError: If the module's task is not ``segment``, naming the task it is; if a
-            module claiming that task has no mask coefficients to decode; or if
-            ``decoder``, ``conf_threshold`` or ``img_size`` is outside its domain, per
-            :func:`_check_predict_arguments`.
-        ValueError: If a tensor ``image`` is not ``(3, H, W)``, or is floating point
-            outside ``[0, 1]``.
+        ValueError: If the module's task is not ``segment``, naming the task it is; if a module claiming that task
+            has no mask coefficients to decode; or if ``decoder``, ``conf_threshold`` or ``img_size`` is outside its
+            domain, per :func:`_check_predict_arguments`.
+        ValueError: If a tensor ``image`` is not ``(3, H, W)``, or is floating point outside ``[0, 1]``.
         TypeError: If a tensor ``image`` holds signed integer or boolean values.
 
     Examples:
@@ -521,16 +472,14 @@ def predict_segmentation(
     """
     prepared = _prepare(module, Task.SEGMENT, image, img_size, decoder, conf_threshold, device)
     with torch.no_grad():
-        # Called directly, with no forward-wrapper. The evaluator's `_SegmentationForward`
-        # exists because the evaluator decides *structurally* — by what the forward returns
-        # — whether to score masks, so it has to force the segmentation forward on a module
-        # whose `forward` hides it. This function has already dispatched on the
-        # checkpoint's own task, so a wrapper here would be a second spelling of a
-        # composition that deliberately exists once.
+        # Called directly, with no forward-wrapper. The evaluator's `_SegmentationForward` exists because the
+        # evaluator decides *structurally* — by what the forward returns — whether to score masks, so it has to force
+        # the segmentation forward on a module whose `forward` hides it. This function has already dispatched on the
+        # checkpoint's own task, so a wrapper here would be a second spelling of a composition that deliberately
+        # exists once.
         #
-        # The branch-limited twin, because Eq. 7 reads one branch's coefficients: the other
-        # branch's coefficient stem is the widest of the optional ones, and it used to be
-        # computed here and dropped.
+        # The branch-limited twin, because Eq. 7 reads one branch's coefficients: the other branch's coefficient stem
+        # is the widest of the optional ones, and it used to be computed here and dropped.
         branch_out, prototypes = module.forward_segmentation_branch(prepared.batch, _branch_for(decoder))
     missing = (
         f"this checkpoint's task is {Task.SEGMENT.value!r} but its head emits no mask coefficients on the "
@@ -556,11 +505,10 @@ def predict_segmentation(
 def _box_decoder(decoder: DecodePath, conf_threshold: float) -> TopKDecoder | NMSDecoder:
     """Build the axis-aligned decoder the named path reads its branch through.
 
-    Only the suppression path is given the threshold: it decides what enters
-    suppression, and a box the threshold drops could only ever have been suppressed
-    anyway, so the survivor set is unchanged and the sort is cheaper. The top-k path's
-    own threshold merely zeroes scores that every entry point's survivor filter drops
-    regardless, so handing it the number too would state the same cut in two places.
+    Only the suppression path is given the threshold: it decides what enters suppression, and a box the threshold
+    drops could only ever have been suppressed anyway, so the survivor set is unchanged and the sort is cheaper. The
+    top-k path's own threshold merely zeroes scores that every entry point's survivor filter drops regardless, so
+    handing it the number too would state the same cut in two places.
     """
     return TopKDecoder() if decoder == "e2e" else NMSDecoder(conf_threshold=conf_threshold)
 
@@ -599,17 +547,14 @@ def _decode_indexed(
     gathers each row's values by its own anchor, and one selection is then applied to
     the boxes and the gathered rows alike, so the two cannot drift apart by a row.
 
-    The values all come from one branch, chosen upstream by :func:`_branch_for`: the
-    module ran only that half, so a plausible mask or pose of a *different* object is
-    unrepresentable here — the other branch's values were never computed. ``decoder``
-    still selects the *decoder*, a separate choice from the branch, per
-    :func:`_box_decoder`.
+    The values all come from one branch, chosen upstream by :func:`_branch_for`: the module ran only that half, so a
+    plausible mask or pose of a *different* object is unrepresentable here — the other branch's values were never
+    computed. ``decoder`` still selects the *decoder*, a separate choice from the branch, per :func:`_box_decoder`.
 
-    The selection is predict's own and stays outside the shared decode: rows at or
-    below ``conf_threshold`` are dropped, and padding rows are excluded explicitly and
-    not merely by their score — a row with no source anchor is not a detection at any
-    threshold. The shared gather zeroes those rows rather than reading a real anchor's
-    values, and dropping them here is what keeps them out of the answer.
+    The selection is predict's own and stays outside the shared decode: rows at or below ``conf_threshold`` are
+    dropped, and padding rows are excluded explicitly and not merely by their score — a row with no source anchor is
+    not a detection at any threshold. The shared gather zeroes those rows rather than reading a real anchor's values,
+    and dropping them here is what keeps them out of the answer.
 
     Raises:
         ValueError: ``missing``, when the branch carries no per-anchor tensor.
@@ -636,16 +581,14 @@ def _canvas_masks(
 ) -> Tensor:
     """Assemble the surviving detections' masks on the letterboxed canvas.
 
-    ``coefficients`` and ``detections`` are the *same* rows in the same order — both
-    selected by :func:`_decode_indexed`'s one filter from the shared gather — so
-    coefficient row ``n`` belongs to box ``n``.
+    ``coefficients`` and ``detections`` are the *same* rows in the same order — both selected by
+    :func:`_decode_indexed`'s one filter from the shared gather — so coefficient row ``n`` belongs to box ``n``.
 
-    An image with nothing above the threshold returns an empty stack without decoding.
-    That is an optimisation and no longer a guard: :func:`decode_instance_masks` used to
-    raise here, because ``F.interpolate`` rejects a zero-length instance axis outright and
-    the evaluator never met that — its decoders always hand over a full 300 rows. WP-090b
-    fixed it at the source, so both callers now get the empty stack; this one gets it
-    without building the gather first.
+    An image with nothing above the threshold returns an empty stack without decoding. That is an optimisation and no
+    longer a guard: :func:`decode_instance_masks` used to raise here, because ``F.interpolate`` rejects a zero-length
+    instance axis outright and the evaluator never met that — its decoders always hand over a full 300 rows. WP-090b
+    fixed it at the source, so both callers now get the empty stack; this one gets it without building the gather
+    first.
     """
     if not detections.shape[0]:
         return prototypes.new_zeros((0, *canvas), dtype=torch.bool)
@@ -697,9 +640,8 @@ def predict_oriented(
         module: An eval-mode ``obb`` module, as
             :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
             **Mutated in place** — see the module docstring's *Module ownership*.
-        image: Path to the image file to read, or an already-decoded ``(3, H, W)`` RGB
-            tensor: ``uint8``/``uint16`` codes, or floating point in ``[0, 1]``
-            (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`).
+        image: Path to the image file to read, or an already-decoded ``(3, H, W)`` RGB tensor: ``uint8``/``uint16``
+            codes, or floating point in ``[0, 1]`` (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`).
         img_size: Letterbox side the model sees. Defaults to
             :data:`DEFAULT_ORIENTED_IMG_SIZE`, the 1024 px the oriented tier trains at
             (R18 sec. 4), not the 640 the COCO tiers use.
@@ -726,8 +668,7 @@ def predict_oriented(
             module claiming the task emits no angles on the branch the selected decoder
             reads; or if ``decoder``, ``conf_threshold`` or ``img_size`` is outside its
             domain, per :func:`_check_predict_arguments`.
-        ValueError: If a tensor ``image`` is not ``(3, H, W)``, or is floating point
-            outside ``[0, 1]``.
+        ValueError: If a tensor ``image`` is not ``(3, H, W)``, or is floating point outside ``[0, 1]``.
         TypeError: If a tensor ``image`` holds signed integer or boolean values.
 
     Examples:
@@ -800,16 +741,14 @@ def _decode_oriented(
 class KeypointPrediction:
     """One image's detections and their point sets, both in original coordinates.
 
-    A frozen pair for the same reason :class:`SegmentedPrediction` is one: the two
-    fields mean nothing apart. Point set ``n`` belongs to detection ``n``, and a bare
-    tuple invites a caller to carry one onward alone or unpack the two the wrong way
-    round -- a pose attached to the neighbouring object being a plausible answer that
-    no shape check catches.
+    A frozen pair for the same reason :class:`SegmentedPrediction` is one: the two fields mean nothing apart. Point set
+    ``n`` belongs to detection ``n``, and a bare tuple invites a caller to carry one onward alone or unpack the two
+    the wrong way round -- a pose attached to the neighbouring object being a plausible answer that no shape check
+    catches.
 
     Attributes:
-        detections: A CPU tensor of shape ``(N, 6)`` whose rows are the A9 tuple
-            ``[x1, y1, x2, y2, score, class]`` in original-image pixels,
-            score-descending, exactly as :func:`predict_image` returns them.
+        detections: A CPU tensor of shape ``(N, 6)`` whose rows are the A9 tuple ``[x1, y1, x2, y2, score, class]`` in
+            original-image pixels, score-descending, exactly as :func:`predict_image` returns them.
         keypoints: Point coordinates ``(N, K, 2)`` on the original pixel grid (A10),
             row ``n`` being detection ``n``'s. ``K`` is whatever the checkpoint's head
             predicts -- read from the decoded tensor, never assumed to be COCO's 17.
@@ -878,9 +817,8 @@ def predict_keypoints(
         module: An eval-mode ``keypoints`` module, as
             :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
             **Mutated in place** — see the module docstring's *Module ownership*.
-        image: Path to the image file to read, or an already-decoded ``(3, H, W)`` RGB
-            tensor: ``uint8``/``uint16`` codes, or floating point in ``[0, 1]``
-            (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`).
+        image: Path to the image file to read, or an already-decoded ``(3, H, W)`` RGB tensor: ``uint8``/``uint16``
+            codes, or floating point in ``[0, 1]`` (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`).
         img_size: Letterbox side the model sees. Defaults to ``640`` (R1 sec. 4.4).
         decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one
             branch, ``"nms"`` for the confidence-threshold plus class-wise suppression
@@ -900,8 +838,7 @@ def predict_keypoints(
             a module claiming that task emits no points on the selected branch; or if
             ``decoder``, ``conf_threshold`` or ``img_size`` is outside its domain, per
             :func:`_check_predict_arguments`.
-        ValueError: If a tensor ``image`` is not ``(3, H, W)``, or is floating point
-            outside ``[0, 1]``.
+        ValueError: If a tensor ``image`` is not ``(3, H, W)``, or is floating point outside ``[0, 1]``.
         TypeError: If a tensor ``image`` holds signed integer or boolean values.
 
     Examples:

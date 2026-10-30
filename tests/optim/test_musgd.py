@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the MuSGD hybrid Muon/SGD optimizer (WP-032).
 
-Covers the parameter-type split (the DoD test): vector parameters take a pure
-SGD-momentum step while matrix parameters take the orthogonalized Muon update.
-Also covers weight-decay routing (matrix params only), conv-kernel flattening,
-shape/finiteness preservation, state-dict round-trip, and skipping grad-less
-parameters.
+Covers the parameter-type split (the DoD test): vector parameters take a pure SGD-momentum step while matrix parameters
+take the orthogonalized Muon update. Also covers weight-decay routing (matrix params only), conv-kernel flattening,
+shape/finiteness preservation, state-dict round-trip, and skipping grad-less parameters.
 """
 
 from __future__ import annotations
@@ -20,11 +18,10 @@ from markers import requires_accelerator, requires_cuda
 from lucid_yolo.optim import MuSGD, orthogonalize
 from lucid_yolo.optim.newton_schulz import _orthogonalize_batched
 
-#: Whether this torch exposes ``Tensor.grad_dtype``, the supported way to hold a gradient in
-#: a dtype other than its parameter's. Below it, assigning such a gradient is refused
-#: outright and the case cannot be built. The project floor is ``torch>=2.4`` and the
-#: attribute is newer than that, so the one test needing it is gated on the capability
-#: rather than on a version number.
+#: Whether this torch exposes ``Tensor.grad_dtype``, the supported way to hold a gradient in a dtype other than its
+#: parameter's. Below it, assigning such a gradient is refused outright and the case cannot be built. The project floor
+#: is ``torch>=2.4`` and the attribute is newer than that, so the one test needing it is gated on the capability rather
+#: than on a version number.
 _GRAD_DTYPE_SUPPORTED = hasattr(torch.Tensor, "grad_dtype")
 
 
@@ -32,11 +29,10 @@ _GRAD_DTYPE_SUPPORTED = hasattr(torch.Tensor, "grad_dtype")
 def batching_on_every_device(monkeypatch: pytest.MonkeyPatch) -> None:
     """Widen the batching gate to every device type the suite runs on.
 
-    Production batches on CUDA alone, so a CPU-only machine would otherwise take
-    the per-parameter path through every one of the batching tests and prove
-    nothing about batching. Widening the gate keeps those tests exercising the
-    mapped path wherever they run; the narrow default is what
-    ``test_non_batching_device_keeps_per_parameter_path`` pins.
+    Production batches on CUDA alone, so a CPU-only machine would otherwise take the per-parameter path through every
+    one of the batching tests and prove nothing about batching. Widening the gate keeps those tests exercising the
+    mapped path wherever they run; the narrow default is what ``test_non_batching_device_keeps_per_parameter_path``
+    pins.
     """
     monkeypatch.setattr("lucid_yolo.optim.musgd._BATCHED_DEVICE_TYPES", frozenset({"cpu", "cuda", "mps"}))
 
@@ -61,13 +57,11 @@ def _param_with_grad(*shape: int) -> torch.nn.Parameter:
 class _FakeDeviceParameter(torch.nn.Parameter):
     """A real CPU-backed parameter that reports a caller-chosen fake ``.device``.
 
-    ``torch.randn(..., device=torch.device("cpu", N))`` collapses back to plain
-    ``"cpu"`` the moment a real tensor is allocated on it, so two genuinely
-    different device values cannot be produced from CPU tensors alone. This
-    subclass keeps the real CPU storage every arithmetic op needs and overrides
-    only the ``.device`` attribute :meth:`MuSGD._step_group` reads to build its
-    ``(shape, dtype, device)`` bucket key -- enough to prove that key's device
-    slot is load-bearing without a second real accelerator.
+    ``torch.randn(..., device=torch.device("cpu", N))`` collapses back to plain ``"cpu"`` the moment a real tensor is
+    allocated on it, so two genuinely different device values cannot be produced from CPU tensors alone. This subclass
+    keeps the real CPU storage every arithmetic op needs and overrides only the ``.device`` attribute
+    :meth:`MuSGD._step_group` reads to build its ``(shape, dtype, device)`` bucket key -- enough to prove that key's
+    device slot is load-bearing without a second real accelerator.
 
     Examples:
         >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
@@ -92,17 +86,14 @@ class _FakeDeviceParameter(torch.nn.Parameter):
 def _expected_muon_update(nesterov_grad: torch.Tensor, ns_steps: int) -> torch.Tensor:
     """Recompute the Muon branch by hand: scaled orthogonalization of the 2D view.
 
-    "By hand" is bounded, and the boundary is deliberate. The reshape to a 2D view and
-    the ``0.2 * sqrt(max(rows, cols))`` scale are re-derived here, so the assertions
-    below genuinely check what ``_matrix_update`` does with them; the Newton-Schulz
-    iteration itself is delegated to :func:`orthogonalize`, which makes that one factor
-    a comparison of the code against itself. It is left that way on purpose. Re-deriving
-    a five-step quintic iteration in the test would duplicate the algorithm rather than
-    check it, and a hand-copy that drifts from the production one is a false failure
-    waiting to happen; meanwhile ``orthogonalize`` carries thirteen tests of its own,
-    including orthogonality against known singular vectors, so it is verified elsewhere
-    rather than assumed here. The parts this helper could get wrong are the parts it
-    computes.
+    "By hand" is bounded, and the boundary is deliberate. The reshape to a 2D view and the ``0.2 * sqrt(max(rows,
+    cols))`` scale are re-derived here, so the assertions below genuinely check what ``_matrix_update`` does with them;
+    the Newton-Schulz iteration itself is delegated to :func:`orthogonalize`, which makes that one factor a comparison
+    of the code against itself. It is left that way on purpose. Re-deriving a five-step quintic iteration in the test
+    would duplicate the algorithm rather than check it, and a hand-copy that drifts from the production one is a false
+    failure waiting to happen; meanwhile ``orthogonalize`` carries thirteen tests of its own, including orthogonality
+    against known singular vectors, so it is verified elsewhere rather than assumed here. The parts this helper could
+    get wrong are the parts it computes.
 
     Examples:
         >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
@@ -119,12 +110,69 @@ def _expected_muon_update(nesterov_grad: torch.Tensor, ns_steps: int) -> torch.T
     return (0.2 * math.sqrt(max(rows, cols)) * orthogonal).reshape(nesterov_grad.shape)
 
 
+def _assert_matches_muon_sgd_step(
+    params: list[torch.nn.Parameter],
+    starts: list[torch.Tensor],
+    grads: list[torch.Tensor],
+    *,
+    lr: float = 0.05,
+    momentum: float = 0.95,
+    w_muon: float = 0.5,
+    w_sgd: float = 0.5,
+    weight_decay: float = 5e-4,
+    ns_steps: int = 5,
+) -> None:
+    """Assert each matrix parameter moved by the hand-computed first MuSGD step.
+
+    The first step has buffer ``g``, so the Nesterov gradient is ``(1 + momentum) * g`` and the update is the Muon term
+    scaled by ``w_muon`` plus the SGD term scaled by ``w_sgd`` plus decoupled decay. Keyword defaults are
+    :class:`MuSGD`'s own, so a caller names only the hyperparameters it changed.
+
+    Examples:
+        >>> param = _param_with_grad(4, 4)
+        >>> start, grad = param.detach().clone(), param.grad.clone()
+        >>> MuSGD([param], lr=0.05).step()
+        >>> _assert_matches_muon_sgd_step([param], [start], [grad])
+    """
+    for param, start, grad in zip(params, starts, grads, strict=True):
+        nesterov = (1.0 + momentum) * grad
+        expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
+        expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
+        torch.testing.assert_close(param.detach(), (start - lr * expected_update).to(param.dtype))
+
+
+def _assert_checkpoint_resumes_identically(original: list[torch.nn.Parameter]) -> None:
+    """Step, round-trip the optimizer state through ``torch.save``/``torch.load``, and assert the next step matches.
+
+    Examples:
+        >>> _assert_checkpoint_resumes_identically([_param_with_grad(3, 2)])
+    """
+    opt_a = MuSGD(original, lr=0.1)
+    opt_a.step()
+    checkpoint = io.BytesIO()
+    torch.save(opt_a.state_dict(), checkpoint)
+    resumed = [torch.nn.Parameter(param.detach().clone()) for param in original]
+    opt_b = MuSGD(resumed, lr=0.1)
+    checkpoint.seek(0)
+    opt_b.load_state_dict(torch.load(checkpoint, weights_only=True))
+
+    next_grads = [torch.randn_like(param) for param in original]
+    for param, grad in zip(original, next_grads, strict=True):
+        param.grad = grad.clone()
+    for param, grad in zip(resumed, next_grads, strict=True):
+        param.grad = grad.clone()
+    opt_a.step()
+    opt_b.step()
+
+    for param_a, param_b in zip(original, resumed, strict=True):
+        torch.testing.assert_close(param_a.detach(), param_b.detach())
+
+
 def test_param_split() -> None:
     """A 1D param takes a pure SGD-momentum step; a 2D param takes the Muon update.
 
-    With ``w_sgd=0`` and ``weight_decay=0`` the matrix branch is exactly the
-    orthogonalized-and-scaled Muon term, and the vector branch is exactly the
-    Nesterov SGD step ``-lr*(1+mu)*g`` -- isolating the split cleanly.
+    With ``w_sgd=0`` and ``weight_decay=0`` the matrix branch is exactly the orthogonalized-and-scaled Muon term, and
+    the vector branch is exactly the Nesterov SGD step ``-lr*(1+mu)*g`` -- isolating the split cleanly.
     """
     lr, momentum, w_muon, ns_steps = 0.1, 0.9, 0.7, 5
     vector = _param_with_grad(8)
@@ -196,30 +244,10 @@ def test_conv_kernel_flattens_and_reshapes() -> None:
 def test_state_dict_roundtrip() -> None:
     """A serialized checkpoint reproduces the momentum buffer: the next step matches.
 
-    Uses a real ``torch.save``/``torch.load`` round-trip (the actual checkpoint
-    use case); this also decouples the resumed optimizer's buffer from the
-    original's in-place updates.
+    Uses a real ``torch.save``/``torch.load`` round-trip (the actual checkpoint use case); this also decouples the
+    resumed optimizer's buffer from the original's in-place updates.
     """
-    original = [_param_with_grad(8), _param_with_grad(6, 4)]
-    opt_a = MuSGD(original, lr=0.1)
-    opt_a.step()
-    checkpoint = io.BytesIO()
-    torch.save(opt_a.state_dict(), checkpoint)
-    resumed = [torch.nn.Parameter(p.detach().clone()) for p in original]
-    opt_b = MuSGD(resumed, lr=0.1)
-    checkpoint.seek(0)
-    opt_b.load_state_dict(torch.load(checkpoint, weights_only=True))
-
-    next_grads = [torch.randn_like(p) for p in original]
-    for param, grad in zip(original, next_grads, strict=True):
-        param.grad = grad.clone()
-    for param, grad in zip(resumed, next_grads, strict=True):
-        param.grad = grad.clone()
-    opt_a.step()
-    opt_b.step()
-
-    for param_a, param_b in zip(original, resumed, strict=True):
-        torch.testing.assert_close(param_a.detach(), param_b.detach())
+    _assert_checkpoint_resumes_identically([_param_with_grad(8), _param_with_grad(6, 4)])
 
 
 def test_zero_grad_param_skipped() -> None:
@@ -238,18 +266,15 @@ def test_zero_grad_param_skipped() -> None:
 class TestExactShapeBatching:
     """Equal-shape matrices share one Newton--Schulz call without sharing state.
 
-    Shape, both dtypes and device are the complete batching key: every operation
-    inside :meth:`MuSGD._batched_parameter_update` is elementwise or acts on the
-    final two matrix axes, so a leading batch axis cannot mix parameters that agree.
-    Both dtypes, because the gradients are stacked as well as the parameters and
-    the two need not match. These tests compare the result with separate
-    per-parameter calls and count the production call boundary, since values alone
-    cannot prove that the separate launches are gone.
+    Shape, both dtypes and device are the complete batching key: every operation inside
+    :meth:`MuSGD._batched_parameter_update` is elementwise or acts on the final two matrix axes, so a leading batch axis
+    cannot mix parameters that agree. Both dtypes, because the gradients are stacked as well as the parameters and the
+    two need not match. These tests compare the result with separate per-parameter calls and count the production call
+    boundary, since values alone cannot prove that the separate launches are gone.
 
-    Which devices take that key is a separate question from what the key is, and
-    the two are tested separately: every test here but the last asks the fixture
-    to widen the device gate, so the key is exercised on whatever device the suite
-    runs on, and the last one asks what an un-widened gate does.
+    Which devices take that key is a separate question from what the key is, and the two are tested separately: every
+    test here but the last asks the fixture to widen the device gate, so the key is exercised on whatever device the
+    suite runs on, and the last one asks what an un-widened gate does.
     """
 
     def _count_orthogonalize_calls(self, monkeypatch: pytest.MonkeyPatch) -> list[tuple[torch.Size, torch.dtype]]:
@@ -277,10 +302,9 @@ class TestExactShapeBatching:
     ) -> None:
         """Three equal conv kernels become one call and retain three independent answers.
 
-        ``ns_steps`` is varied because the batched path must forward the group's
-        iteration count to the native batch. The helper's default is five, so a
-        run at five alone cannot tell a forwarded count from a dropped one; one
-        and three iterations land on visibly different matrices.
+        ``ns_steps`` is varied because the batched path must forward the group's iteration count to the native batch.
+        The helper's default is five, so a run at five alone cannot tell a forwarded count from a dropped one; one and
+        three iterations land on visibly different matrices.
         """
         lr, momentum, w_muon, w_sgd, weight_decay = 0.03, 0.8, 0.6, 0.4, 0.02
         kernels = [_param_with_grad(5, 3, 3, 3) for _ in range(3)]
@@ -300,21 +324,25 @@ class TestExactShapeBatching:
         opt.step()
 
         assert calls == [(torch.Size([5, 27]), torch.float32)]
-        for param, start, grad in zip(kernels, starts, grads, strict=True):
-            nesterov = (1.0 + momentum) * grad
-            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
-            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
-            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+        _assert_matches_muon_sgd_step(
+            kernels,
+            starts,
+            grads,
+            lr=lr,
+            momentum=momentum,
+            w_muon=w_muon,
+            w_sgd=w_sgd,
+            weight_decay=weight_decay,
+            ns_steps=ns_steps,
+        )
 
     @pytest.mark.usefixtures("batching_on_every_device")
     def test_orientation_shares_batch_while_dtype_stays_separate(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Opposite orientations share a wide batch; float64 stays separate and each value matches unbatched.
 
-        Values are checked against the same `_expected_muon_update` construction the
-        equal-shape test uses, so the boundary is proven on outcomes, not only on the
-        recorded call sites.
+        Values are checked against the same `_expected_muon_update` construction the equal-shape test uses, so the
+        boundary is proven on outcomes, not only on the recorded call sites.
         """
-        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
         double_param = torch.nn.Parameter(torch.randn(6, 4, dtype=torch.float64))
         double_param.grad = torch.randn_like(double_param)
         params = [
@@ -326,7 +354,7 @@ class TestExactShapeBatching:
         starts = [param.detach().clone() for param in params]
         grads = [param.grad.clone() for param in params]
         calls = self._count_orthogonalize_calls(monkeypatch)
-        opt = MuSGD(params, lr=lr)
+        opt = MuSGD(params, lr=0.05)
 
         opt.step()
 
@@ -335,16 +363,11 @@ class TestExactShapeBatching:
             (torch.Size([6, 4]), torch.float64),
         ]
         assert [param.dtype for param in params] == [torch.float32, torch.float32, torch.float32, torch.float64]
-        for param, start, grad in zip(params, starts, grads, strict=True):
-            nesterov = (1.0 + momentum) * grad
-            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
-            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
-            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+        _assert_matches_muon_sgd_step(params, starts, grads)
 
     @pytest.mark.usefixtures("batching_on_every_device")
     def test_parameter_groups_never_share_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Equal matrices with different group options keep separate update calls and separate values."""
-        lr, momentum, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 5e-4, 5
         left = _param_with_grad(6, 4)
         right = _param_with_grad(6, 4)
         starts = [left.detach().clone(), right.detach().clone()]
@@ -355,7 +378,7 @@ class TestExactShapeBatching:
                 {"params": [left], "w_muon": 0.2},
                 {"params": [right], "w_muon": 0.8},
             ],
-            lr=lr,
+            lr=0.05,
         )
 
         opt.step()
@@ -364,17 +387,13 @@ class TestExactShapeBatching:
             (torch.Size([6, 4]), torch.float32),
             (torch.Size([6, 4]), torch.float32),
         ]
-        for param, start, grad, w_muon in zip([left, right], starts, grads, [0.2, 0.8], strict=True):
-            nesterov = (1.0 + momentum) * grad
-            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
-            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
-            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+        _assert_matches_muon_sgd_step([left], starts[:1], grads[:1], w_muon=0.2)
+        _assert_matches_muon_sgd_step([right], starts[1:], grads[1:], w_muon=0.8)
 
     @requires_accelerator
     @pytest.mark.usefixtures("batching_on_every_device")
     def test_device_boundary_forms_separate_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Equal shape and dtype on different devices never share a batch."""
-        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
         cpu_param = _param_with_grad(6, 4)
         accelerator_device = torch.device("cuda" if torch.cuda.is_available() else "mps")
         accelerator_param = torch.nn.Parameter(torch.randn(6, 4, device=accelerator_device))
@@ -383,7 +402,7 @@ class TestExactShapeBatching:
         starts = [param.detach().clone() for param in params]
         grads = [param.grad.clone() for param in params]
         calls = self._count_orthogonalize_calls(monkeypatch)
-        opt = MuSGD(params, lr=lr)
+        opt = MuSGD(params, lr=0.05)
 
         opt.step()
 
@@ -391,31 +410,22 @@ class TestExactShapeBatching:
             (torch.Size([6, 4]), torch.float32),
             (torch.Size([6, 4]), torch.float32),
         ]
-        for param, start, grad in zip(params, starts, grads, strict=True):
-            nesterov = (1.0 + momentum) * grad
-            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
-            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
-            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+        _assert_matches_muon_sgd_step(params, starts, grads)
 
     @pytest.mark.skipif(not _GRAD_DTYPE_SUPPORTED, reason="torch.Tensor.grad_dtype postdates the torch>=2.4 floor")
     @pytest.mark.usefixtures("batching_on_every_device")
     def test_gradient_dtype_of_own_forms_separate_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Two float32 matrices whose gradients differ in dtype are stacked apart.
 
-        ``_nesterov_grad`` returns ``grad.add(buffer)``, which promotes, so a
-        float64 gradient on a float32 parameter yields a float64 Nesterov gradient
-        while its same-shape, same-dtype neighbour yields a float32 one. Only the
-        parameters agree; the gradients are stacked too. ``torch.stack`` promotes
-        a mixed pair rather than refusing it, so the neighbour would be computed at
-        a precision its own path never chose and nothing would say so -- the failure
-        this key separation removes is silent, which is why it is worth a key field
-        rather than an assertion.
+        ``_nesterov_grad`` returns ``grad.add(buffer)``, which promotes, so a float64 gradient on a float32 parameter
+        yields a float64 Nesterov gradient while its same-shape, same-dtype neighbour yields a float32 one. Only the
+        parameters agree; the gradients are stacked too. ``torch.stack`` promotes a mixed pair rather than refusing it,
+        so the neighbour would be computed at a precision its own path never chose and nothing would say so -- the
+        failure this key separation removes is silent, which is why it is worth a key field rather than an assertion.
 
-        The gradient is assigned through ``grad_dtype``, which is the supported way
-        to hold a gradient in a dtype other than its parameter's and the reason this
-        case is reachable at all.
+        The gradient is assigned through ``grad_dtype``, which is the supported way to hold a gradient in a dtype other
+        than its parameter's and the reason this case is reachable at all.
         """
-        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
         promoting = torch.nn.Parameter(torch.randn(6, 4))
         promoting.grad_dtype = None  # accept a gradient wider than the parameter
         promoting.grad = torch.randn(6, 4, dtype=torch.float64)
@@ -423,7 +433,7 @@ class TestExactShapeBatching:
         starts = [param.detach().clone() for param in params]
         grads = [param.grad.clone() for param in params]
         calls = self._count_orthogonalize_calls(monkeypatch)
-        opt = MuSGD(params, lr=lr)
+        opt = MuSGD(params, lr=0.05)
 
         opt.step()
 
@@ -432,25 +442,18 @@ class TestExactShapeBatching:
             (torch.Size([6, 4]), torch.float32),
         ]
         assert [param.dtype for param in params] == [torch.float32, torch.float32]
-        for param, start, grad in zip(params, starts, grads, strict=True):
-            nesterov = (1.0 + momentum) * grad
-            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
-            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
-            torch.testing.assert_close(param.detach(), (start - lr * expected_update).to(param.dtype))
+        _assert_matches_muon_sgd_step(params, starts, grads)
 
     def test_device_boundary_forms_separate_batch_on_cpu_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Two equal-shape, equal-dtype params on different ``.device`` values never share a batch.
 
-        ``test_device_boundary_forms_separate_batch`` above is the only test of
-        this invariant and is ``@pytest.mark.gpu``-only, so it never runs in the
-        default CPU-only CI matrix. A real second CPU tensor cannot carry a
-        genuinely different device value -- ``torch.randn(..., device=("cpu", 1))``
-        collapses back to plain ``"cpu"`` the moment the tensor is allocated -- so
-        this test tags one of two identical CPU tensors with a fake ``.device``
-        via :class:`_FakeDeviceParameter`, proving the device slot of the
-        ``(shape, dtype, device)`` bucket key is load-bearing without hardware.
+        ``test_device_boundary_forms_separate_batch`` above is the only test of this invariant and is
+        ``@pytest.mark.gpu``-only, so it never runs in the default CPU-only CI matrix. A real second CPU tensor cannot
+        carry a genuinely different device value -- ``torch.randn(..., device=("cpu", 1))`` collapses back to plain
+        ``"cpu"`` the moment the tensor is allocated -- so this test tags one of two identical CPU tensors with a fake
+        ``.device`` via :class:`_FakeDeviceParameter`, proving the device slot of the ``(shape, dtype, device)`` bucket
+        key is load-bearing without hardware.
         """
-        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
         real_cpu_param = _param_with_grad(6, 4)
         tagged_param = _FakeDeviceParameter(torch.randn(6, 4), torch.device("cpu", 1))
         tagged_param.grad = torch.randn(6, 4)
@@ -458,7 +461,7 @@ class TestExactShapeBatching:
         starts = [param.detach().clone() for param in params]
         grads = [param.grad.clone() for param in params]
         calls = self._count_orthogonalize_calls(monkeypatch)
-        opt = MuSGD(params, lr=lr)
+        opt = MuSGD(params, lr=0.05)
 
         opt.step()
 
@@ -466,11 +469,7 @@ class TestExactShapeBatching:
             (torch.Size([6, 4]), torch.float32),
             (torch.Size([6, 4]), torch.float32),
         ]
-        for param, start, grad in zip(params, starts, grads, strict=True):
-            nesterov = (1.0 + momentum) * grad
-            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
-            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
-            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+        _assert_matches_muon_sgd_step(params, starts, grads)
 
     def _count_native_batch_calls(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
         """Install a counting wrapper around the native batched orthogonalization."""
@@ -497,28 +496,21 @@ class TestExactShapeBatching:
     ) -> None:
         """A bucket holding one parameter reaches the update directly; two take one batch.
 
-        A single-element batch has nothing to combine and is not free: it pays a stack
-        and an unbind to wrap the one call it makes, and it returns a value
-        that is no longer bit-for-bit the direct call's. Ten of the n-scale
-        detector's buckets hold one parameter, so this is the common case rather
-        than the corner one, and the batch count is what separates the two paths --
-        the recorded orthogonalization shape is the same either way.
+        A single-element batch has nothing to combine and is not free: it pays a stack and an unbind to wrap the one
+        call it makes, and it returns a value that is no longer bit-for-bit the direct call's. Ten of the n-scale
+        detector's buckets hold one parameter, so this is the common case rather than the corner one, and the batch
+        count is what separates the two paths -- the recorded orthogonalization shape is the same either way.
         """
-        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
         matrices = [_param_with_grad(6, 4) for _ in range(matrix_count)]
         starts = [param.detach().clone() for param in matrices]
         grads = [param.grad.clone() for param in matrices]
         batches = self._count_native_batch_calls(monkeypatch)
-        opt = MuSGD(matrices, lr=lr)
+        opt = MuSGD(matrices, lr=0.05)
 
         opt.step()
 
         assert batches[0] == expected_batches
-        for param, start, grad in zip(matrices, starts, grads, strict=True):
-            nesterov = (1.0 + momentum) * grad
-            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
-            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
-            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+        _assert_matches_muon_sgd_step(matrices, starts, grads)
 
     @requires_cuda
     def test_native_batch_runs_through_production_cuda_gate(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -543,13 +535,11 @@ class TestExactShapeBatching:
     def test_non_batching_device_keeps_per_parameter_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Three equal CPU kernels take three separate orthogonalizations, at the same values.
 
-        Batching is not free and not uniformly profitable: it buys one large kernel
-        launch in place of many, which the measurement found to be a win on CUDA and
-        a loss on MPS, where the mapped path ran at 108.45 ms per optimizer step
-        against 60.99 ms for the per-parameter loop. CPU is outside the gate for the
-        same reason, and this is the test that would fail if the gate were dropped or
-        widened again -- the call count is the only observable that separates the two
-        paths, since the values below hold either way.
+        Batching is not free and not uniformly profitable: it buys one large kernel launch in place of many, which the
+        measurement found to be a win on CUDA and a loss on MPS, where the mapped path ran at 108.45 ms per optimizer
+        step against 60.99 ms for the per-parameter loop. CPU is outside the gate for the same reason, and this is the
+        test that would fail if the gate were dropped or widened again -- the call count is the only observable that
+        separates the two paths, since the values below hold either way.
         """
         lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.03, 0.8, 0.6, 0.4, 0.02, 5
         kernels = [_param_with_grad(5, 3, 3, 3) for _ in range(3)]
@@ -569,25 +559,28 @@ class TestExactShapeBatching:
         opt.step()
 
         assert calls == [(torch.Size([5, 27]), torch.float32)] * 3
-        for param, start, grad in zip(kernels, starts, grads, strict=True):
-            nesterov = (1.0 + momentum) * grad
-            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
-            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
-            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+        _assert_matches_muon_sgd_step(
+            kernels,
+            starts,
+            grads,
+            lr=lr,
+            momentum=momentum,
+            w_muon=w_muon,
+            w_sgd=w_sgd,
+            weight_decay=weight_decay,
+            ns_steps=ns_steps,
+        )
 
     @pytest.mark.usefixtures("batching_on_every_device")
     def test_interleaved_vector_and_matrix_params_reassemble(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Vectors interleaved between equal-shape matrices land at the right param after batching.
 
-        ``_step_group`` routes each non-batchable param (a vector) straight to
-        ``_parameter_update`` and buckets each batchable matrix by
-        ``(shape, dtype, grad_dtype, device)`` in a ``defaultdict`` keyed on
-        ``_BucketKey``, each bucket holding a list of ``_PendingUpdate`` with a
-        direct reference back to its own param. A group ordered
-        ``[bias, kernel_a, bias2, kernel_b]`` pins that the two vectors update via
-        the unbatched path while ``kernel_a``/``kernel_b`` batch together and each
-        write back to its own param, not the other's. Every existing batching test
-        uses an all-matrix list, so this path was previously unpinned.
+        ``_step_group`` routes each non-batchable param (a vector) straight to ``_parameter_update`` and buckets each
+        batchable matrix by ``(shape, dtype, grad_dtype, device)`` in a ``defaultdict`` keyed on ``_BucketKey``, each
+        bucket holding a list of ``_PendingUpdate`` with a direct reference back to its own param. A group ordered
+        ``[bias, kernel_a, bias2, kernel_b]`` pins that the two vectors update via the unbatched path while
+        ``kernel_a``/``kernel_b`` batch together and each write back to its own param, not the other's. Every existing
+        batching test uses an all-matrix list, so this path was previously unpinned.
         """
         lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.9, 0.6, 0.4, 0.01, 5
         bias = _param_with_grad(4)
@@ -614,20 +607,26 @@ class TestExactShapeBatching:
         for index in (0, 2):  # vector slots: pure Nesterov SGD, no weight decay
             expected = starts[index] - lr * (1.0 + momentum) * grads[index]
             torch.testing.assert_close(params[index].detach(), expected)
-        for index in (1, 3):  # matrix slots: batched Muon+SGD+decay, reassembled by index
-            nesterov = (1.0 + momentum) * grads[index]
-            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
-            expected_update.add_(nesterov, alpha=w_sgd).add_(starts[index], alpha=weight_decay)
-            torch.testing.assert_close(params[index].detach(), starts[index] - lr * expected_update)
+        # matrix slots: batched Muon+SGD+decay, reassembled by index
+        _assert_matches_muon_sgd_step(
+            [params[1], params[3]],
+            [starts[1], starts[3]],
+            [grads[1], grads[3]],
+            lr=lr,
+            momentum=momentum,
+            w_muon=w_muon,
+            w_sgd=w_sgd,
+            weight_decay=weight_decay,
+            ns_steps=ns_steps,
+        )
 
     @pytest.mark.usefixtures("batching_on_every_device")
     def test_large_bucket_reassembles_every_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A bucket of eight equal-shape matrices reassembles every element correctly.
 
-        Every other batching test caps at two or three elements, while a
-        real n-scale deployment reaches roughly six to ten equal-shape matrices
-        per bucket. The ``zip(..., strict=True)`` reassembly in ``_step_group``
-        is untested at that scale before this test.
+        Every other batching test caps at two or three elements, while a real n-scale deployment reaches roughly six
+        to ten equal-shape matrices per bucket. The ``zip(..., strict=True)`` reassembly in ``_step_group`` is untested
+        at that scale before this test.
         """
         lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.03, 0.8, 0.6, 0.4, 0.02, 5
         kernels = [_param_with_grad(4, 4) for _ in range(8)]
@@ -647,66 +646,45 @@ class TestExactShapeBatching:
         opt.step()
 
         assert calls == [(torch.Size([4, 4]), torch.float32)]
-        for param, start, grad in zip(kernels, starts, grads, strict=True):
-            nesterov = (1.0 + momentum) * grad
-            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
-            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
-            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+        _assert_matches_muon_sgd_step(
+            kernels,
+            starts,
+            grads,
+            lr=lr,
+            momentum=momentum,
+            w_muon=w_muon,
+            w_sgd=w_sgd,
+            weight_decay=weight_decay,
+            ns_steps=ns_steps,
+        )
 
     @pytest.mark.usefixtures("batching_on_every_device")
     def test_state_dict_roundtrip_through_multi_element_bucket(self) -> None:
         """A checkpoint saved mid-batch restores each parameter's own momentum buffer, not a mixed one.
 
-        ``test_state_dict_roundtrip`` at module scope only routes through a
-        singleton bucket. Momentum buffers are keyed by parameter identity
-        before bucketing runs, so this is expected to be unaffected by batching
-        -- but that expectation was previously unpinned once two or more
-        equal-shape matrices share a batch.
+        ``test_state_dict_roundtrip`` at module scope only routes through a singleton bucket. Momentum buffers are keyed
+        by parameter identity before bucketing runs, so this is expected to be unaffected by batching -- but that
+        expectation was previously unpinned once two or more equal-shape matrices share a batch.
         """
-        original = [_param_with_grad(6, 4) for _ in range(3)]
-        opt_a = MuSGD(original, lr=0.1)
-        opt_a.step()
-        checkpoint = io.BytesIO()
-        torch.save(opt_a.state_dict(), checkpoint)
-        resumed = [torch.nn.Parameter(param.detach().clone()) for param in original]
-        opt_b = MuSGD(resumed, lr=0.1)
-        checkpoint.seek(0)
-        opt_b.load_state_dict(torch.load(checkpoint, weights_only=True))
-
-        next_grads = [torch.randn_like(param) for param in original]
-        for param, grad in zip(original, next_grads, strict=True):
-            param.grad = grad.clone()
-        for param, grad in zip(resumed, next_grads, strict=True):
-            param.grad = grad.clone()
-        opt_a.step()
-        opt_b.step()
-
-        for param_a, param_b in zip(original, resumed, strict=True):
-            torch.testing.assert_close(param_a.detach(), param_b.detach())
+        _assert_checkpoint_resumes_identically([_param_with_grad(6, 4) for _ in range(3)])
 
     @pytest.mark.usefixtures("batching_on_every_device")
     @pytest.mark.parametrize("weight_decay", [5e-4, 0.0])
     def test_batched_trajectory_matches_unbatched_reference_over_many_steps(self, weight_decay: float) -> None:
         """Divergence between the batched and unbatched paths stays within a tight bound over 40 steps.
 
-        Every other batching test in this class compares a single step. The PR
-        introducing exact-shape batching reports that floating-point
-        reassociation inside the batched products grows the gap between batched and
-        unbatched runs with step count -- "max difference from the old loop
-        after 60 local CUDA steps is 3.814697e-06; after 35 CPU steps it is
-        1.192093e-06" -- so a single-step comparison cannot catch a regression
-        that only compounds over a real training run. This test runs the
-        production batched path (``opt.step()`` on equal-shape matrices) and an
-        unbatched reference (direct :meth:`MuSGD._parameter_update` calls) side by
-        side for 40 steps with the same fixed per-parameter
-        gradients each step, and asserts the worst per-step divergence never
-        exceeds ``1e-5`` -- a bound comfortably above the PR's own reported
-        1.192093e-06-after-35-CPU-steps figure, tight enough to catch a
+        Every other batching test in this class compares a single step. The PR introducing exact-shape batching reports
+        that floating-point reassociation inside the batched products grows the gap between batched and unbatched runs
+        with step count -- "max difference from the old loop after 60 local CUDA steps is 3.814697e-06; after 35 CPU
+        steps it is 1.192093e-06" -- so a single-step comparison cannot catch a regression that only compounds over a
+        real training run. This test runs the production batched path (``opt.step()`` on equal-shape matrices) and an
+        unbatched reference (direct :meth:`MuSGD._parameter_update` calls) side by side for 40 steps with the same fixed
+        per-parameter gradients each step, and asserts the worst per-step divergence never exceeds ``1e-5`` -- a bound
+        comfortably above the PR's own reported 1.192093e-06-after-35-CPU-steps figure, tight enough to catch a
         regression that reintroduces or worsens the reassociation gap.
 
-        This is also the drift guard between the batched update and
-        :meth:`MuSGD._parameter_update`, which hold separate copies of the same
-        expression. It runs with and without decoupled decay so that both sides of the
+        This is also the drift guard between the batched update and :meth:`MuSGD._parameter_update`, which hold separate
+        copies of the same expression. It runs with and without decoupled decay so that both sides of the
         ``weight_decay != 0`` branch in each copy are compared.
         """
         lr, momentum, w_muon, w_sgd, ns_steps = 0.05, 0.9, 0.5, 0.5, 5
@@ -745,10 +723,9 @@ class TestExactShapeBatching:
 class TestZeroMuonGain:
     """The ``w_muon = 0`` arm skips the Muon branch instead of computing and discarding it.
 
-    A7's gains are independent, so ``w_muon = 0`` is a usable SGD-only arm rather
-    than a degenerate configuration. It used to run the full Newton-Schulz
-    iteration for every matrix parameter and then multiply the result by zero --
-    on the n-scale detector, 127 orthogonalizations per step for nothing.
+    A7's gains are independent, so ``w_muon = 0`` is a usable SGD-only arm rather than a degenerate configuration. It
+    used to run the full Newton-Schulz iteration for every matrix parameter and then multiply the result by zero -- on
+    the n-scale detector, 127 orthogonalizations per step for nothing.
     """
 
     def _count_orthogonalize_calls(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
@@ -775,9 +752,8 @@ class TestZeroMuonGain:
     ) -> None:
         """One matrix parameter triggers one orthogonalization at ``w_muon > 0`` and none at zero.
 
-        The zero case is the regression: before the short-circuit the iteration
-        ran and its result was scaled to nothing, so the call count -- not the
-        parameter value -- is what distinguishes the two implementations.
+        The zero case is the regression: before the short-circuit the iteration ran and its result was scaled to
+        nothing, so the call count -- not the parameter value -- is what distinguishes the two implementations.
         """
         tally = self._count_orthogonalize_calls(monkeypatch)
         matrix = _param_with_grad(6, 4)
@@ -790,10 +766,9 @@ class TestZeroMuonGain:
     def test_zero_gain_update_pure_sgd_step_with_weight_decay(self) -> None:
         """At ``w_muon = 0`` a matrix parameter moves by exactly ``-lr*(w_sgd*nesterov + wd*w)``.
 
-        The skipped branch must be worth exactly zero, which is what makes
-        skipping it a performance change and not a numerical one: the surviving
-        terms are the SGD half and the decoupled decay, and both are asserted
-        against hand-written arithmetic rather than against the old code path.
+        The skipped branch must be worth exactly zero, which is what makes skipping it a performance change and not a
+        numerical one: the surviving terms are the SGD half and the decoupled decay, and both are asserted against
+        hand-written arithmetic rather than against the old code path.
         """
         lr, momentum, w_sgd, weight_decay = 0.1, 0.9, 0.4, 0.2
         matrix = _param_with_grad(6, 4)
@@ -809,12 +784,10 @@ class TestZeroMuonGain:
     def test_zero_gain_skips_batching_for_multiple_equal_shape_matrices(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Two or more equal-shape matrices at ``w_muon = 0`` all take the scalar path, never a shared batch.
 
-        ``_step_group``'s bucket-membership test is ``ndim < 2 or w_muon == 0.0``:
-        at zero Muon gain a matrix parameter never enters ``matrix_buckets``
-        regardless of how many peers share its shape. ``test_newton_schulz_runs_
-        only_for_a_nonzero_gain`` above only covers a single matrix parameter;
-        this extends the same zero-call invariant to three equal-shape matrices
-        that would otherwise be eligible to batch together.
+        ``_step_group``'s bucket-membership test is ``ndim < 2 or w_muon == 0.0``: at zero Muon gain a matrix parameter
+        never enters ``matrix_buckets`` regardless of how many peers share its shape. ``test_newton_schulz_runs_
+        only_for_a_nonzero_gain`` above only covers a single matrix parameter; this extends the same zero-call
+        invariant to three equal-shape matrices that would otherwise be eligible to batch together.
         """
         lr, momentum, w_sgd, weight_decay = 0.1, 0.9, 0.4, 0.2
         matrices = [_param_with_grad(6, 4) for _ in range(3)]
@@ -834,9 +807,8 @@ class TestZeroMuonGain:
     def test_zero_gain_leaves_vector_parameter_on_own_path(self) -> None:
         """A 1D parameter takes the same pure Nesterov SGD step whatever ``w_muon`` says.
 
-        The short-circuit sits in the matrix branch, and the rank split above it
-        is unchanged: a vector parameter never reached the Muon branch and must
-        still move by ``-lr*(1+mu)*g``, with no weight decay (A12).
+        The short-circuit sits in the matrix branch, and the rank split above it is unchanged: a vector parameter never
+        reached the Muon branch and must still move by ``-lr*(1+mu)*g``, with no weight decay (A12).
         """
         lr, momentum = 0.1, 0.9
         vector = _param_with_grad(8)
@@ -868,12 +840,10 @@ class TestConstructorValidation:
     def test_invalid_hyperparameters_raise(self, kwargs: dict[str, float], match: str) -> None:
         """Each out-of-range hyperparameter raises ValueError with a descriptive message.
 
-        The two gains joined the four originals at WP-171: they were the only
-        constructor arguments unchecked, so a negative gain -- which subtracts its
-        branch's update instead of adding it -- and a NaN gain -- which turns every
-        matrix parameter it touches into NaN on the first step -- both constructed
-        cleanly and failed, if at all, as a loss curve rather than as an error. NaN
-        needs the explicit case because ``w_muon < 0.0`` is false for it.
+        The two gains joined the four originals at WP-171: they were the only constructor arguments unchecked, so a
+        negative gain -- which subtracts its branch's update instead of adding it -- and a NaN gain -- which turns every
+        matrix parameter it touches into NaN on the first step -- both constructed cleanly and failed, if at all, as a
+        loss curve rather than as an error. NaN needs the explicit case because ``w_muon < 0.0`` is false for it.
         """
         param = torch.nn.Parameter(torch.randn(4, 4))
 

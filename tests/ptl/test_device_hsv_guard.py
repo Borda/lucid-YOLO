@@ -24,8 +24,8 @@ from lucid_yolo.data.augment import HSVParams
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.ptl.datamodule import DetectionDataModule, _DeferredHSVSample, collate_detection, unpack_batch
 
-#: Real plugins that accept an allowlisted precision label yet cast floating batch inputs:
-#: FSDP narrows the float64 gains to float32, DeepSpeed's mixed modes also halve the images.
+#: Real plugins that accept an allowlisted precision label yet cast floating batch inputs: FSDP narrows the float64
+#: gains to float32, DeepSpeed's mixed modes also halve the images.
 _CASTING_PLUGINS = [
     pytest.param(
         partial(FSDPPrecision, "16-mixed"),
@@ -77,9 +77,9 @@ def _cuda_trainer(plugin: Precision) -> SimpleNamespace:
 def test_casting_plugin_keeps_worker_hsv(detseg_fixture_dir: Path, make_plugin: Callable[[], Precision]) -> None:
     """A plugin that casts the transport under an allowlisted label keeps worker-side HSV.
 
-    FSDP and DeepSpeed accept ``32-true``/``16-mixed``/``bf16-mixed`` yet cast floating
-    batch inputs before the transfer hook, so trusting the label would run the colour
-    transform on rounded gains, and for DeepSpeed mixed on half-precision images.
+    FSDP and DeepSpeed accept ``32-true``/``16-mixed``/``bf16-mixed`` yet cast floating batch inputs before the
+    transfer hook, so trusting the label would run the colour transform on rounded gains, and for DeepSpeed mixed on
+    half-precision images.
     """
     plugin = make_plugin()
     module = _module(detseg_fixture_dir)
@@ -101,8 +101,8 @@ def test_casting_plugin_keeps_worker_hsv(detseg_fixture_dir: Path, make_plugin: 
 def test_preserving_plugin_defers(detseg_fixture_dir: Path, make_plugin: Callable[[], Precision]) -> None:
     """A plugin whose input conversion is a no-op keeps the deferred transport, silently.
 
-    Single-device float32 and native AMP are the configurations the flag exists for;
-    the probe must not refuse them, or the guard would turn the feature off everywhere.
+    Single-device float32 and native AMP are the configurations the flag exists for; the probe must not refuse them,
+    or the guard would turn the feature off everywhere.
     """
     module = _module(detseg_fixture_dir)
     module.trainer = _cuda_trainer(make_plugin())
@@ -118,9 +118,8 @@ def test_preserving_plugin_defers(detseg_fixture_dir: Path, make_plugin: Callabl
 def test_cast_deferred_batch_fails_at_restore(make_plugin: Callable[[], Precision]) -> None:
     """A deferred batch passed through a casting plugin's real conversion is refused at restore.
 
-    This is the boundary the precision-label stubs bypass: Lightning calls
-    ``convert_input`` before the transfer hook, so a cast that slipped past the guard
-    must fail loudly rather than jitter rounded gains or half-precision images.
+    This is the boundary the precision-label stubs bypass: Lightning calls ``convert_input`` before the transfer hook,
+    so a cast that slipped past the guard must fail loudly rather than jitter rounded gains or half-precision images.
     """
     sample = _DeferredHSVSample(torch.rand(3, 4, 4), Targets.empty(), HSVParams(0.012, 0.31, -0.27))
     converted = make_plugin().convert_input(collate_detection([sample]))
@@ -131,10 +130,9 @@ def test_cast_deferred_batch_fails_at_restore(make_plugin: Callable[[], Precisio
 def test_unattached_setup_neither_warns_nor_latches(detseg_fixture_dir: Path) -> None:
     """A setup before any trainer is attached stays silent and leaves the warning for later.
 
-    User code may call ``setup("fit")`` before ``trainer.fit``, which runs setup again
-    with the trainer attached. The early call cannot know the backend, so saying the
-    flag is ignored "off CUDA" would be false, and spending the once-per-module warning
-    there would hide a genuine fallback found by a later setup.
+    User code may call ``setup("fit")`` before ``trainer.fit``, which runs setup again with the trainer attached. The
+    early call cannot know the backend, so saying the flag is ignored "off CUDA" would be false, and spending the
+    once-per-module warning there would hide a genuine fallback found by a later setup.
     """
     module = _module(detseg_fixture_dir)
     with warnings.catch_warnings():

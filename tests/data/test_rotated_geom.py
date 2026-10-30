@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-055 long-edge rotated-geometry primitives (A23, A25).
 
-Covers the long-edge canonical form (``w >= h``, ``theta`` in ``[-pi/4, 3*pi/4)``)
-including its exact idempotence and the square tie-break, the ``theta``/``theta + pi``
-equivalence a rectangle's 180-degree symmetry implies, the rotated-box/polygon round
-trip, and point-in-rotated-rect containment — the primitive WP-061 selects rotated
-assignment candidates with.
+Covers the long-edge canonical form (``w >= h``, ``theta`` in ``[-pi/4, 3*pi/4)``) including its exact idempotence and
+the square tie-break, the ``theta``/``theta + pi`` equivalence a rectangle's 180-degree symmetry implies, the
+rotated-box/polygon round trip, and point-in-rotated-rect containment — the primitive WP-061 selects rotated assignment
+candidates with.
 
 No RNG is used: every input is written out, so there is no seeding fixture.
 """
@@ -13,6 +12,7 @@ No RNG is used: every input is written out, so there is no seeding fixture.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import pytest
 import torch
@@ -20,19 +20,17 @@ import torch
 from lucid_yolo.data import canonicalize, points_in_rboxes, polygons_to_rboxes, rboxes_to_polygons
 from lucid_yolo.data.rotated_geom import rotated_iou
 
-#: Canonical angle bounds as float32 tensors. The invariant is a float32 one and
-#: ``float32(-pi/4)`` is strictly *below* the float64 ``-math.pi / 4``, so comparing a
-#: canonicalized boundary angle against the float64 literal would reject a correct
-#: result. Comparing tensor-to-scalar casts the scalar to float32, which is the
-#: comparison the implementation makes.
+#: Canonical angle bounds as float32 tensors. The invariant is a float32 one and ``float32(-pi/4)`` is strictly *below*
+#: the float64 ``-math.pi / 4``, so comparing a canonicalized boundary angle against the float64 literal would reject a
+#: correct result. Comparing tensor-to-scalar casts the scalar to float32, which is the comparison the implementation
+#: makes.
 _THETA_LOW = torch.tensor(-math.pi / 4, dtype=torch.float32)
 _THETA_HIGH = torch.tensor(3 * math.pi / 4, dtype=torch.float32)
 #: Largest float32 strictly below the exclusive upper bound of the canonical range.
 _JUST_BELOW_HIGH = float(torch.nextafter(_THETA_HIGH, torch.tensor(0.0)))
 
-#: Angle/extent sweep shared by the canonical-form, idempotence and geometry-preservation
-#: gates: in-range and out-of-range angles both directions, ``w < h`` inputs, the exact
-#: range boundaries and the ambiguous square.
+#: Angle/extent sweep shared by the canonical-form, idempotence and geometry-preservation gates: in-range and
+#: out-of-range angles both directions, ``w < h`` inputs, the exact range boundaries and the ambiguous square.
 _CANON_CASES = [
     pytest.param(6.0, 3.0, 0.3, id="in-range"),
     pytest.param(6.0, 3.0, 0.0, id="theta-zero"),
@@ -48,9 +46,9 @@ _CANON_CASES = [
     pytest.param(5.0, 5.0, -math.pi / 4, id="square-lower-bound"),
 ]
 
-#: Angles for the ``theta``/``theta + pi`` equivalence gate. Kept at modest magnitude on
-#: purpose: the sweep's many-turn angles carry a float32 ulp of ~2e-6 at 30 rad, which
-#: swamps the agreement tolerance without saying anything about the symmetry itself.
+#: Angles for the ``theta``/``theta + pi`` equivalence gate. Kept at modest magnitude on purpose: the sweep's many-turn
+#: angles carry a float32 ulp of ~2e-6 at 30 rad, which swamps the agreement tolerance without saying anything about the
+#: symmetry itself.
 _THETA_PI_CASES = [
     pytest.param(6.0, 3.0, 0.0, id="axis-aligned"),
     pytest.param(6.0, 3.0, 0.3, id="in-range"),
@@ -60,9 +58,8 @@ _THETA_PI_CASES = [
     pytest.param(5.0, 5.0, 0.2, id="square"),
 ]
 
-#: Non-square boxes for the polygon round trip; the square is covered separately
-#: because a reconstructed square's ``w``/``h`` can differ by one ulp, which legitimately
-#: rotates its canonical angle by ``pi/2``.
+#: Non-square boxes for the polygon round trip; the square is covered separately because a reconstructed square's
+#: ``w``/``h`` can differ by one ulp, which legitimately rotates its canonical angle by ``pi/2``.
 _ROUNDTRIP_CASES = [
     pytest.param(6.0, 3.0, 0.3, id="in-range"),
     pytest.param(6.0, 3.0, 0.0, id="axis-aligned"),
@@ -101,8 +98,8 @@ def _step_ulps(value: torch.Tensor, steps: int) -> float:
 def _point_grid() -> torch.Tensor:
     """Return a deterministic 25x25 point lattice straddling the test boxes' centre.
 
-    The fractional offsets keep every point clear of any test box's edges, so a
-    containment comparison cannot flip on a point sitting exactly on a boundary.
+    The fractional offsets keep every point clear of any test box's edges, so a containment comparison cannot flip on a
+    point sitting exactly on a boundary.
 
     Examples:
         >>> grid = _point_grid()
@@ -120,10 +117,9 @@ def _point_grid() -> torch.Tensor:
 def test_theta_pi_equivalence(w: float, h: float, theta: float) -> None:
     """``theta`` and ``theta + pi`` describe one rectangle: same canonical box, same corners.
 
-    Bit-equality is not available — building ``theta + pi`` in float32 already rounds —
-    so the canonical parameters agree to ``1e-6`` and the corners to ``1e-5``. Corner
-    *order* is exact by construction, because :func:`rboxes_to_polygons` winds the
-    canonical box rather than the box it was handed.
+    Bit-equality is not available — building ``theta + pi`` in float32 already rounds — so the canonical parameters
+    agree to ``1e-6`` and the corners to ``1e-5``. Corner *order* is exact by construction, because
+    :func:`rboxes_to_polygons` winds the canonical box rather than the box it was handed.
     """
     stacked = torch.cat([_rbox(w, h, theta), _rbox(w, h, theta + math.pi)], dim=0)
 
@@ -169,9 +165,9 @@ class TestCanonicalize:
     def test_angle_ulp_either_side_of_bound_lands_in_range(self, bound: float, step: int) -> None:
         """Angles within a couple of ulps of either range bound still canonicalize into range.
 
-        Shifting by whole multiples of pi cannot rescue an angle this close to a bound at
-        float32: the remainder rounds to pi and the shift returns the input untouched. A
-        similarity round trip of a box at exactly -pi/4 reaches that case in practice.
+        Shifting by whole multiples of pi cannot rescue an angle this close to a bound at float32: the remainder rounds
+        to pi and the shift returns the input untouched. A similarity round trip of a box at exactly -pi/4 reaches that
+        case in practice.
         """
         theta = _step_ulps(bound, step)
 
@@ -239,9 +235,9 @@ class TestPolygonConversion:
     def test_square_round_trip_preserves_geometry(self) -> None:
         """A square survives the round trip as the same rectangle despite ulp-level w/h drift.
 
-        The tie-break fires on exact equality only, so a reconstructed square whose sides
-        differ by one ulp may come back rotated by ``pi/2`` — the same rectangle under a
-        different canonical representative, which containment sees through.
+        The tie-break fires on exact equality only, so a reconstructed square whose sides differ by one ulp may come
+        back rotated by ``pi/2`` — the same rectangle under a different canonical representative, which containment
+        sees through.
         """
         box = _rbox(5.0, 5.0, 0.3)
         grid = _point_grid()
@@ -255,8 +251,8 @@ class TestPolygonConversion:
     def test_ring_order_not_change_box(self, start: int, reverse: bool) -> None:
         """Every cyclic rotation and reversal of one quad's ring yields the same canonical box.
 
-        DOTA writes its eight coordinates in whatever order the annotator drew them, so all
-        eight orderings of a given ring must load as one box.
+        DOTA writes its eight coordinates in whatever order the annotator drew them, so all eight orderings of a given
+        ring must load as one box.
         """
         box = _rbox(6.0, 3.0, 0.3)
         ring = rboxes_to_polygons(box).roll(start, dims=1)
@@ -271,9 +267,9 @@ class TestPolygonConversion:
 
         out = polygons_to_rboxes(quad)
 
-        # Long sides both measure hypot(10, 1); short sides measure 4 and 2 -> mean 3.
-        # The centre is the vertex centroid, and the long-edge direction is the mean of
-        # the two long edges, which cancels the +-1 vertical perturbation back to theta=0.
+        # Long sides both measure hypot(10, 1); short sides measure 4 and 2 -> mean 3. The centre is the vertex
+        # centroid, and the long-edge direction is the mean of the two long edges, which cancels the +-1 vertical
+        # perturbation back to theta=0.
         assert out[0, :2].tolist() == [5.0, 0.0]
         assert out[0, 2].item() == pytest.approx(math.hypot(10.0, 1.0), abs=1e-5)
         assert out[0, 3].item() == pytest.approx(3.0, abs=1e-5)
@@ -299,23 +295,24 @@ class TestPointsInRboxes:
 
         assert bool(inside.diagonal().all())
 
-    def test_point_nudged_past_corner_outside(self) -> None:
-        """A point nudged diagonally past a corner falls outside."""
+    @pytest.mark.parametrize(
+        ("point", "expected"),
+        [
+            pytest.param([2.001, 1.001], False, id="nudged-diagonally-past-corner"),
+            pytest.param([2.0, 1.0], True, id="exactly-on-corner"),
+        ],
+    )
+    def test_corner_boundary_is_inclusive(self, point: list[float], expected: bool) -> None:
+        """A point exactly on a corner counts as inside; one nudged diagonally past it falls outside.
+
+        The 4x2 axis-aligned box centred at the origin has its top-right corner at (2, 1), so the two points straddle
+        the closed boundary by 0.001 on each axis.
+        """
         box = torch.tensor([[0.0, 0.0, 4.0, 2.0, 0.0]], dtype=torch.float32)
-        beyond = torch.tensor([[2.001, 1.001]], dtype=torch.float32)
 
-        inside = points_in_rboxes(beyond, box)
+        inside = points_in_rboxes(torch.tensor([point], dtype=torch.float32), box)
 
-        assert not bool(inside[0, 0])
-
-    def test_boundary_inclusive(self) -> None:
-        """A point exactly on a corner counts as inside."""
-        box = torch.tensor([[0.0, 0.0, 4.0, 2.0, 0.0]], dtype=torch.float32)
-        corner = torch.tensor([[2.0, 1.0]], dtype=torch.float32)
-
-        inside = points_in_rboxes(corner, box)
-
-        assert bool(inside[0, 0])
+        assert bool(inside[0, 0]) is expected
 
     def test_rotated_box_excludes_point_envelope_includes(self) -> None:
         """A point inside the axis-aligned envelope but outside the rotated rect is rejected."""
@@ -361,33 +358,43 @@ class TestPointsInRboxes:
 class TestShapeValidation:
     """Wrong-shaped inputs are rejected rather than silently broadcast."""
 
-    def test_rboxes_wrong_width(self) -> None:
-        """A four-column tensor is not a rotated-box tensor."""
-        with pytest.raises(ValueError, match=r"rboxes must be \(N, 5\)"):
-            canonicalize(torch.zeros((2, 4), dtype=torch.float32))
+    @pytest.mark.parametrize(
+        ("function", "arguments", "match"),
+        [
+            pytest.param(
+                canonicalize, (torch.zeros((2, 4)),), r"rboxes must be \(N, 5\)", id="rboxes-four-columns-not-rbox"
+            ),
+            pytest.param(
+                points_in_rboxes,
+                (torch.zeros((2, 3)), torch.zeros((1, 5))),
+                r"points must be \(N, 2\)",
+                id="points-three-columns-not-xy",
+            ),
+            pytest.param(
+                polygons_to_rboxes, (torch.zeros((2, 5, 2)),), r"polygons must be \(M, 4, 2\)", id="quads-five-vertices"
+            ),
+        ],
+    )
+    def test_wrong_shape_raises(
+        self, function: Callable[..., torch.Tensor], arguments: tuple[torch.Tensor, ...], match: str
+    ) -> None:
+        """A four-column rotated box, a three-column point set and a five-vertex quad are each rejected.
 
-    def test_points_wrong_width(self) -> None:
-        """Points must be ``(P, 2)``."""
-        with pytest.raises(ValueError, match=r"points must be \(N, 2\)"):
-            points_in_rboxes(torch.zeros((2, 3), dtype=torch.float32), torch.zeros((1, 5), dtype=torch.float32))
-
-    def test_polygons_wrong_shape(self) -> None:
-        """Quads must be ``(M, 4, 2)``."""
-        with pytest.raises(ValueError, match=r"polygons must be \(M, 4, 2\)"):
-            polygons_to_rboxes(torch.zeros((2, 5, 2), dtype=torch.float32))
+        Every entry point validates its leading dimensions (``rboxes (N, 5)``, ``points (P, 2)``, ``polygons
+        (M, 4, 2)``) and refuses a wrong shape with a message naming the expectation, rather than broadcasting it.
+        """
+        with pytest.raises(ValueError, match=match):
+            function(*arguments)
 
 
 class TestRotatedIouRejectsImpossibleGeometry:
     """A row that is not a rectangle scores ``0.0``, never a plausible overlap (WP-170).
 
-    ``rotated_iou``'s docstring has always promised this for zero and negative
-    extents, but the promise was left to the winding to keep and the winding does
-    not keep it: :func:`canonicalize` swaps a pair of signed extents back into
-    ``w >= h`` order, and two negative extents are a half-turn that rebuilds the
-    very rectangle the caller wrote as impossible. Non-finite rows reached the
-    same zero for an unrelated reason -- every comparison against ``NaN`` is false
-    -- which is a different statement about a different failure and was worth
-    making on purpose.
+    ``rotated_iou``'s docstring has always promised this for zero and negative extents, but the promise was left to the
+    winding to keep and the winding does not keep it: :func:`canonicalize` swaps a pair of signed extents back into
+    ``w >= h`` order, and two negative extents are a half-turn that rebuilds the very rectangle the caller wrote as
+    impossible. Non-finite rows reached the same zero for an unrelated reason -- every comparison against ``NaN`` is
+    false -- which is a different statement about a different failure and was worth making on purpose.
     """
 
     #: A well-formed 4x2 box at the origin, the honest counterpart of the rows below.
@@ -396,9 +403,8 @@ class TestRotatedIouRejectsImpossibleGeometry:
     def test_two_negative_extents_no_longer_score_perfect_match(self) -> None:
         """``[-4, -2]`` against itself scored ``1.0``; it is an invalid row, so ``0.0``.
 
-        The half-turn case: negating both extents names the same rectangle, so
-        canonicalization produced a correctly wound polygon and the shoelace had
-        nothing left to object to.
+        The half-turn case: negating both extents names the same rectangle, so canonicalization produced a correctly
+        wound polygon and the shoelace had nothing left to object to.
         """
         negative = torch.tensor([[0.0, 0.0, -4.0, -2.0, 0.0]])
 
@@ -407,8 +413,8 @@ class TestRotatedIouRejectsImpossibleGeometry:
     def test_negative_row_not_match_real_box(self) -> None:
         """``[-4, -2]`` scored ``1.0`` against the honest ``[4, 2]`` describing that region.
 
-        Worse than the self-pair: an impossible row was not merely self-consistent,
-        it was accepted as an exact match for a real detection.
+        Worse than the self-pair: an impossible row was not merely self-consistent, it was accepted as an exact match
+        for a real detection.
         """
         negative = torch.tensor([[0.0, 0.0, -4.0, -2.0, 0.0]])
         valid = torch.tensor([self.VALID])
@@ -431,9 +437,8 @@ class TestRotatedIouRejectsImpossibleGeometry:
     def test_non_finite_in_any_column_scores_zero(self, column: int, bad: float) -> None:
         """A non-finite ``cx``, ``cy``, ``w``, ``h`` or ``theta`` yields ``0.0``, not ``NaN``.
 
-        Stated by the validity mask now rather than reached by accident through
-        false ``NaN`` comparisons, so ``inf`` -- which compares perfectly well --
-        is covered by the same rule as ``nan``.
+        Stated by the validity mask now rather than reached by accident through false ``NaN`` comparisons, so ``inf``
+        -- which compares perfectly well -- is covered by the same rule as ``nan``.
         """
         row = torch.tensor([self.VALID])
         row[0, column] = bad
@@ -455,8 +460,8 @@ class TestRotatedIouRejectsImpossibleGeometry:
     def test_invalid_row_not_poison_neighbours(self) -> None:
         """Only the pairs involving the bad row collapse; the rest of the matrix stands.
 
-        The mask is per-box and folded into the pair grid, so a single corrupt
-        detection in a batch cannot zero the overlaps of the good ones beside it.
+        The mask is per-box and folded into the pair grid, so a single corrupt detection in a batch cannot zero the
+        overlaps of the good ones beside it.
         """
         rows = torch.tensor([self.VALID, (0.0, 0.0, -4.0, -2.0, 0.0), (2.0, 0.0, 4.0, 2.0, 0.0)])
 

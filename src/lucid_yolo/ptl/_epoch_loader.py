@@ -15,12 +15,11 @@ _T = TypeVar("_T")
 class _EpochPrefetchLoader(DataLoader[_T]):
     """Reuse the ordinary persistent-worker iterator after an early epoch reset.
 
-    The caller owns a dedicated shuffle generator and chooses when another full
-    epoch is actually expected. Each returned iterator still stops at its own
-    epoch boundary: the early reset queues work, without exposing the next epoch
-    through the exhausted iterator. No executor or second worker pool is created. The prepared marker is weak so
-    Lightning teardown can release an unused iterator and its queued batches. The loader length is recorded with
-    the prepared epoch, and a later ``iter()`` that finds it changed raises instead of replaying a stale epoch.
+    The caller owns a dedicated shuffle generator and chooses when another full epoch is actually expected. Each
+    returned iterator still stops at its own epoch boundary: the early reset queues work, without exposing the next
+    epoch through the exhausted iterator. No executor or second worker pool is created. The prepared marker is weak so
+    Lightning teardown can release an unused iterator and its queued batches. The loader length is recorded with the
+    prepared epoch, and a later ``iter()`` that finds it changed raises instead of replaying a stale epoch.
     """
 
     def __init__(self, *args: Any, prepare_next: Callable[[], bool], **kwargs: Any) -> None:
@@ -72,11 +71,10 @@ class _EpochPrefetchLoader(DataLoader[_T]):
     def _refuse_stale_epoch(self) -> NoReturn:
         """Rewind the shuffle, then refuse a prepared epoch that was drawn for another length.
 
-        The prepared iterator queued its index lists for the length it saw. Serving it
-        under a longer count would end the epoch on a bare ``StopIteration``, and under a
-        shorter one it would cut the epoch silently. The persistent workers also keep the
-        dataset they started with, so a changed length cannot be honoured by a reset
-        either. The rewind leaves a retried ``iter()`` on the ordinary reset.
+        The prepared iterator queued its index lists for the length it saw. Serving it under a longer count would end
+        the epoch on a bare ``StopIteration``, and under a shorter one it would cut the epoch silently. The persistent
+        workers also keep the dataset they started with, so a changed length cannot be honoured by a reset either. The
+        rewind leaves a retried ``iter()`` on the ordinary reset.
         """
         if self._generator_receipt is not None and self.generator is not None:
             self.generator.set_state(self._generator_receipt)

@@ -1,51 +1,43 @@
 # SPDX-License-Identifier: Apache-2.0
 """Checkpoint loading and device selection shared by the acceptance scripts (WP-095).
 
-``lucid_yolo.eval.detect_eval`` grew these two steps first — read a Lightning checkpoint,
-optionally overlay the EMA shadow the :class:`~lucid_yolo.ptl.callbacks.EMACallback`
-stored inside it, and resolve ``auto`` to the fastest available backend. The oriented
-instrument needs both, unchanged, and a second copy of a "find the shadow inside the
-callbacks dict" walk is the defect class WP-089's row names: two copies of one piece of
-knowledge that can drift apart silently, because each has its own tests passing.
+``lucid_yolo.eval.detect_eval`` grew these two steps first — read a Lightning checkpoint, optionally overlay the EMA
+shadow the :class:`~lucid_yolo.ptl.callbacks.EMACallback` stored inside it, and resolve ``auto`` to the fastest
+available backend. The oriented instrument needs both, unchanged, and a second copy of a "find the shadow inside the
+callbacks dict" walk is the defect class WP-089's row names: two copies of one piece of knowledge that can drift
+apart silently, because each has its own tests passing.
 
-The EMA overlay is worth stating plainly, since it is the part that is easy to get
-subtly wrong. A shadow covers parameters *and* buffers, so both are collected into one
-name-keyed mapping before the copy; a missing shadow raises rather than quietly
-evaluating raw weights, because "the EMA numbers" and "the raw numbers" are different
-claims and a run that silently reports the second under the first name is unfalsifiable.
+The EMA overlay is worth stating plainly, since it is the part that is easy to get subtly wrong. A shadow covers
+parameters *and* buffers, so both are collected into one name-keyed mapping before the copy; a missing shadow raises
+rather than quietly evaluating raw weights, because "the EMA numbers" and "the raw numbers" are different claims and a
+run that silently reports the second under the first name is unfalsifiable.
 
-WP-174 closed the two ways that argument leaked. The callback's key inside the
-checkpoint is resolved **once** and reused for both the shadow and the update counter --
-resolving it by substring here and by literal name there is how a checkpoint written by a
-parametrized callback passed the overlay and then died on a bare ``KeyError``, with the
-module already mutated -- and an ambiguous key is refused rather than resolved by "last
-one wins". The shadow is also checked to cover every floating-point parameter and buffer
-*before* any copy happens: a partial shadow otherwise leaves the module half EMA and half
-raw, which is neither of the two claims a report can make, and leaves it that way silently.
+WP-174 closed the two ways that argument leaked. The callback's key inside the checkpoint is resolved **once** and
+reused for both the shadow and the update counter -- resolving it by substring here and by literal name there is how
+a checkpoint written by a parametrized callback passed the overlay and then died on a bare ``KeyError``, with the
+module already mutated -- and an ambiguous key is refused rather than resolved by "last one wins". The shadow is also
+checked to cover every floating-point parameter and buffer *before* any copy happens: a partial shadow otherwise
+leaves the module half EMA and half raw, which is neither of the two claims a report can make, and leaves it that way
+silently.
 
-The file is read **once**, restricted. ``torch.load(..., weights_only=True)`` refuses any
-global the file names outside torch's allowlist while it is still parsing the pickle
-stream, so a checkpoint carrying an arbitrary reducer is rejected before that reducer runs,
-and the module is then built from that same payload rather than handed to Lightning's
-``load_from_checkpoint`` for a second, unrestricted read. Earlier releases read the file
-twice -- restricted first, as the gate, then through Lightning --
-which deserialized every tensor twice (twice the peak host memory) and checked the file in
-its first form while loading it in its second if it was replaced between the reads. One
-read closes both.
+The file is read **once**, restricted. ``torch.load(..., weights_only=True)`` refuses any global the file names outside
+torch's allowlist while it is still parsing the pickle stream, so a checkpoint carrying an arbitrary reducer is
+rejected before that reducer runs, and the module is then built from that same payload rather than handed to
+Lightning's ``load_from_checkpoint`` for a second, unrestricted read. Earlier releases read the file twice --
+restricted first, as the gate, then through Lightning -- which deserialized every tensor twice (twice the peak host
+memory) and checked the file in its first form while loading it in its second if it was replaced between the reads.
+One read closes both.
 
-Building the module needs no private Lightning API, because the class is simple to
-build: :class:`~lucid_yolo.ptl.module.DetectionLitModule` takes primitive keyword
-arguments only, so its saved ``hyper_parameters``, filtered to the ``__init__``
-signature, construct it directly. The filter is what a ``lucid-yolo fit`` checkpoint
-needs: LightningCLI saves an ``_instantiator`` entry beside the arguments, which Lightning
-uses to rebuild the class through jsonargparse, and which, for this class, builds the
-same object a plain call does. Then come the public steps Lightning's loader takes
-after construction: the ``on_load_checkpoint`` hook and a ``load_state_dict`` at the
-module's own ``strict_loading``. What this skips is Lightning's legacy-checkpoint
-migration, which rewrites loop and callback state from Lightning 1.x layouts. The
-fields read here, ``hyper_parameters``, ``state_dict``, ``epoch``, ``global_step`` and the
-EMA callback's entry, are written in the same layout by every Lightning release in
-``pyproject.toml``'s supported range.
+Building the module needs no private Lightning API, because the class is simple to build:
+:class:`~lucid_yolo.ptl.module.DetectionLitModule` takes primitive keyword arguments only, so its saved
+``hyper_parameters``, filtered to the ``__init__`` signature, construct it directly. The filter is what a
+``lucid-yolo fit`` checkpoint needs: LightningCLI saves an ``_instantiator`` entry beside the arguments, which
+Lightning uses to rebuild the class through jsonargparse, and which, for this class, builds the same object a plain
+call does. Then come the public steps Lightning's loader takes after construction: the ``on_load_checkpoint`` hook
+and a ``load_state_dict`` at the module's own ``strict_loading``. What this skips is Lightning's legacy-checkpoint
+migration, which rewrites loop and callback state from Lightning 1.x layouts. The fields read here,
+``hyper_parameters``, ``state_dict``, ``epoch``, ``global_step`` and the EMA callback's entry, are written in the same
+layout by every Lightning release in ``pyproject.toml``'s supported range.
 """
 
 from __future__ import annotations
@@ -66,15 +58,14 @@ if TYPE_CHECKING:
 
 __all__ = ["available_devices", "load_eval_module", "pick_device"]
 
-#: Class name identifying the EMA callback's entry in a checkpoint's ``callbacks`` dict.
-#: The key Lightning writes is the callback's ``state_key``, which carries the callback's
-#: arguments for a parametrized instance, so the entry is found by this substring and then
-#: required to be unique -- see :func:`_ema_state_key`.
+#: Class name identifying the EMA callback's entry in a checkpoint's ``callbacks`` dict. The key Lightning writes is
+#: the callback's ``state_key``, which carries the callback's arguments for a parametrized instance, so the entry is
+#: found by this substring and then required to be unique -- see :func:`_ema_state_key`.
 _EMA_CALLBACK_MARKER = "EMACallback"
 
-#: Keyword arguments :class:`DetectionLitModule` accepts, so saved hyper-parameters can be
-#: filtered to them: a ``lucid-yolo fit`` checkpoint saves an ``_instantiator`` entry
-#: beside them, which is Lightning's own bookkeeping, not an argument.
+#: Keyword arguments :class:`DetectionLitModule` accepts, so saved hyper-parameters can be filtered to them: a
+#: ``lucid-yolo fit`` checkpoint saves an ``_instantiator`` entry beside them, which is Lightning's own bookkeeping,
+#: not an argument.
 _INIT_ARGUMENTS = frozenset(inspect.signature(DetectionLitModule.__init__).parameters) - {"self"}
 
 
@@ -90,15 +81,12 @@ def load_eval_module(checkpoint: Path, *, use_ema: bool) -> tuple[DetectionLitMo
         The eval-mode module and a small provenance dict (checkpoint, epoch, step, EMA).
 
     Raises:
-        pickle.UnpicklingError: If the checkpoint names anything restricted loading refuses.
-            Raised by the one read, before any reducer the file carries is called -- see
-            the module docstring.
-        ValueError: If the checkpoint carries no ``hyper_parameters`` or ``state_dict``
-            mapping, no ``epoch`` or ``global_step``, or -- under
-            ``use_ema`` -- no ``num_updates`` beside the shadow; and if ``use_ema`` is
-            requested and the checkpoint carries no EMA shadow, names the EMA callback in
-            more than one ``callbacks`` entry, or carries a shadow that does not cover
-            every floating-point parameter and buffer.
+        pickle.UnpicklingError: If the checkpoint names anything restricted loading refuses. Raised by the one read,
+            before any reducer the file carries is called -- see the module docstring.
+        ValueError: If the checkpoint carries no ``hyper_parameters`` or ``state_dict`` mapping, no ``epoch`` or
+            ``global_step``, or -- under ``use_ema`` -- no ``num_updates`` beside the shadow; and if ``use_ema`` is
+            requested and the checkpoint carries no EMA shadow, names the EMA callback in more than one ``callbacks``
+            entry, or carries a shadow that does not cover every floating-point parameter and buffer.
 
     Examples:
         ```pycon
@@ -119,8 +107,8 @@ def load_eval_module(checkpoint: Path, *, use_ema: bool) -> tuple[DetectionLitMo
         "ema": use_ema,
     }
     if use_ema:
-        # One resolution of the callback's key, used for both lookups: the shadow and the
-        # counter that says how many updates produced it must come from the same entry.
+        # One resolution of the callback's key, used for both lookups: the shadow and the counter that says how many
+        # updates produced it must come from the same entry.
         state_key = _overlay_ema(module, payload, checkpoint)
         entry = cast("Mapping[str, Any]", payload["callbacks"][state_key])
         info["ema_updates"] = _required_int(entry, "num_updates", f"{checkpoint} callbacks entry {state_key!r}")
@@ -131,10 +119,9 @@ def load_eval_module(checkpoint: Path, *, use_ema: bool) -> tuple[DetectionLitMo
 def _module_from_payload(payload: Mapping[str, Any], checkpoint: Path) -> DetectionLitModule:
     """Build the module a checkpoint describes from its already-read payload.
 
-    The public steps of Lightning's own loader, in its order: construct from the saved
-    hyper-parameters, give the module its ``on_load_checkpoint`` hook, then load the
-    weights at the module's ``strict_loading`` -- so a missing or unexpected key raises
-    PyTorch's own ``load_state_dict`` error, as it did through ``load_from_checkpoint``.
+    The public steps of Lightning's own loader, in its order: construct from the saved hyper-parameters, give the
+    module its ``on_load_checkpoint`` hook, then load the weights at the module's ``strict_loading`` -- so a missing or
+    unexpected key raises PyTorch's own ``load_state_dict`` error, as it did through ``load_from_checkpoint``.
 
     Args:
         payload: The checkpoint dict, read with ``weights_only=True``.
@@ -201,15 +188,14 @@ def _required_mapping(payload: Mapping[str, Any], key: str, where: str) -> Mappi
 def _required_int(payload: Mapping[str, Any], key: str, where: str) -> int:
     """Read ``key`` as an integer, or refuse naming the key, the file, and what is there.
 
-    Indexing the payload raw turns a truncated or hand-built checkpoint into ``KeyError:
-    'epoch'`` -- which names the dict lookup that failed and nothing an operator can act
-    on, on a path ``lucid-eval`` and ``lucid-predict`` surface directly.
+    Indexing the payload raw turns a truncated or hand-built checkpoint into ``KeyError: 'epoch'`` -- which names the
+    dict lookup that failed and nothing an operator can act on, on a path ``lucid-eval`` and ``lucid-predict`` surface
+    directly.
 
     Args:
         payload: The checkpoint dict, or one entry inside it.
         key: The key that must be present.
-        where: What to name in the refusal -- the checkpoint path, plus the entry when the
-            lookup is a nested one.
+        where: What to name in the refusal -- the checkpoint path, plus the entry when the lookup is a nested one.
 
     Returns:
         The value at ``key``, as an ``int``.
@@ -238,13 +224,11 @@ def _required_int(payload: Mapping[str, Any], key: str, where: str) -> int:
 def pick_device(requested: str) -> torch.device:
     """Resolve ``auto`` to the fastest available backend, else check ``requested`` exists here.
 
-    A named backend is held to the same availability question ``auto`` asks, rather than
-    passed through (WP-171). ``--device cuda`` on a machine with no CUDA used to be
-    accepted and then fail several minutes later, inside the first ``.to(device)`` — after
-    the checkpoint was loaded and, for a long run, after the annotations were parsed —
-    with a message about a tensor rather than about the flag. The refusal names the
-    request and what this machine does have, because the useful next command is the one
-    the caller cannot guess from a stack trace.
+    A named backend is held to the same availability question ``auto`` asks, rather than passed through (WP-171).
+    ``--device cuda`` on a machine with no CUDA used to be accepted and then fail several minutes later, inside the
+    first ``.to(device)`` — after the checkpoint was loaded and, for a long run, after the annotations were parsed —
+    with a message about a tensor rather than about the flag. The refusal names the request and what this machine does
+    have, because the useful next command is the one the caller cannot guess from a stack trace.
 
     Args:
         requested: ``"auto"`` or any string :class:`torch.device` accepts.
@@ -282,13 +266,12 @@ def pick_device(requested: str) -> torch.device:
 def available_devices() -> tuple[str, ...]:
     """Name the backends this machine can actually run on, fastest first.
 
-    Probed on every call rather than resolved once at import: a device string is checked
-    where it enters, and a module-level snapshot would answer for the machine that
-    imported this module rather than for the one running now.
+    Probed on every call rather than resolved once at import: a device string is checked where it enters, and a
+    module-level snapshot would answer for the machine that imported this module rather than for the one running now.
 
     Returns:
-        The usable ``--device`` spellings, ending in ``"cpu"`` — always available — and
-        ``"auto"``, which is what a caller who does not want to know should pass.
+        The usable ``--device`` spellings, ending in ``"cpu"`` — always available — and ``"auto"``, which is what
+        a caller who does not want to know should pass.
 
     Examples:
         ```pycon
@@ -306,10 +289,9 @@ def available_devices() -> tuple[str, ...]:
 def _is_available(device: torch.device) -> bool:
     """Report whether ``device``'s backend can be run on here.
 
-    Only the two accelerators this project ships support for are probed. Anything else
-    — ``cpu``, and whatever other type :class:`torch.device` accepts — passes through
-    unjudged, because a check that guessed at a backend nobody here tests would refuse
-    working configurations rather than protect any.
+    Only the two accelerators this project ships support for are probed. Anything else — ``cpu``, and whatever other
+    type :class:`torch.device` accepts — passes through unjudged, because a check that guessed at a backend nobody here
+    tests would refuse working configurations rather than protect any.
 
     Examples:
         ```pycon
@@ -329,11 +311,10 @@ def _is_available(device: torch.device) -> bool:
 def _ema_state_key(callbacks: dict[str, dict[str, object]], checkpoint: Path) -> str:
     """Resolve the one ``callbacks`` entry that belongs to the EMA callback.
 
-    Lightning keys the ``callbacks`` dict by each callback's ``state_key``, which for a
-    parametrized callback is the class name followed by its arguments -- so the match is on
-    the class name rather than on the whole key. Exactly one entry may match: two would
-    make "the EMA shadow" ambiguous, and picking one (the previous behaviour, where the
-    last match silently won) reports numbers under a name that does not identify them.
+    Lightning keys the ``callbacks`` dict by each callback's ``state_key``, which for a parametrized callback is the
+    class name followed by its arguments -- so the match is on the class name rather than on the whole key. Exactly one
+    entry may match: two would make "the EMA shadow" ambiguous, and picking one (the previous behaviour, where the last
+    match silently won) reports numbers under a name that does not identify them.
 
     Args:
         callbacks: The checkpoint's ``callbacks`` mapping.
@@ -363,10 +344,10 @@ def _ema_state_key(callbacks: dict[str, dict[str, object]], checkpoint: Path) ->
 def _float_tensors(module: DetectionLitModule) -> dict[str, Tensor]:
     """Name every floating-point parameter and buffer -- the exact set a shadow covers.
 
-    Mirrors :class:`~lucid_yolo.ptl.callbacks.EMACallback`'s own rule on the writing side:
-    integer buffers (batch-norm's ``num_batches_tracked``) are excluded, because an
-    exponential average of a step counter is meaningless and the writer never shadows one.
-    Parameter and buffer names share one namespace, so the merged mapping loses nothing.
+    Mirrors :class:`~lucid_yolo.ptl.callbacks.EMACallback`'s own rule on the writing side: integer buffers
+    (batch-norm's ``num_batches_tracked``) are excluded, because an exponential average of a step counter is
+    meaningless and the writer never shadows one. Parameter and buffer names share one namespace, so the merged mapping
+    loses nothing.
 
     Args:
         module: The module whose tensors are named.
@@ -381,14 +362,12 @@ def _float_tensors(module: DetectionLitModule) -> dict[str, Tensor]:
 def _overlay_ema(module: DetectionLitModule, payload: dict[str, object], checkpoint: Path) -> str:
     """Copy the checkpoint's EMA shadow over the module's parameters and buffers.
 
-    The callback's key is resolved once and handed back, so the caller's ``num_updates``
-    lookup reads the same entry the shadow came from rather than a literal name that may
-    not be the one that matched.
+    The callback's key is resolved once and handed back, so the caller's ``num_updates`` lookup reads the same entry
+    the shadow came from rather than a literal name that may not be the one that matched.
 
-    Coverage is checked **before** anything is copied. Raising afterwards would leave the
-    module half EMA and half raw -- neither of the two claims a report can make -- and a
-    shadow that merely omits a tensor would otherwise leave that tensor at its raw value
-    with nothing said.
+    Coverage is checked **before** anything is copied. Raising afterwards would leave the module half EMA and half raw
+    -- neither of the two claims a report can make -- and a shadow that merely omits a tensor would otherwise leave
+    that tensor at its raw value with nothing said.
 
     Args:
         module: The module to overlay in place.
@@ -399,9 +378,8 @@ def _overlay_ema(module: DetectionLitModule, payload: dict[str, object], checkpo
         The ``callbacks`` key the shadow was taken from.
 
     Raises:
-        ValueError: If the checkpoint carries no EMA shadow, if more than one callback
-            entry names the EMA callback, or if the shadow omits any floating-point
-            parameter or buffer of ``module``.
+        ValueError: If the checkpoint carries no EMA shadow, if more than one callback entry names the EMA callback, or
+            if the shadow omits any floating-point parameter or buffer of ``module``.
     """
     callbacks = cast("dict[str, dict[str, object]]", payload.get("callbacks", {}))
     state_key = _ema_state_key(callbacks, checkpoint)

@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from lucid_yolo.cli import eval as eval_cli
@@ -10,21 +12,27 @@ from lucid_yolo.cli import predict as predict_cli
 from lucid_yolo.cli import train as train_cli
 from lucid_yolo.tasks import Task
 
-
-@pytest.mark.parametrize("name", ["_EVAL_TASKS", "_EVAL_OPTIONS"])
-def test_eval_tables_cover_tasks(name: str) -> None:
-    """A new task cannot inherit the detection protocol or its accepted options."""
-    assert set(getattr(eval_cli, name)) == set(Task)
+if TYPE_CHECKING:
+    from types import ModuleType
 
 
-def test_predict_table_covers_tasks() -> None:
-    """Every prediction task needs an explicit report-producing handler."""
-    assert set(predict_cli._PREDICT_TASKS) == set(Task)
+@pytest.mark.parametrize(
+    ("module", "table"),
+    [
+        pytest.param(eval_cli, "_EVAL_TASKS", id="eval-protocols"),
+        pytest.param(eval_cli, "_EVAL_OPTIONS", id="eval-options"),
+        pytest.param(predict_cli, "_PREDICT_TASKS", id="predict-handlers"),
+        pytest.param(train_cli, "_TARGET_FIELD", id="train-target-fields"),
+    ],
+)
+def test_dispatch_table_covers_every_task(module: ModuleType, table: str) -> None:
+    """Every task has an explicit entry in each command's dispatch table.
 
-
-def test_train_table_covers_tasks() -> None:
-    """A new task cannot silently disable all loader target types."""
-    assert set(train_cli._TARGET_FIELD) == set(Task)
+    A new task cannot inherit the detection protocol or its accepted options from ``lucid-eval``, needs an explicit
+    report-producing handler in ``lucid-predict``, and cannot silently disable all loader target types in
+    ``lucid-yolo``.
+    """
+    assert set(getattr(module, table)) == set(Task)
 
 
 @pytest.mark.parametrize(

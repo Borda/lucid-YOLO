@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Load a ``scripts/`` module by file stem, for the suites that test a script's own functions.
 
-The scripts are not a package, so a test cannot ``import`` them; each suite used to carry
-its own ``importlib`` recipe, identical down to the module-name string. ``conftest.py``
-puts this directory on ``sys.path``, which is how a test file reaches it.
+The scripts are not a package, so a test cannot ``import`` them; each suite used to carry its own ``importlib`` recipe,
+identical down to the module-name string. ``conftest.py`` puts this directory on ``sys.path``, which is how a test file
+reaches it.
 """
 
 from __future__ import annotations

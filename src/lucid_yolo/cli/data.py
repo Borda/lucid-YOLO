@@ -7,34 +7,29 @@ Three subcommands, in the order a tier run uses them::
     lucid-data check --data_root /data/coco
     lucid-data build-tiles --root /data/dota --out /data/dota_tiles --overlap 512
 
-``check`` names the dataset only where it has to: the COCO and YOLO layouts are inferred
-from the root itself, by the same probe ``lucid-yolo fit`` dispatches on (WP-099c), while
-``--dataset dota`` names a layout no run reads and no probe covers.
+``check`` names the dataset only where it has to: the COCO and YOLO layouts are inferred from the root itself, by the
+same probe ``lucid-yolo fit`` dispatches on (WP-099c), while ``--dataset dota`` names a layout no run reads and no probe
+covers.
 
-They were three separate things before: a shipped ``lucid-download`` console script, an
-unshipped ``scripts/check_data.py`` reachable only through ``make``, and an unshipped
-``scripts/build_dota_tiles.py``. A remote tier run installs a wheel, so two thirds of its
-own data pipeline were unavailable to it and the recipe named a build step nobody
-installing the package could run.
+They were three separate things before: a shipped ``lucid-download`` console script, an unshipped
+``scripts/check_data.py`` reachable only through ``make``, and an unshipped ``scripts/build_dota_tiles.py``. A remote
+tier run installs a wheel, so two thirds of its own data pipeline were unavailable to it and the recipe named a build
+step nobody installing the package could run.
 
 Naming:
-    Subcommands name the *operation* and a flag names the dataset — ``check --dataset``,
-    ``build-tiles --source``. A command per dataset would grow a verb every time one is
-    added and let each drift into its own flag spellings. ``build-tiles`` in particular
-    is not ``build-dota-tiles``: what it writes is a plain COCO container with
+    Subcommands name the *operation* and a flag names the dataset — ``check --dataset``, ``build-tiles --source``. A
+    command per dataset would grow a verb every time one is added and let each drift into its own flag spellings.
+    ``build-tiles`` in particular is not ``build-dota-tiles``: what it writes is a plain COCO container with
     quadrilateral rings, and DOTA is the reader it happens to have.
 
     Flags and help come from the operation functions' signatures and Google docstrings
-    (:func:`lucid_yolo.data.download.download_dataset`,
-    :func:`lucid_yolo.data.check.check_dataset`,
-    :func:`lucid_yolo.data.tiles.build_tiles`), so a flag cannot document itself
-    differently from the function it sets.
+    (:func:`lucid_yolo.data.download.download_dataset`, :func:`lucid_yolo.data.check.check_dataset`,
+    :func:`lucid_yolo.data.tiles.build_tiles`), so a flag cannot document itself differently from the function it sets.
 
 What is deliberately *not* here:
-    Neither check runs inside ``lucid-yolo fit``. :func:`~lucid_yolo.data.check.check_dataset`
-    asserts the dataset's **published** totals, so wiring it into training would refuse a
-    legitimate subset or smoke run at startup, and a preflight on every ``fit`` charges
-    every run for a property of the disk that changes once. The dataset contract
+    Neither check runs inside ``lucid-yolo fit``. :func:`~lucid_yolo.data.check.check_dataset` asserts the dataset's
+    **published** totals, so wiring it into training would refuse a legitimate subset or smoke run at startup, and a
+    preflight on every ``fit`` charges every run for a property of the disk that changes once. The dataset contract
     (AGENTS.md sec. 3) makes provisioning an explicit step; these are that step's tools.
 """
 
@@ -55,16 +50,15 @@ if TYPE_CHECKING:
 
 __all__ = ["SUBCOMMANDS", "build_parser", "main"]
 
-#: The flag name :func:`build_parser` gives every subparser, and the one key
-#: :func:`main` drops before calling the operation. jsonargparse's ``"config"`` action
-#: consumes it while parsing and spreads the file's contents across the real arguments;
-#: the namespace entry it leaves behind names the file that was read, which no operation
-#: function takes. The action is named by string rather than by importing
-#: ``ActionConfigFile``, which jsonargparse does not export from its package root.
+#: The flag name :func:`build_parser` gives every subparser, and the one key :func:`main` drops before calling the
+#: operation. jsonargparse's ``"config"`` action consumes it while parsing and spreads the file's contents across the
+#: real arguments; the namespace entry it leaves behind names the file that was read, which no operation function takes.
+#: The action is named by string rather than by importing ``ActionConfigFile``, which jsonargparse does not export
+#: from its package root.
 _CONFIG_FLAG = "config"
 
-#: Subcommand name to the function that implements it. The parser is built from these
-#: signatures, so adding an operation is one entry here and one typed function.
+#: Subcommand name to the function that implements it. The parser is built from these signatures,
+#: so adding an operation is one entry here and one typed function.
 SUBCOMMANDS: dict[str, Callable[..., int]] = {
     "download": download_dataset,
     "check": check_dataset,
@@ -95,12 +89,11 @@ def build_parser() -> ArgumentParser:
         # The summary line only: the full docstring would print its Examples section,
         # doctest directives and all, into the subcommand's help.
         subparser = ArgumentParser(description=_summary(function))
-        # Every command takes `--config` (AGENTS.md sec. 2). The other three commands get
-        # it for free: `lucid-yolo` is a LightningCLI and `lucid-eval`/`lucid-predict` go
-        # through `auto_cli`, both of which add an `ActionConfigFile` themselves. This
-        # parser is built by hand, and `add_subcommands` adds nothing to a subparser, so
-        # the flag has to be asked for here -- per subparser, because that is the level
-        # the arguments a config file would set actually live at.
+        # Every command takes `--config` (AGENTS.md sec. 2). The other three commands get it for free: `lucid-yolo` is
+        # a LightningCLI and `lucid-eval`/`lucid-predict` go through `auto_cli`, both of which add an `ActionConfigFile`
+        # themselves. This parser is built by hand, and `add_subcommands` adds nothing to a subparser, so the flag has
+        # to be asked for here -- per subparser, because that is the level the arguments a config file would set
+        # actually live at.
         subparser.add_argument(f"--{_CONFIG_FLAG}", action="config")
         if name == "build-tiles":
             # Preserve the operation's root/config key while accepting the spelling
@@ -148,10 +141,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     config = build_parser().parse_args(argv)
     command = str(config.command)
     arguments = config[command].as_dict()
-    # `ActionConfigFile` has already applied the file's contents to the real arguments by
-    # the time parsing returns; what stays in the namespace is a record of which file was
-    # read, and no operation function has a parameter for it. Splatting it through would
-    # make every subcommand a TypeError -- including the ones invoked without `--config`,
+    # `ActionConfigFile` has already applied the file's contents to the real arguments by the time parsing returns; what
+    # stays in the namespace is a record of which file was read, and no operation function has a parameter for it.
+    # Splatting it through would make every subcommand a TypeError -- including the ones invoked without `--config`,
     # whose namespace carries the key with `None` in it.
     arguments.pop(_CONFIG_FLAG, None)
     return SUBCOMMANDS[command](**arguments)

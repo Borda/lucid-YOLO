@@ -1,16 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Compare packed training input restoration and 300-mask decode across revisions.
 
-Measures the same input work on two revisions, without a model, so a before/after
-pair on one device shows what WP-214 changed. Synthetic host collation is untimed;
-each timed sample covers the device transfer, the datamodule restore hook and the
-public box, rotated and point padding. The decode sample always scores 300 instances,
-the evaluation cap. Every entry point it calls exists on WP-213 as well, so the same
-file runs on both revisions.
+Measures the same input work on two revisions, without a model, so a before/after pair on one device shows what
+WP-214 changed. Synthetic host collation is untimed; each timed sample covers the device transfer, the datamodule
+restore hook and the public box, rotated and point padding. The decode sample always scores 300 instances, the
+evaluation cap. Every entry point it calls exists on WP-213 as well, so the same file runs on both revisions.
 
-It prints one JSON line: median wall times in milliseconds and the CUDA peak
-allocated memory in MiB, ``null`` on CPU and MPS. Invalid arguments and an
-unavailable device raise normally. Usage::
+It prints one JSON line: median wall times in milliseconds and the CUDA peak allocated memory in MiB, ``null`` on
+CPU and MPS. Invalid arguments and an unavailable device raise normally. Usage::
 
     python scripts/bench_input_path.py --device cpu --iterations 10
 """

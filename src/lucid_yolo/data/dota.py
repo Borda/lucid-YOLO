@@ -1,62 +1,52 @@
 # SPDX-License-Identifier: Apache-2.0
 """DOTA-v1.0 label parsing and long-edge conversion for the oriented path (WP-056).
 
-The dataset (R18) annotates each object with an "arbitrary quadrilateral bounding box"
-``{(x_i, y_i), i=1,2,3,4}`` whose "vertices are arranged in a clockwise order", one object
-per line of a ``labelTxt`` file::
+The dataset (R18) annotates each object with an "arbitrary quadrilateral bounding box" ``{(x_i, y_i), i=1,2,3,4}``
+whose "vertices are arranged in a clockwise order", one object per line of a ``labelTxt`` file::
 
     imagesource:GoogleEarth
     gsd:0.146343590398
     x1 y1 x2 y2 x3 y3 x4 y4 category difficult
 
-Leading ``key:value`` metadata lines (``imagesource``, ``gsd``, and in some releases
-``'acquisition dates'``) are skipped; blank lines are ignored; every other line must carry
-exactly ten whitespace-separated fields, ``difficult`` being "1 for difficult, 0 for not
-difficult". Anything else is rejected with the file, the 1-based line number and the
-offending text — a label file this reader cannot account for is a dataset problem, not a
-line to drop quietly.
+Leading ``key:value`` metadata lines (``imagesource``, ``gsd``, and in some releases ``'acquisition dates'``) are
+skipped; blank lines are ignored; every other line must carry exactly ten whitespace-separated fields,
+``difficult`` being "1 for difficult, 0 for not difficult". Anything else is rejected with the file, the 1-based line
+number and the offending text — a label file this reader cannot account for is a dataset problem, not a line to drop
+quietly.
 
-Vertex order carries meaning in R18 (the first point marks the "head" for plane, ship,
-harbor, helicopter, large/small vehicle and baseball diamond, and the top-left corner
-otherwise), but none of it survives the conversion to a long-edge box, which is symmetric
-under a half turn by construction (see :mod:`lucid_yolo.data.rotated_geom`). This reader
-therefore neither relies on the ordering nor enforces it: :func:`~lucid_yolo.data.rotated_geom.polygons_to_rboxes`
-is invariant to any cyclic rotation or reversal of the ring.
+Vertex order carries meaning in R18 (the first point marks the "head" for plane, ship, harbor, helicopter,
+large/small vehicle and baseball diamond, and the top-left corner otherwise), but none of it survives the conversion
+to a long-edge box, which is symmetric under a half turn by construction (see :mod:`lucid_yolo.data.rotated_geom`).
+This reader therefore neither relies on the ordering nor enforces it:
+:func:`~lucid_yolo.data.rotated_geom.polygons_to_rboxes` is invariant to any cyclic rotation or reversal of the ring.
 
 Category names:
-    :data:`DOTA_CLASSES` lists the 15 categories in the order R18 publishes them; the
-    index into it *is* the class id. The label files on disk write the multi-word names
-    with hyphens or underscores (``storage-tank``, ``soccer-ball-field``,
-    ``ground_track_field``), so names are **normalized on read** — lower-cased, with ``-``
-    and ``_`` treated as spaces and runs of whitespace collapsed. A name that does not
-    resolve after normalization raises rather than being dropped: a silently skipped
-    category is a silently shrunken dataset.
+    :data:`DOTA_CLASSES` lists the 15 categories in the order R18 publishes them; the index into it *is* the class id.
+    The label files on disk write the multi-word names with hyphens or underscores (``storage-tank``,
+    ``soccer-ball-field``, ``ground_track_field``), so names are **normalized on read** — lower-cased, with ``-`` and
+    ``_`` treated as spaces and runs of whitespace collapsed. A name that does not resolve after normalization raises
+    rather than being dropped: a silently skipped category is a silently shrunken dataset.
 
 Instance-axis invariant (relied on by WP-058, WP-061 and WP-088):
-    The oriented path keeps the rotated-box axis **1:1 with the instance axis**.
-    ``rboxes[i]`` is the oriented box of the same instance as ``boxes[i]`` and
-    ``labels[i]``, so ``targets.filter(keep, rkeep=keep)`` keeps every modality aligned
-    with a single mask. :class:`~lucid_yolo.data.targets.Targets` permits this — it
-    validates the two axes separately and never couples their lengths — and the pairing is
-    what gives the existing axis-aligned transforms an envelope to work with.
+    The oriented path keeps the rotated-box axis **1:1 with the instance axis**. ``rboxes[i]`` is the oriented box of
+    the same instance as ``boxes[i]`` and ``labels[i]``, so ``targets.filter(keep, rkeep=keep)`` keeps every modality
+    aligned with a single mask. :class:`~lucid_yolo.data.targets.Targets` permits this — it validates the two axes
+    separately and never couples their lengths — and the pairing is what gives the existing axis-aligned transforms
+    an envelope to work with.
 
-    ``boxes[i]`` is the axis-aligned envelope of the **annotated quadrilateral**, not of
-    the fitted rectangle. The two coincide when the quad is an exact rectangle and differ
-    by the hand-drawn quad's own residual otherwise; the envelope of what was annotated is
-    the honest axis-aligned reading of the annotation. Boxes are **not** clipped to the
-    image: a label file carries no image size, and WP-057's 1024 px tiling is where
-    geometry meets the canvas.
+    ``boxes[i]`` is the axis-aligned envelope of the **annotated quadrilateral**, not of the fitted rectangle. The two
+    coincide when the quad is an exact rectangle and differ by the hand-drawn quad's own residual otherwise; the
+    envelope of what was annotated is the honest axis-aligned reading of the annotation. Boxes are **not** clipped to
+    the image: a label file carries no image size, and WP-057's 1024 px tiling is where geometry meets the canvas.
 
-    ``polygons`` stays empty. The quad is already carried losslessly by ``rboxes`` up to
-    the rectangle fit, and a second copy would be one more modality WP-058 has to keep
-    consistent through every warp for no reader.
+    ``polygons`` stays empty. The quad is already carried losslessly by ``rboxes`` up to the rectangle fit, and a
+    second copy would be one more modality WP-058 has to keep consistent through every warp for no reader.
 
 The ``difficult`` flag:
-    Neither R1 nor R18 settles whether difficult instances are trained on, so this module
-    does not decide either (A39). The flag is parsed and carried on every
-    :class:`DotaObject`, and ``keep_difficult`` is a **required** keyword argument of both
-    loaders, so every call site states its choice. The tier-level policy lands with
-    WP-063's evaluation protocol and WP-088's training path.
+    Neither R1 nor R18 settles whether difficult instances are trained on, so this module does not decide either
+    (A39). The flag is parsed and carried on every :class:`DotaObject`, and ``keep_difficult`` is a **required**
+    keyword argument of both loaders, so every call site states its choice. The tier-level policy lands with WP-063's
+    evaluation protocol and WP-088's training path.
 """
 
 from __future__ import annotations
@@ -138,10 +128,9 @@ class DotaObject:
 def parse_dota_label_file(label_file: Path) -> list[DotaObject]:
     """Parse one ``labelTxt`` file into its objects, in file order.
 
-    Metadata header lines and blank lines are skipped; every remaining line must be a
-    well-formed object line (see the module docstring). Category names are normalized
-    before lookup, so ``storage-tank``, ``storage_tank`` and ``Storage Tank`` all resolve
-    to the same class id.
+    Metadata header lines and blank lines are skipped; every remaining line must be a well-formed object line (see
+    the module docstring). Category names are normalized before lookup, so ``storage-tank``, ``storage_tank`` and
+    ``Storage Tank`` all resolve to the same class id.
 
     Args:
         label_file: Path to the image's ``labelTxt`` file.
@@ -151,10 +140,9 @@ def parse_dota_label_file(label_file: Path) -> list[DotaObject]:
         headers or nothing at all.
 
     Raises:
-        ValueError: If any line is not a header and not a well-formed object line — wrong
-            field count, non-numeric coordinate, unknown category or a ``difficult`` flag
-            that is neither ``0`` nor ``1``. The message names the file and the 1-based
-            line number.
+        ValueError: If any line is not a header and not a well-formed object line — wrong field count, non-numeric
+            coordinate, unknown category or a ``difficult`` flag that is neither ``0`` nor ``1``. The message names
+            the file and the 1-based line number.
         OSError: If the file cannot be read.
 
     Examples:
@@ -178,10 +166,9 @@ def parse_dota_label_file(label_file: Path) -> list[DotaObject]:
 def dota_targets(objects: Sequence[DotaObject], *, keep_difficult: bool) -> Targets:
     """Convert parsed objects into :class:`~lucid_yolo.data.targets.Targets`.
 
-    Each kept object contributes one entry to all three of ``boxes``, ``labels`` and
-    ``rboxes``, on the shared instance axis the module docstring pins: ``rboxes[i]`` is the
-    canonical long-edge box fitted to the same quadrilateral whose envelope is ``boxes[i]``.
-    ``polygons`` is left empty.
+    Each kept object contributes one entry to all three of ``boxes``, ``labels`` and ``rboxes``, on the shared instance
+    axis the module docstring pins: ``rboxes[i]`` is the canonical long-edge box fitted to the same quadrilateral
+    whose envelope is ``boxes[i]``. ``polygons`` is left empty.
 
     ``keep_difficult`` has no default on purpose (A39): the papers do not settle whether
     difficult instances are trained on, so the caller says.
@@ -223,9 +210,8 @@ def dota_targets(objects: Sequence[DotaObject], *, keep_difficult: bool) -> Targ
 def load_dota_targets(label_file: Path, *, keep_difficult: bool) -> Targets:
     """Load one image's ``labelTxt`` file straight into targets.
 
-    A thin composition of :func:`parse_dota_label_file` and :func:`dota_targets`; the
-    intermediate objects are worth reaching for only when the ``difficult`` flags
-    themselves matter.
+    A thin composition of :func:`parse_dota_label_file` and :func:`dota_targets`; the intermediate objects are worth
+    reaching for only when the ``difficult`` flags themselves matter.
 
     Args:
         label_file: Path to the image's ``labelTxt`` file.

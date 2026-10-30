@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-013 photometric HSV jitter and horizontal flip (blueprint section 5.9).
 
-Covers the HSV converter round-trip fidelity and the jitter's identity/clamp/wrap
-behaviour with targets left untouched, plus the flip's per-modality mirroring
-(boxes, polygons, rotated boxes), image column reversal, double-flip identity, the
-``p=0``/``p=1`` boundaries and seeded determinism of the flip draw.
+Covers the HSV converter round-trip fidelity and the jitter's identity/clamp/wrap behaviour with targets left untouched,
+plus the flip's per-modality mirroring (boxes, polygons, rotated boxes), image column reversal, double-flip identity,
+the ``p=0``/``p=1`` boundaries and seeded determinism of the flip draw.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import pytest
 import torch
@@ -48,14 +48,18 @@ class TestConverters:
         restored = hsv_to_rgb(rgb_to_hsv(image))
         assert torch.allclose(restored, image, atol=1e-4)
 
-    def test_primary_colours(self) -> None:
+    @pytest.mark.parametrize(
+        ("rgb", "expected_hsv"),
+        [
+            pytest.param([1.0, 0.0, 0.0], [0.0, 1.0, 1.0], id="red"),
+            pytest.param([0.0, 1.0, 0.0], [1.0 / 3.0, 1.0, 1.0], id="green"),
+            pytest.param([0.0, 0.0, 1.0], [2.0 / 3.0, 1.0, 1.0], id="blue"),
+        ],
+    )
+    def test_primary_colours(self, rgb: list[float], expected_hsv: list[float]) -> None:
         """Pure red/green/blue map to hue 0, 1/3, 2/3 with full saturation and value."""
-        red = torch.tensor([1.0, 0.0, 0.0]).reshape(3, 1, 1)
-        green = torch.tensor([0.0, 1.0, 0.0]).reshape(3, 1, 1)
-        blue = torch.tensor([0.0, 0.0, 1.0]).reshape(3, 1, 1)
-        assert torch.allclose(rgb_to_hsv(red).flatten(), torch.tensor([0.0, 1.0, 1.0]), atol=1e-6)
-        assert torch.allclose(rgb_to_hsv(green).flatten(), torch.tensor([1.0 / 3.0, 1.0, 1.0]), atol=1e-6)
-        assert torch.allclose(rgb_to_hsv(blue).flatten(), torch.tensor([2.0 / 3.0, 1.0, 1.0]), atol=1e-6)
+        pixel = torch.tensor(rgb).reshape(3, 1, 1)
+        assert torch.allclose(rgb_to_hsv(pixel).flatten(), torch.tensor(expected_hsv), atol=1e-6)
 
     def test_greyscale_achromatic(self) -> None:
         """A grey pixel has zero saturation and its value equals the grey level."""
@@ -64,12 +68,21 @@ class TestConverters:
         assert torch.allclose(hsv[1], torch.zeros_like(hsv[1]))
         assert torch.allclose(hsv[2], torch.full_like(hsv[2], 0.4))
 
-    def test_shape_guard(self) -> None:
-        """Both converters reject a non-3-channel image."""
+    @pytest.mark.parametrize(
+        ("converter", "bad_image"),
+        [
+            pytest.param(rgb_to_hsv, torch.zeros(4, 2, 2), id="rgb_to_hsv-four-channels"),
+            pytest.param(hsv_to_rgb, torch.zeros(2, 2), id="hsv_to_rgb-no-channel-axis"),
+        ],
+    )
+    def test_shape_guard(self, converter: Callable[[torch.Tensor], torch.Tensor], bad_image: torch.Tensor) -> None:
+        """Both converters reject an image that is not ``(3, H, W)``.
+
+        ``rgb_to_hsv`` gets a 4-channel image and ``hsv_to_rgb`` a 2-D one; each must fail with the shape message
+        instead of broadcasting.
+        """
         with pytest.raises(ValueError, match="3, H, W"):
-            rgb_to_hsv(torch.rand(4, 2, 2))
-        with pytest.raises(ValueError, match="3, H, W"):
-            hsv_to_rgb(torch.rand(2, 2))
+            converter(bad_image)
 
 
 class TestHSVJitter:
@@ -92,14 +105,18 @@ class TestHSVJitter:
         out = hsv_to_rgb(shifted)
         assert torch.allclose(out.flatten(), torch.tensor([0.0, 1.0, 1.0]), atol=1e-4)
 
-    def test_output_stays_in_unit_range(self) -> None:
-        """Extreme s/v gain ranges never push the output outside [0, 1] (clamp holds)."""
-        for seed in range(8):
-            jitter = HSVJitter(hsv_h=0.0, hsv_s=5.0, hsv_v=5.0, generator=seeded_generator(seed))
-            image = torch.rand(3, 8, 8) * 0.5 + 0.25
-            out_image, _ = jitter(image, Targets.empty())
-            assert out_image.min() >= 0.0
-            assert out_image.max() <= 1.0 + 1e-6
+    @pytest.mark.parametrize("seed", range(8))
+    def test_output_stays_in_unit_range(self, seed: int) -> None:
+        """Extreme s/v gain ranges never push the output outside [0, 1] (clamp holds).
+
+        Eight generator seeds draw different gains from the 5.0-wide saturation and value ranges; none may leave the
+        unit interval.
+        """
+        jitter = HSVJitter(hsv_h=0.0, hsv_s=5.0, hsv_v=5.0, generator=seeded_generator(seed))
+        image = torch.rand(3, 8, 8) * 0.5 + 0.25
+        out_image, _ = jitter(image, Targets.empty())
+        assert out_image.min() >= 0.0
+        assert out_image.max() <= 1.0 + 1e-6
 
     def test_saturation_multiplier_clamps_at_one(self) -> None:
         """A multiplicative saturation boost past 1.0 clamps rather than overflowing."""
@@ -112,7 +129,11 @@ class TestHSVJitter:
         assert rgb.max() <= 1.0 + 1e-6
 
     def test_targets_pass_through_untouched(self) -> None:
-        """The returned targets are the exact same tensors as the input geometry."""
+        """The returned targets are the exact same tensors as the input geometry.
+
+        A photometric transform must not touch geometry, so the very same ``Targets`` object (not a copy) comes back
+        with boxes and rotated boxes equal.
+        """
         jitter = HSVJitter(generator=seeded_generator())
         targets = _targets()
         _, out_targets = jitter(torch.rand(3, 8, 8), targets)
@@ -136,12 +157,10 @@ class TestHorizontalFlip:
     def test_mirror_axis_image_column_reversal(self) -> None:
         """The mirror is about ``(W-1)/2``, the axis ``image.flip(-1)`` itself reflects about — not ``W/2``.
 
-        ``W-1`` versus ``W`` is a real choice and both appear in the wild, so it is
-        asserted here by its consequence rather than restated as a formula: a box drawn
-        tightly around a bright block must still bound that block after both are
-        mirrored. Under the ``W`` convention the block lands at columns ``{6, 7}`` while
-        the box is carried to ``[7, 8]`` — off by exactly one pixel, and every downstream
-        coordinate inherits the error.
+        ``W-1`` versus ``W`` is a real choice and both appear in the wild, so it is asserted here by its consequence
+        rather than restated as a formula: a box drawn tightly around a bright block must still bound that block
+        after both are mirrored. Under the ``W`` convention the block lands at columns ``{6, 7}`` while the box is
+        carried to ``[7, 8]`` — off by exactly one pixel, and every downstream coordinate inherits the error.
         """
         flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         width = 10
@@ -159,11 +178,10 @@ class TestHorizontalFlip:
     def test_box_at_canvas_bound_re_clipped(self) -> None:
         """A box whose ``x2`` sits at the reader's clamp bound ``W`` mirrors to ``x1 = -1`` and is re-clipped.
 
-        The two conventions meet here: extents are clamped to ``[0, W]`` (``coco.py``,
-        ``affine.py``, ``fuse``'s own ``clip_bbox_xyxy``) while the mirror reflects about
-        ``(W-1)/2``, so a box legitimately touching the right edge comes back one pixel
-        off the left edge. The flip is the last stage of the train pipeline, so without a
-        re-clip that negative coordinate is what the assigner receives.
+        The two conventions meet here: extents are clamped to ``[0, W]`` (``coco.py``, ``affine.py``, ``fuse``'s own
+        ``clip_bbox_xyxy``) while the mirror reflects about ``(W-1)/2``, so a box legitimately touching the right edge
+        comes back one pixel off the left edge. The flip is the last stage of the train pipeline, so without a re-clip
+        that negative coordinate is what the assigner receives.
         """
         flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         width = 10
@@ -176,9 +194,8 @@ class TestHorizontalFlip:
     def test_double_flip_identity(self) -> None:
         """Flipping boxes twice returns the original coordinates.
 
-        The canvas holds the whole target set here: the involution is a property of the
-        mirror, and the re-clip that keeps the assigner on-canvas necessarily breaks it
-        for geometry that started outside the canvas.
+        The canvas holds the whole target set here: the involution is a property of the mirror, and the re-clip that
+        keeps the assigner on-canvas necessarily breaks it for geometry that started outside the canvas.
         """
         flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         image = torch.rand(3, 64, 64)
@@ -199,7 +216,11 @@ class TestHorizontalFlip:
             assert torch.allclose(dst[:, 1], src[:, 1])
 
     def test_keypoints_mirror_without_identity_swap(self) -> None:
-        """Without pairs, every x coordinate mirrors while keypoint-column order stays fixed."""
+        """Without pairs, every x coordinate mirrors while keypoint-column order stays fixed.
+
+        With no ``keypoint_flip_pairs`` (A64) the transform cannot know which points are left/right partners, so
+        coordinates mirror in place and visibility columns keep their order.
+        """
         flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         targets = Targets(
             boxes=torch.zeros((1, 4)),
@@ -212,7 +233,11 @@ class TestHorizontalFlip:
         assert out.keypoint_vis.tolist() == [[2, 1]]
 
     def test_keypoints_mirror_and_swap_supplied_pairs(self) -> None:
-        """A supplied pair swaps mirrored coordinates and visibility columns together."""
+        """A supplied pair swaps mirrored coordinates and visibility columns together.
+
+        Pair ``(0, 1)`` exchanges the two points after mirroring, and the visibility values must travel with their
+        points.
+        """
         flip = HorizontalFlip(p=1.0, generator=seeded_generator(), keypoint_flip_pairs=[(0, 1)])
         targets = Targets(
             boxes=torch.zeros((1, 4)),
@@ -227,13 +252,11 @@ class TestHorizontalFlip:
     def test_mirrored_visibility_flags_follow_own_points(self) -> None:
         """Every flag stays attached to its own point across the mirror and the identity swap.
 
-        The coordinate permutation is upstream's and moves coordinates only, so the
-        visibility permutation is this transform's own (WP-157). Dropping it leaves shapes
-        identical and every coordinate assertion passing while a visible point arrives
-        marked occluded and its partner marked visible -- which is why the invariant asserted
-        here is the *pairing* of each mirrored point with its flag, not the two columns
-        separately. The third slot is unpaired on purpose: it pins that an identity slot
-        neither moves nor loses its flag.
+        The coordinate permutation is upstream's and moves coordinates only, so the visibility permutation is this
+        transform's own (WP-157). Dropping it leaves shapes identical and every coordinate assertion passing while a
+        visible point arrives marked occluded and its partner marked visible -- which is why the invariant asserted
+        here is the *pairing* of each mirrored point with its flag, not the two columns separately. The third slot is
+        unpaired on purpose: it pins that an identity slot neither moves nor loses its flag.
         """
         width = 10
         flip = HorizontalFlip(p=1.0, generator=seeded_generator(), keypoint_flip_pairs=[(0, 2)])
@@ -259,7 +282,10 @@ class TestHorizontalFlip:
         assert out.keypoint_vis.tolist() == [[1, 0, 2]]
 
     def test_out_of_range_keypoint_pair_raises(self) -> None:
-        """Pairs outside the supplied K-point axis are rejected with a clear error."""
+        """Pairs outside the supplied K-point axis are rejected with a clear error.
+
+        Pair ``(0, 2)`` names a third point, but the targets carry only ``K=2`` points.
+        """
         flip = HorizontalFlip(p=1.0, generator=seeded_generator(), keypoint_flip_pairs=[(0, 2)])
         targets = Targets(
             boxes=torch.zeros((1, 4)),
@@ -288,7 +314,10 @@ class TestHorizontalFlip:
         assert torch.equal(out_image, image.flip(-1))
 
     def test_p_zero_identity(self) -> None:
-        """p=0 never flips: image and targets are returned unchanged."""
+        """p=0 never flips: image and targets are returned unchanged.
+
+        The very same targets object comes back and ``last_flipped`` reports False, so no clone or mirror ran.
+        """
         flip = HorizontalFlip(p=0.0, generator=seeded_generator())
         image = torch.rand(3, 4, 6)
         targets = _targets()

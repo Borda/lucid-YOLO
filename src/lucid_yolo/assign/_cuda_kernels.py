@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Device passes for the existing dense assignment expressions.
 
-No reduction adds floating-point values: row maxima and first-index argmax retain
-TAL's choices. Native PyTorch still supplies the IoU power and rotated sine/cosine,
-whose library implementations must not be approximated by the compiler.
+No reduction adds floating-point values: row maxima and first-index argmax retain TAL's choices. Native PyTorch still
+supplies the IoU power and rotated sine/cosine, whose library implementations must not be approximated by the compiler.
 """
 
 from types import MappingProxyType

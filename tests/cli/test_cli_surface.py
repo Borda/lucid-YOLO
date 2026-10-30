@@ -1,26 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate on the installed command surface (WP-096).
 
-Four console scripts are declared in ``pyproject.toml`` and none of them is exercised by
-importing the library: a rename or a move breaks the *installed* command while every
-other test keeps passing, which is how ``scripts/`` tooling drifted out of reach of a
-wheel in the first place. These tests resolve each declared target the way a console
-script does and drive the two new commands end to end.
+Four console scripts are declared in ``pyproject.toml`` and none of them is exercised by importing the library: a rename
+or a move breaks the *installed* command while every other test keeps passing, which is how ``scripts/`` tooling drifted
+out of reach of a wheel in the first place. These tests resolve each declared target the way a console script does and
+drive the two new commands end to end.
 
-``lucid-eval``'s dispatch is asserted on both branches with the protocol functions
-stubbed: what is under test is that the checkpoint's own task chooses the protocol and
-supplies the per-task defaults, not the evaluation itself, which its own suites cover.
+``lucid-eval``'s dispatch is asserted on both branches with the protocol functions stubbed: what is under test is that
+the checkpoint's own task chooses the protocol and supplies the per-task defaults, not the evaluation itself, which its
+own suites cover.
 
-The refusal group (WP-171) is the other half of that surface: what a command does with a
-value its annotation admits and its arithmetic cannot use. Each case asserts the message
-names the flag the caller typed, because the flag is the only part of the refusal they
-can act on -- a ``ValueError`` reading "invalid value" leaves a caller re-reading their
-own command line. The values are the ones that used to answer *plausibly* rather than
-fail: ``--limit -5`` scored every image but the last five, ``--batch_size 0`` reached a
-``ZeroDivisionError`` three frames down, ``--img_size 641`` crashed inside the neck's
-concatenation, a mis-spelled ``--decoder`` returned the other branch's boxes, a negative
-``--conf_threshold`` admitted the decoders' score-zero padding rows as detections, and an
-unknown task was scored as detection.
+The refusal group (WP-171) is the other half of that surface: what a command does with a value its annotation admits and
+its arithmetic cannot use. Each case asserts the message names the flag the caller typed, because the flag is the only
+part of the refusal they can act on -- a ``ValueError`` reading "invalid value" leaves a caller re-reading their own
+command line. The values are the ones that used to answer *plausibly* rather than fail: ``--limit -5`` scored every
+image but the last five, ``--batch_size 0`` reached a ``ZeroDivisionError`` three frames down, ``--img_size 641``
+crashed inside the neck's concatenation, a mis-spelled ``--decoder`` returned the other branch's boxes, a negative
+``--conf_threshold`` admitted the decoders' score-zero padding rows as detections, and an unknown task was scored as
+detection.
 """
 
 from __future__ import annotations
@@ -31,9 +28,11 @@ import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 
 import pytest
 import torch
+from cli_checkpoint_helpers import kwargs_recorder, save_lightning_checkpoint
 
 from lucid_yolo.assign.grid import HEAD_STRIDES
 from lucid_yolo.cli import data as data_cli
@@ -71,9 +70,9 @@ def _declared_scripts() -> dict[str, str]:
     return scripts
 
 
-#: Point count given to a ``keypoints`` checkpoint. ``num_keypoints`` has no default for
-#: that task -- ``K`` belongs to whichever schema supplies the points -- so the stub must
-#: name one, and COCO's person schema is the one ``pose_eval`` scores against.
+#: Point count given to a ``keypoints`` checkpoint. ``num_keypoints`` has no default for that task -- ``K`` belongs to
+#: whichever schema supplies the points -- so the stub must name one, and COCO's person schema is the one ``pose_eval``
+#: scores against.
 _COCO_PERSON_POINTS = 17
 
 
@@ -89,21 +88,17 @@ def _write_checkpoint(task: str, path: Path) -> Path:
     """
     points = _COCO_PERSON_POINTS if task == "keypoints" else None
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=2, task=task, num_keypoints=points)
-    torch.save(
-        {
-            "state_dict": module.state_dict(),
-            "hyper_parameters": dict(module.hparams),
-            "epoch": 0,
-            "global_step": 0,
-            "pytorch-lightning_version": "2.4.0",
-            "loops": {},
-            "callbacks": {},
-            "optimizer_states": [],
-            "lr_schedulers": [],
-        },
-        path,
-    )
-    return path
+    return save_lightning_checkpoint(module, path)
+
+
+def _load_panoptic(*_args: Any, **_kwargs: Any) -> tuple[SimpleNamespace, dict[str, Any]]:
+    """Stand in for ``load_eval_module`` with a module whose task no command implements.
+
+    Examples:
+        >>> _load_panoptic("any.ckpt")[0].task
+        'panoptic'
+    """
+    return SimpleNamespace(task="panoptic"), {}
 
 
 def test_every_declared_console_script_resolves() -> None:
@@ -140,18 +135,15 @@ def test_train_refuses_unsupported_subcommand(subcommand: str, capsys: pytest.Ca
     assert subcommand in error
 
 
-def test_train_command_exits_zero_after_subcommand_ran(monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(train_cli, "DetectionCLI", lambda *_args, **_kwargs: object())
+def test_train_command_exits_zero_after_subcommand_ran() -> None:
     """``lucid-yolo`` reports success as ``0``, not as the CLI object it built.
 
-    The console-script wrapper calls ``sys.exit(main())``, and :func:`sys.exit`
-    treats any non-``int`` value as failure — it prints the value and exits ``1``.
-    Until WP-185 ``main`` returned the constructed :class:`DetectionCLI`, so a
-    training run that had completed reported failure to every caller that checks
-    the status (a shell ``&&``, a notebook ``subprocess.run(check=True)``, CI).
-    The CLI is stubbed here because building it runs the subcommand.
+    The console-script wrapper calls ``sys.exit(main())``, and :func:`sys.exit` treats any non-``int`` value as failure
+    — it prints the value and exits ``1``. Until WP-185 ``main`` returned the constructed :class:`DetectionCLI`, so a
+    training run that had completed reported failure to every caller that checks the status (a shell ``&&``, a notebook
+    ``subprocess.run(check=True)``, CI). The CLI is stubbed here because building it runs the subcommand.
     """
-    monkeypatch.setattr(train_cli, "DetectionCLI", lambda *_args, **_kwargs: object())
-
     assert train_cli.main(["fit"]) == 0
 
 
@@ -192,8 +184,8 @@ def test_eval_dispatches_on_checkpoints_own_task(
 ) -> None:
     """The protocol and its defaults come from the checkpoint, with no task flag anywhere.
 
-    Both protocol entry points are stubbed, so a wrong dispatch shows up as the other
-    stub recording the call rather than as a numerically odd report.
+    Both protocol entry points are stubbed, so a wrong dispatch shows up as the other stub recording the call rather
+    than as a numerically odd report.
     """
     calls: dict[str, dict[str, Any]] = {}
 
@@ -220,12 +212,7 @@ def test_eval_dispatches_on_checkpoints_own_task(
 def test_explicit_size_beats_task_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A caller who names ``--img_size`` gets it, oriented default or not."""
     seen: dict[str, Any] = {}
-
-    def stub(_module: object, _info: dict[str, object], **kwargs: Any) -> int:
-        seen.update(kwargs)
-        return 0
-
-    monkeypatch.setattr(eval_cli.rotated_eval, "run", stub)
+    monkeypatch.setattr(eval_cli.rotated_eval, "run", kwargs_recorder(seen))
     checkpoint = _write_checkpoint("obb", tmp_path / "obb.ckpt")
 
     eval_cli.main(
@@ -252,11 +239,10 @@ def test_predict_dispatches_on_checkpoints_own_task(
 ) -> None:
     """Each task reaches its own inference entry point, with no task flag anywhere.
 
-    All four entry points are stubbed, so a wrong dispatch shows up as another stub
-    recording the call. The keypoint case is why this test exists: until WP-152 the
-    command had three branches and a ``keypoints`` checkpoint silently fell through to
-    the detection one, answering with boxes and never consulting the point stem -- a
-    plausible answer, no error, and the pose the caller asked for absent.
+    All four entry points are stubbed, so a wrong dispatch shows up as another stub recording the call. The keypoint
+    case is why this test exists: until WP-152 the command had three branches and a ``keypoints`` checkpoint silently
+    fell through to the detection one, answering with boxes and never consulting the point stem -- a plausible answer,
+    no error, and the pose the caller asked for absent.
     """
     called: list[str] = []
 
@@ -291,9 +277,8 @@ def test_predict_dispatches_on_checkpoints_own_task(
 def test_keypoint_report_names_point_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A keypoint report carries the point layout and ``K``; the other reports are untouched.
 
-    ``K`` is a property of the checkpoint's schema (A64), so a report that omitted it
-    would leave a reader unable to tell a 17-point human pose from a 15-point letter one
-    without re-loading the checkpoint that wrote it.
+    ``K`` is a property of the checkpoint's schema (A64), so a report that omitted it would leave a reader unable to
+    tell a 17-point human pose from a 15-point letter one without re-loading the checkpoint that wrote it.
     """
     points = torch.tensor([[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]])
     detections = torch.tensor([[0.0, 0.0, 8.0, 8.0, 0.9, 1.0]])
@@ -316,11 +301,10 @@ def test_keypoint_report_names_point_layout(tmp_path: Path, monkeypatch: pytest.
 def test_deprecated_download_alias_gone() -> None:
     """``lucid-download`` is no longer declared, and the entry point it named is gone too.
 
-    0.3.0 deprecated the alias in favour of ``lucid-data download`` and put the removal in
-    writing for 0.4.0 (WP-096), which WP-110 carried out. This asserts the absence rather
-    than merely dropping the old test: a removal nothing asserts is one a later copy-paste
-    can silently undo, and the entry point is the half that would come back unnoticed —
-    a stale ``[project.scripts]`` line at least fails to resolve.
+    0.3.0 deprecated the alias in favour of ``lucid-data download`` and put the removal in writing for 0.4.0 (WP-096),
+    which WP-110 carried out. This asserts the absence rather than merely dropping the old test: a removal nothing
+    asserts is one a later copy-paste can silently undo, and the entry point is the half that would come back
+    unnoticed — a stale ``[project.scripts]`` line at least fails to resolve.
     """
     assert "lucid-download" not in _declared_scripts()
     assert not hasattr(download, "main")
@@ -338,26 +322,21 @@ def test_deprecated_download_alias_gone() -> None:
 def test_eval_refuses_argument_outside_domain(tmp_path: Path, argument: str, flag: str) -> None:
     """``lucid-eval`` refuses each unusable flag by name, before it opens the checkpoint.
 
-    The checkpoint path does not exist and that is the assertion's other half: the
-    refusal has to come from the flag rather than from the first thing downstream to
-    trip over it, or the caller reads a ``FileNotFoundError`` and never learns which of
-    their flags was the problem. Each value here used to be accepted: ``-5`` is truthy,
-    so ``images[:-5]`` scored every image *but* the last five while the banner printed
-    the truncated count as the request; ``0`` reached ``math.ceil(len(images) / 0)``; and
-    ``641`` reached the neck, which concatenates an upsampled P5 of width 42 with a P4 of
-    width 41.
+    The checkpoint path does not exist and that is the assertion's other half: the refusal has to come from the flag
+    rather than from the first thing downstream to trip over it, or the caller reads a ``FileNotFoundError`` and never
+    learns which of their flags was the problem. Each value here used to be accepted: ``-5`` is truthy, so
+    ``images[:-5]`` scored every image *but* the last five while the banner printed the truncated count as the request;
+    ``0`` reached ``math.ceil(len(images) / 0)``; and ``641`` reached the neck, which concatenates an upsampled P5 of
+    width 42 with a P4 of width 41.
     """
     with pytest.raises(ValueError, match=flag):
         eval_cli.main(["--checkpoint", str(tmp_path / "absent.ckpt"), "--data_root", str(tmp_path), argument])
 
 
 @pytest.mark.parametrize("img_size", [None, 640])
-def test_predict_refuses_unknown_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, img_size: int | None) -> None:
+@patch.object(predict_cli, "load_eval_module", _load_panoptic)
+def test_predict_refuses_unknown_task(tmp_path: Path, img_size: int | None) -> None:
     """Unknown checkpoint tasks are named before prediction, even with an explicit size."""
-    monkeypatch.setattr(
-        predict_cli, "load_eval_module", lambda *_args, **_kwargs: (SimpleNamespace(task="panoptic"), {})
-    )
-
     with pytest.raises(ValueError, match="task") as refusal:
         predict_cli.predict(tmp_path / "unknown.ckpt", tmp_path / "absent.jpg", img_size=img_size)
 
@@ -365,19 +344,16 @@ def test_predict_refuses_unknown_task(tmp_path: Path, monkeypatch: pytest.Monkey
     assert str(refusal.value) == f"task must be one of {tuple(eval_cli.DEFAULT_IMG_SIZE)}; got 'panoptic'"
 
 
-def test_eval_refuses_task_it_has_no_protocol_for(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(eval_cli, "load_eval_module", _load_panoptic)
+def test_eval_refuses_task_without_protocol(tmp_path: Path) -> None:
     """A checkpoint task this command implements nothing for is named, not scored as detection.
 
-    The dispatch branches for ``obb`` and ``keypoints`` and ends in the detection
-    protocol, so every other task value fell through and was *scored* — a report carrying
-    detection's numbers under the checkpoint's own task name, which nothing in the file
-    contradicts. The module is stubbed rather than saved, because
-    :class:`~lucid_yolo.ptl.module.DetectionLitModule` refuses an unknown task at
-    construction: the gap was only ever reachable through a checkpoint this repository
-    cannot write, which is exactly why nothing caught it.
+    The dispatch branches for ``obb`` and ``keypoints`` and ends in the detection protocol, so every other task value
+    fell through and was *scored* — a report carrying detection's numbers under the checkpoint's own task name, which
+    nothing in the file contradicts. The module is stubbed rather than saved, because
+    :class:`~lucid_yolo.ptl.module.DetectionLitModule` refuses an unknown task at construction: the gap was only ever
+    reachable through a checkpoint this repository cannot write, which is exactly why nothing caught it.
     """
-    monkeypatch.setattr(eval_cli, "load_eval_module", lambda *_args, **_kwargs: (SimpleNamespace(task="panoptic"), {}))
-
     with pytest.raises(ValueError, match="task") as refusal:
         eval_cli.main(["--checkpoint", str(tmp_path / "absent.ckpt"), "--data_root", str(tmp_path)])
 
@@ -397,13 +373,11 @@ def test_eval_refuses_task_it_has_no_protocol_for(tmp_path: Path, monkeypatch: p
 def test_predict_refuses_argument_outside_domain(tmp_path: Path, overrides: dict[str, Any], flag: str) -> None:
     """``lucid-predict`` refuses each unusable flag by name, before it reads the image.
 
-    The refusal belongs to the four entry points of :mod:`lucid_yolo.predict` rather than
-    to this command — the same ownership the task refusal already has, so a direct
-    library call and a command line cannot disagree about which values are usable — and
-    this asserts it arrives through the command with the flag's own spelling in it.
-    ``"E2E"`` and ``"nms "`` are the cases worth naming: both used to select the
-    one-to-many branch by falling through ``decoder == "e2e"``, answering with another
-    path's boxes and, for an oriented checkpoint, another path's headings.
+    The refusal belongs to the four entry points of :mod:`lucid_yolo.predict` rather than to this command — the same
+    ownership the task refusal already has, so a direct library call and a command line cannot disagree about which
+    values are usable — and this asserts it arrives through the command with the flag's own spelling in it. ``"E2E"``
+    and ``"nms "`` are the cases worth naming: both used to select the one-to-many branch by falling through
+    ``decoder == "e2e"``, answering with another path's boxes and, for an oriented checkpoint, another path's headings.
     """
     checkpoint = _write_checkpoint("detect", tmp_path / "detect.ckpt")
 
@@ -411,15 +385,14 @@ def test_predict_refuses_argument_outside_domain(tmp_path: Path, overrides: dict
         predict_cli.predict(checkpoint=checkpoint, image=tmp_path / "image.jpg", ema=False, **overrides)
 
 
-def test_per_task_defaults_themselves_usable_values() -> None:
+def test_default_tables_hold_usable_values() -> None:
     """Both default tables cover the same tasks, and every value in them would be accepted.
 
-    The task guard reads its vocabulary off :data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE`,
-    and the resolved defaults skip the flag checks by construction — a caller who names
-    nothing is trusting these two tables. That makes the tables the one place an unusable
-    value could still reach a protocol, so they are pinned here rather than checked at
-    every call: a task added to one table alone, or a side the strides do not divide,
-    fails in this suite instead of in a queued run.
+    The task guard reads its vocabulary off :data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE`, and the resolved defaults
+    skip the flag checks by construction — a caller who names nothing is trusting these two tables. That makes the
+    tables the one place an unusable value could still reach a protocol, so they are pinned here rather than checked at
+    every call: a task added to one table alone, or a side the strides do not divide, fails in this suite instead of in
+    a queued run.
     """
     assert eval_cli.DEFAULT_IMG_SIZE.keys() == eval_cli.DEFAULT_BATCH_SIZE.keys()
     assert {side % max(HEAD_STRIDES) for side in eval_cli.DEFAULT_IMG_SIZE.values()} == {0}
@@ -432,12 +405,10 @@ class TestDataCommandConfigFlag:
     def test_config_file_supplies_subcommands_arguments(self, tmp_path: Path) -> None:
         """Values in a ``--config`` YAML land on the subcommand's own arguments.
 
-        ``AGENTS.md`` sec. 2 states that every command takes ``--config``, and three of
-        the four got one for free -- ``lucid-yolo`` from ``LightningCLI``, ``lucid-eval``
-        and ``lucid-predict`` from ``auto_cli``. This parser is built by hand and
-        ``add_subcommands`` adds nothing to a subparser, so ``lucid-data check --config
-        anything.yaml`` exited 2 with "unrecognized arguments" while the documentation
-        said otherwise.
+        ``AGENTS.md`` sec. 2 states that every command takes ``--config``, and three of the four got one for free --
+        ``lucid-yolo`` from ``LightningCLI``, ``lucid-eval`` and ``lucid-predict`` from ``auto_cli``. This parser is
+        built by hand and ``add_subcommands`` adds nothing to a subparser, so ``lucid-data check --config
+        anything.yaml`` exited 2 with "unrecognized arguments" while the documentation said otherwise.
         """
         config = tmp_path / "check.yaml"
         config.write_text("data_root: /data/from_config\ndataset: dota\n")
@@ -447,15 +418,12 @@ class TestDataCommandConfigFlag:
         assert parsed.check.data_root == Path("/data/from_config"), "annotated Path, so jsonargparse coerces"
         assert parsed.check.dataset == "dota"
 
-    @pytest.mark.parametrize(
-        "subcommand",
-        [pytest.param(name, id=name) for name in ("download", "check", "build-tiles")],
-    )
+    @pytest.mark.parametrize("subcommand", ["download", "check", "build-tiles"])
     def test_every_subcommand_advertises_flag(self, subcommand: str) -> None:
         """All three subcommands carry ``--config``, not just the one that was tested first.
 
-        The claim in ``AGENTS.md`` is about commands, and a fix applied to one subparser
-        would satisfy a single-case test while leaving the other two exactly as they were.
+        The claim in ``AGENTS.md`` is about commands, and a fix applied to one subparser would satisfy a single-case
+        test while leaving the other two exactly as they were.
         """
         parser = data_cli.build_parser()
 
@@ -467,11 +435,10 @@ class TestDataCommandConfigFlag:
         """``main`` drops the ``config`` namespace key before splatting into the operation.
 
         This is the half a parse-level assertion cannot see. ``main`` calls
-        ``SUBCOMMANDS[command](**config[command].as_dict())``, and ``ActionConfigFile``
-        leaves a ``config`` entry in that namespace naming the file it read -- a
-        parameter no operation function has. Left in, every invocation becomes a
-        ``TypeError``, including the ones with no ``--config`` on the command line, whose
-        namespace carries the key holding ``None``.
+        ``SUBCOMMANDS[command](**config[command].as_dict())``, and ``ActionConfigFile`` leaves a ``config`` entry in
+        that namespace naming the file it read -- a parameter no operation function has. Left in, every invocation
+        becomes a ``TypeError``, including the ones with no ``--config`` on the command line, whose namespace carries
+        the key holding ``None``.
         """
         config = tmp_path / "check.yaml"
         config.write_text(f"data_root: {tmp_path / 'absent'}\n")
@@ -483,8 +450,8 @@ class TestDataCommandConfigFlag:
     def test_invocation_without_config_runs(self, tmp_path: Path) -> None:
         """Omitting ``--config`` is unaffected by the key the flag adds to the namespace.
 
-        The ``None``-valued key is present whether or not the flag was typed, so this is
-        the case that would break silently if the drop were conditional on the flag.
+        The ``None``-valued key is present whether or not the flag was typed, so this is the case that would break
+        silently if the drop were conditional on the flag.
         """
         exit_code = data_cli.main(["check", "--data_root", str(tmp_path / "absent")])
 
@@ -494,23 +461,14 @@ class TestDataCommandConfigFlag:
 class TestPredictReportSerialisation:
     """The prediction report refuses what JSON cannot represent (audit M-18)."""
 
-    @pytest.mark.parametrize(
-        "bad",
-        [
-            pytest.param(float("nan"), id="nan"),
-            pytest.param(float("inf"), id="inf"),
-            pytest.param(float("-inf"), id="-inf"),
-        ],
-    )
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
     def test_non_finite_number_anywhere_refused(self, bad: float) -> None:
         """A ``NaN`` or infinity in any record raises instead of being written out.
 
-        ``json.dumps`` emits these as the bare tokens ``NaN``/``Infinity``, which Python's
-        own ``json.loads`` accepts and every strict parser -- browsers, ``jq``, most other
-        languages' standard libraries -- rejects. The report therefore looked valid until
-        somebody outside Python opened it. Refusing rather than substituting is the
-        deliberate half: a run that produced a non-finite box did something the caller
-        needs to know about.
+        ``json.dumps`` emits these as the bare tokens ``NaN``/``Infinity``, which Python's own ``json.loads`` accepts
+        and every strict parser -- browsers, ``jq``, most other languages' standard libraries -- rejects. The report
+        therefore looked valid until somebody outside Python opened it. Refusing rather than substituting is the
+        deliberate half: a run that produced a non-finite box did something the caller needs to know about.
         """
         payload = {"image": "a.png", "detections": [{"box": [0.0, 0.0, bad, 1.0], "score": 0.9, "label": 0}]}
 
@@ -520,9 +478,8 @@ class TestPredictReportSerialisation:
     def test_message_names_offending_field(self) -> None:
         """The refusal points at the field, not merely at the report.
 
-        A report holds up to ``max_det`` records of several numeric fields each; "this
-        file contains a NaN" leaves the caller to find it by hand, and the walk exists
-        precisely so it does not have to.
+        A report holds up to ``max_det`` records of several numeric fields each; "this file contains a NaN" leaves the
+        caller to find it by hand, and the walk exists precisely so it does not have to.
         """
         payload = {"detections": [{"score": 0.5}, {"score": float("nan")}]}
 
@@ -532,8 +489,8 @@ class TestPredictReportSerialisation:
     def test_finite_report_serialises_unchanged(self) -> None:
         """The guard costs the normal path nothing -- a clean payload round-trips.
 
-        Without this the refusals above would pass against a serializer that rejected
-        every payload, which two error-path tests cannot distinguish on their own.
+        Without this the refusals above would pass against a serializer that rejected every payload, which two
+        error-path tests cannot distinguish on their own.
         """
         payload = {"image": "a.png", "detections": [{"box": [1.0, 2.0, 3.0, 4.0], "score": 0.9, "label": 3}]}
 

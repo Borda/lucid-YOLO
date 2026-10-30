@@ -1,18 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Gate on single-image inference from an image already held as a tensor.
 
-Every ``predict_*`` entry point takes either a file path or a decoded ``(3, H, W)`` RGB
-tensor. The contract worth pinning is that the two are the same input: a picture passed
-as ``uint8`` codes, or as floats already in ``[0, 1]``, gets exactly the answer the same
-picture gets when saved and read back, because both reach the model through one scale and
-one letterbox (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`). An untrained
-module is used on purpose: its answer depends on every pixel, so equal outputs mean equal
-inputs reached the network, which a stub ignoring its input could not show.
+Every ``predict_*`` entry point takes either a file path or a decoded ``(3, H, W)`` RGB tensor. The contract worth
+pinning is that the two are the same input: a picture passed as ``uint8`` codes, or as floats already in ``[0, 1]``,
+gets exactly the answer the same picture gets when saved and read back, because both reach the model through one scale
+and one letterbox (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`). An untrained module is used on
+purpose: its answer depends on every pixel, so equal outputs mean equal inputs reached the network, which a stub
+ignoring its input could not show.
 
-The refusals cover the three tensors a caller most plausibly holds by mistake: an
-``(H, W, 3)`` array from PIL or numpy, a float image still in ``0..255``, and signed
-integer codes; and float images holding a NaN or infinite value, which a min/max range
-check alone passes once a NaN makes the extrema NaN.
+The refusals cover the three tensors a caller most plausibly holds by mistake: an ``(H, W, 3)`` array from PIL or numpy,
+a float image still in ``0..255``, and signed integer codes; and float images holding a NaN or infinite value, which a
+min/max range check alone passes once a NaN makes the extrema NaN.
 """
 
 from __future__ import annotations
@@ -59,8 +57,7 @@ def noise_file(tmp_path: Path) -> Path:
 def test_tensor_image_answers_as_file(noise_file: Path, form: str) -> None:
     """A decoded image, as codes or as unit floats, yields the file's detections exactly.
 
-    ``unit-float`` is the codes divided by 255 by the caller, the most common way an image
-    arrives already scaled.
+    ``unit-float`` is the codes divided by 255 by the caller, the most common way an image arrives already scaled.
     """
     module = _module("detect")
     codes = decode_rgb(noise_file)

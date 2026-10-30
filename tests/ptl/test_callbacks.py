@@ -1,16 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the checkpoint-path callback wiring in the detection CLI (WP-127).
 
-Lightning's own default writes ``lightning_logs/version_N/checkpoints/epoch=X-step=Y.ckpt``
--- nothing in the path or filename names the task or scale variant, so identifying what a
-saved checkpoint trained meant opening its ``hparams.yaml`` (surfaced re-scoring WP-064's
-OBB-smoke checkpoint for WP-111's row 111). Covers the DoD: a real ``Trainer.fit`` run's
-checkpoint filename carries its task and variant while ``lightning_logs/version_N``
-numbering and the ``epoch=X-step=Y`` suffix stay exactly as before
-(``test_fit_checkpoint_names_task_and_variant``), and
-:class:`~lucid_yolo.cli.train.DetectionCLI` injects that callback by default unless a
-config already places its own :class:`~pytorch_lightning.callbacks.ModelCheckpoint`
-(``TestDetectionCLICheckpointInjection``).
+Lightning's own default writes ``lightning_logs/version_N/checkpoints/epoch=X-step=Y.ckpt`` -- nothing in the path or
+filename names the task or scale variant, so identifying what a saved checkpoint trained meant opening its
+``hparams.yaml`` (surfaced re-scoring WP-064's OBB-smoke checkpoint for WP-111's row 111). Covers the DoD: a real
+``Trainer.fit`` run's checkpoint filename carries its task and variant while ``lightning_logs/version_N`` numbering and
+the ``epoch=X-step=Y`` suffix stay exactly as before (``test_fit_checkpoint_names_task_and_variant``), and
+:class:`~lucid_yolo.cli.train.DetectionCLI` injects that callback by default unless a config already places its own
+:class:`~pytorch_lightning.callbacks.ModelCheckpoint` (``TestDetectionCLICheckpointInjection``).
 """
 
 from __future__ import annotations
@@ -100,9 +97,8 @@ class TestCheckpointFilename:
     def test_prefixes_task_and_variant_onto_default_suffix(self, task: str, variant: str, expected: str) -> None:
         """The task and variant prefix ``{epoch}-{step}``, Lightning's own default suffix.
 
-        The suffix stays a literal template (not pre-filled) so
-        :class:`~pytorch_lightning.callbacks.ModelCheckpoint` still fills it in from
-        the run's own metrics -- only the run-identity prefix is new.
+        The suffix stays a literal template (not pre-filled) so :class:`~pytorch_lightning.callbacks.ModelCheckpoint`
+        still fills it in from the run's own metrics -- only the run-identity prefix is new.
         """
         assert _checkpoint_filename(task, variant) == expected
 
@@ -110,12 +106,10 @@ class TestCheckpointFilename:
 def test_fit_checkpoint_names_task_and_variant(tmp_path: Path) -> None:
     """A real one-epoch fit's checkpoint filename carries its task and variant.
 
-    Builds the exact callback :meth:`~lucid_yolo.cli.train.DetectionCLI.instantiate_trainer`
-    would inject for a ``task="detect"``, ``variant="s"`` run, fits one epoch on a tiny
-    synthetic loader, and checks the saved ``.ckpt`` under the resolved
-    ``lightning_logs/version_0/checkpoints/`` directory: the ``lightning_logs/version_N``
-    numbering and the ``epoch=X-step=Y`` suffix are unchanged, only the new
-    ``detect_s_`` prefix is added.
+    Builds the exact callback :meth:`~lucid_yolo.cli.train.DetectionCLI.instantiate_trainer` would inject for a
+    ``task="detect"``, ``variant="s"`` run, fits one epoch on a tiny synthetic loader, and checks the saved ``.ckpt``
+    under the resolved ``lightning_logs/version_0/checkpoints/`` directory: the ``lightning_logs/version_N`` numbering
+    and the ``epoch=X-step=Y`` suffix are unchanged, only the new ``detect_s_`` prefix is added.
     """
     module = tiny_module(max_channels=64)
     checkpoint = ModelCheckpoint(filename=_checkpoint_filename(module.task, "s"))

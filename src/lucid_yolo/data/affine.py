@@ -1,33 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
 """Random affine augmentation for boxes and instance masks (WP-010, blueprint section 5.9).
 
-Random affine is the geometric workhorse of the YOLO-lineage recipe: it samples a
-rotation, an anisotropic shear, a uniform scale and a translation, composes them
-about the canvas centre into one ``3x3`` pixel-space matrix, and applies that
-single matrix to *both* the image and every target modality. Keeping one matrix
-as the source of geometric truth — routed through
-:func:`~lucid_yolo.data.transforms.apply_affine_to_points` exactly as WP-009's
-:class:`~lucid_yolo.data.letterbox.Letterbox` does — is what keeps boxes, polygons
-and (eventually) rotated boxes mutually consistent rather than drifting across
-three parallel reimplementations (blueprint sec. 5.9: "all geometric transforms
-must operate consistently on boxes, polygon/instance masks, and rotated boxes").
+Random affine is the geometric workhorse of the YOLO-lineage recipe: it samples a rotation, an anisotropic shear,
+a uniform scale and a translation, composes them about the canvas centre into one ``3x3`` pixel-space matrix,
+and applies that single matrix to *both* the image and every target modality. Keeping one matrix as the source of
+geometric truth — routed through :func:`~lucid_yolo.data.transforms.apply_affine_to_points` exactly as WP-009's
+:class:`~lucid_yolo.data.letterbox.Letterbox` does — is what keeps boxes, polygons and (eventually) rotated boxes
+mutually consistent rather than drifting across three parallel reimplementations (blueprint sec. 5.9: "all geometric
+transforms must operate consistently on boxes, polygon/instance masks, and rotated boxes").
 
 Image warp (WP-156):
-    The warp is ``fuse``'s and the geometry is this project's. What stays here is R1
-    Table S3's ranges, the sampling of them, and the matrix they compose to;
-    :func:`~fuse_augmentations.build_segments` owns the resampling — fusion, matrix
-    inversion, the sampling grid, the constant fill — behind
-    :class:`~fuse_augmentations.TransformAdapter`, the seam the package publishes for
-    a caller with its own parameterisation.
+    The warp is ``fuse``'s and the geometry is this project's. What stays here is R1 Table S3's ranges, the sampling
+    of them, and the matrix they compose to; :func:`~fuse_augmentations.build_segments` owns the resampling — fusion,
+    matrix inversion, the sampling grid, the constant fill — behind :class:`~fuse_augmentations.TransformAdapter`,
+    the seam the package publishes for a caller with its own parameterisation.
 
-    :class:`_StatedGeometryAdapter` is this project's implementation of that seam. Its
-    ``build_matrix`` answers with :meth:`AffineParams.matrix`, so the matrix reaching
-    the pixels is the one reaching the boxes and neither moved when the engine
-    changed. Handing *parameters* to upstream instead would have re-composed them
-    under its own decomposition — two sequential shears after the rotation, against
-    one combined shear before it — which agrees with this one only at zero shear.
-    Out-of-canvas samples take the same ``114/255`` grey as letterbox, spelled
-    ``fill=`` with ``padding_mode="zeros"``.
+    :class:`_StatedGeometryAdapter` is this project's implementation of that seam. Its ``build_matrix`` answers with
+    :meth:`AffineParams.matrix`, so the matrix reaching the pixels is the one reaching the boxes and neither
+    moved when the engine changed. Handing *parameters* to upstream instead would have re-composed them under its own
+    decomposition — two sequential shears after the rotation, against one combined shear before it — which agrees
+    with this one only at zero shear. Out-of-canvas samples take the same ``114/255`` grey as letterbox,
+    spelled ``fill=`` with ``padding_mode="zeros"``.
 
 Targets:
     When polygons are present each ring is transformed point-wise, clamped to the
@@ -41,51 +34,41 @@ Targets:
     :meth:`~lucid_yolo.data.targets.Targets.filter`.
 
 Keypoints (WP-132):
-    Keypoints ride the same matrix as everything else and are the one modality that is
-    **not** clipped afterwards. This transform manufactures the case A70 decides — it
-    translates by up to 10% of the canvas and scales, so a point can land off-canvas while
-    its box still clears ``min_visibility`` — and A70's answer is to carry the point
-    through unchanged rather than clamp it to the edge or demote it to invisible. The
-    argument is in :meth:`RandomAffine._warp_keypoints`. Rows still drop with their
-    instance, since the keep mask runs on the shared axis.
+    Keypoints ride the same matrix as everything else and are the one modality that is **not** clipped afterwards.
+    This transform manufactures the case A70 decides — it translates by up to 10% of the canvas and scales,
+    so a point can land off-canvas while its box still clears ``min_visibility`` — and A70's answer is to carry
+    the point through unchanged rather than clamp it to the edge or demote it to invisible. The argument is in
+    :meth:`RandomAffine._warp_keypoints`. Rows still drop with their instance, since the keep mask runs on the
+    shared axis.
 
 Rotated boxes (WP-058):
-    A general affine does not map a rectangle to a rectangle — the sampled shear
-    sends one to a parallelogram — so a rotated box cannot be warped by
-    transporting ``(w, h, theta)``. The rotated path instead expands each box to
-    the four corners the image warp moves, pushes them through the same matrix,
-    and re-fits a canonical long-edge box
-    (:func:`~lucid_yolo.data.rotated_aug.warp_rboxes`); the fit is exact under a
-    similarity and approximate under shear, as that module states. The warped box
-    is then clipped to the canvas with WP-057's clipper, ``boxes`` is recomputed
-    as the envelope of the rotated geometry, and the *same* ``min_box_size`` /
-    ``min_visibility`` rule the axis-aligned path uses decides which instances
-    survive — one policy over both modalities (A40). Because that rule drops
-    instances, the rotated path requires WP-056's instance-axis invariant
+    A general affine does not map a rectangle to a rectangle — the sampled shear sends one to a parallelogram — so a
+    rotated box cannot be warped by transporting ``(w, h, theta)``. The rotated path instead expands each box
+    to the four corners the image warp moves, pushes them through the same matrix, and re-fits a canonical
+    long-edge box (:func:`~lucid_yolo.data.rotated_aug.warp_rboxes`); the fit is exact under a similarity
+    and approximate under shear, as that module states. The warped box is then clipped to the canvas with WP-057's
+    clipper, ``boxes`` is recomputed as the envelope of the rotated geometry, and the *same* ``min_box_size`` /
+    ``min_visibility`` rule the axis-aligned path uses decides which instances survive — one policy over both
+    modalities (A40). Because that rule drops instances, the rotated path requires WP-056's instance-axis invariant
     (``rboxes`` 1:1 with ``boxes``, no polygons) and rejects targets that break it.
 
 Testability:
-    Sampling is fully driven by an optional :class:`torch.Generator`, so a seeded
-    generator gives byte-identical results. After each call the sampled
-    :class:`AffineParams` and the resulting forward matrix are stashed on
-    :attr:`RandomAffine.last_params` / :attr:`RandomAffine.last_matrix` for
-    introspection (recovering the sampled translation, asserting determinism, etc.).
+    Sampling is fully driven by an optional :class:`torch.Generator`, so a seeded generator gives
+    byte-identical results. After each call the sampled :class:`AffineParams` and the resulting forward matrix
+    are stashed on :attr:`RandomAffine.last_params` / :attr:`RandomAffine.last_matrix` for introspection
+    (recovering the sampled translation, asserting determinism, etc.).
 
 Fused letterbox (WP-070, delegated WP-156):
-    Training warps a source canvas by this random affine and then letterboxes it down
-    to ``img_size``, which as two transforms is two bilinear resamples. Passing
-    ``letterbox=`` to :class:`RandomAffine` appends upstream's deterministic
-    aspect-preserving fit to the same pipeline: it sits after the geometry and before
-    any colour operation, so the two compose into one matrix and one resample. The
-    local class that used to perform that composition is gone — this row and WP-155
-    composed inside ``fuse`` *are* that composition.
+    Training warps a source canvas by this random affine and then letterboxes it down to ``img_size``, which as two
+    transforms is two bilinear resamples. Passing ``letterbox=`` to :class:`RandomAffine` appends upstream's
+    deterministic aspect-preserving fit to the same pipeline: it sits after the geometry and before any colour
+    operation, so the two compose into one matrix and one resample. The local class that used to perform
+    that composition is gone — this row and WP-155 composed inside ``fuse`` *are* that composition.
 
-    Targets are still clipped and filtered at the **source** canvas and only then
-    mapped through the letterbox affine by
-    :meth:`~lucid_yolo.data.letterbox.Letterbox.warp_targets`. That order is not
-    incidental: the source canvas maps onto the letterboxed canvas's *content*
-    region, so clipping after the letterbox would clip against the padded canvas
-    instead and keep instances the two-transform path drops.
+    Targets are still clipped and filtered at the **source** canvas and only then mapped through the letterbox
+    affine by :meth:`~lucid_yolo.data.letterbox.Letterbox.warp_targets`. That order is not incidental:
+    the source canvas maps onto the letterboxed canvas's *content* region, so clipping after the letterbox would clip
+    against the padded canvas instead and keep instances the two-transform path drops.
 """
 
 from __future__ import annotations
@@ -162,22 +145,18 @@ class AffineParams:
         ``p`` maps to ``A @ (p - c) + t + c`` where ``A`` is the ``2x2`` linear part,
         ``c`` the canvas centre and ``t`` the translation.
 
-        This composition is **this project's**, and WP-156 kept it that way while
-        delegating the warp: it reaches upstream's resampling engine through
-        :class:`_StatedGeometryAdapter`, which hands this matrix back as the
-        segment's ``build_matrix`` answer. Upstream's own direct-parameter adapter
-        decomposes an affine differently — two sequential shears applied *after* the
-        rotation, where this applies one combined shear *before* it — and the two
-        agree only at zero shear. Routing the decomposition through the adapter seam
-        rather than through a parameter dictionary is what lets the engine change
-        without the geometry moving.
+        This composition is **this project's**, and WP-156 kept it that way while delegating the warp:
+        it reaches upstream's resampling engine through :class:`_StatedGeometryAdapter`, which hands this matrix back as
+        the segment's ``build_matrix`` answer. Upstream's own direct-parameter adapter decomposes an affine
+        differently — two sequential shears applied *after* the rotation, where this applies one combined shear
+        *before* it — and the two agree only at zero shear. Routing the decomposition through the adapter seam
+        rather than through a parameter dictionary is what lets the engine change without the geometry moving.
 
-        The centre is the **pixel centre** ``((W - 1) / 2, (H - 1) / 2)``, not the
-        canvas corner midpoint ``(W / 2, H / 2)``: a coordinate names a sample
-        point, so the outermost samples sit at ``0`` and ``W - 1`` and their
-        midpoint is what a rotation leaves fixed. This is the convention
-        ``fuse-augmentations`` composes about (WP-154b), and one convention shared
-        between image and coordinate transport is what keeps the two agreeing.
+        The centre is the **pixel centre** ``((W - 1) / 2, (H - 1) / 2)``, not the canvas corner midpoint
+        ``(W / 2, H / 2)``: a coordinate names a sample point, so the outermost samples sit at ``0`` and ``W - 1``
+        and their midpoint is what a rotation leaves fixed. This is the convention ``fuse-augmentations`` composes
+        about (WP-154b), and one convention shared between image and coordinate transport is what keeps the two
+        agreeing.
 
         Args:
             height: Canvas height in pixels (sets the centre and vertical axis).
@@ -214,11 +193,10 @@ class AffineParams:
 class _StatedAffine:
     """One already-drawn affine, in the shape upstream's segment machinery classifies.
 
-    A ``fuse`` segment is built from *transform objects* it hands back to an adapter,
-    so the object this project passes carries what this project has: the
-    :class:`AffineParams` :meth:`RandomAffine.sample` already drew. Nothing here is
-    random — the draw happened before the pipeline was built, which is what keeps the
-    WP-147 seam intact with the warp delegated.
+    A ``fuse`` segment is built from *transform objects* it hands back to an adapter, so the object this project
+    passes carries what this project has: the :class:`AffineParams` :meth:`RandomAffine.sample` already drew.
+    Nothing here is random — the draw happened before the pipeline was built, which is what keeps the WP-147 seam
+    intact with the warp delegated.
 
     Attributes:
         params: The affine this transform states.
@@ -259,35 +237,31 @@ class _StatedLetterbox:
 class _StatedGeometryAdapter:
     """Bridge this project's own composition to ``fuse``'s resampling engine (WP-156).
 
-    :class:`~fuse_augmentations.TransformAdapter` is the seam the package exposes for
-    exactly this: an adapter answers *what category is this transform*, *what are its
-    parameters* and *what matrix does it compose to*, and the engine owns everything
-    after that — fusion, inversion, the sampling grid, the fill, the target routing.
-    That protocol is structural, so this class conforms by shape rather than by
-    inheritance — the package ships untyped, and subclassing an ``Any`` is a fiction
-    a strict checker is right to reject. ``test_aug_contract.py`` asserts the
-    conformance against the published ``@runtime_checkable`` protocol instead, which
-    is the check that would actually catch upstream adding a required method.
-    Upstream's own :class:`_DirectParamAdapter` is one implementation of that seam, and
-    its ``rotation → scale → shear_x → shear_y → translate`` decomposition is that
-    adapter's choice rather than the package's convention.
+    :class:`~fuse_augmentations.TransformAdapter` is the seam the package exposes for exactly this: an adapter
+    answers *what category is this transform*, *what are its parameters* and *what matrix does it compose to*,
+    and the engine owns everything after that — fusion, inversion, the sampling grid, the fill, the target routing.
+    That protocol is structural, so this class conforms by shape rather than by inheritance — the package ships
+    untyped, and subclassing an ``Any`` is a fiction a strict checker is right to reject.
+    ``test_aug_contract.py`` asserts the conformance against the published ``@runtime_checkable`` protocol instead,
+    which is the check that would actually catch upstream adding a required method. Upstream's own
+    :class:`_DirectParamAdapter` is one implementation of that seam, and its
+    ``rotation → scale → shear_x → shear_y → translate`` decomposition is that adapter's choice rather than the
+    package's convention.
 
-    Implementing the seam here is what makes the delegation move no geometry.
-    :meth:`build_matrix` returns :meth:`AffineParams.matrix` — R1 Table S3's parameters
-    composed the way this project has always composed them — so the matrix that reaches
-    the pixels is the matrix that reaches the boxes, unchanged from before the swap.
-    Handing the *parameters* to upstream instead would have re-composed them under a
-    different decomposition, which agrees with this one only at zero shear.
+    Implementing the seam here is what makes the delegation move no geometry. :meth:`build_matrix` returns
+    :meth:`AffineParams.matrix` — R1 Table S3's parameters composed the way this project has always composed them —
+    so the matrix that reaches the pixels is the matrix that reaches the boxes, unchanged from before the swap.
+    Handing the *parameters* to upstream instead would have re-composed them under a different decomposition,
+    which agrees with this one only at zero shear.
 
-    :meth:`sample_params` draws nothing: the draw is :meth:`RandomAffine.sample`'s, on
-    the caller's generator, and by the time a segment exists the values are settled.
-    The ``generator`` keyword is accepted (and ``supports_generator`` set) so that the
-    engine's own per-transform activation gate — drawn even at ``prob = 1.0`` — has a
-    generator to draw from instead of falling back to the global stream.
+    :meth:`sample_params` draws nothing: the draw is :meth:`RandomAffine.sample`'s, on the caller's generator,
+    and by the time a segment exists the values are settled. The ``generator`` keyword is accepted
+    (and ``supports_generator`` set) so that the engine's own per-transform activation gate — drawn even at
+    ``prob = 1.0`` — has a generator to draw from instead of falling back to the global stream.
     """
 
-    #: Lets the engine pass its generator down rather than rejecting it at the segment
-    #: boundary; this adapter draws nothing with it (see the class docstring).
+    #: Lets the engine pass its generator down rather than rejecting it at the segment boundary; this adapter draws
+    #: nothing with it (see the class docstring).
     supports_generator = True
 
     def category(self, transform: object) -> TransformCategory:
@@ -320,9 +294,8 @@ class _StatedGeometryAdapter:
             generator: Accepted for the protocol's benefit and deliberately unused.
 
         Returns:
-            The output size for a letterbox — the two keys the fused crop segment reads
-            — and an empty mapping for the affine, whose parameters ride on the
-            transform object itself.
+            The output size for a letterbox — the two keys the fused crop segment reads — and an empty mapping for
+            the affine, whose parameters ride on the transform object itself.
         """
         if isinstance(transform, _StatedLetterbox):
             batch = input_shape[0]
@@ -385,11 +358,10 @@ class _StatedGeometryAdapter:
     def _unsupported(method: str, transform: object) -> NoReturn:
         """Raise for a protocol method no transform this adapter states can reach.
 
-        The protocol asks an adapter to decline what it does not support rather than
-        omit it, so that upstream's segment planner gets an answer instead of an
-        ``AttributeError`` from somewhere deeper. Declining loudly is also what keeps
-        these five honest: reaching one means a transform was classified into a path
-        this project never builds.
+        The protocol asks an adapter to decline what it does not support rather than omit it, so that upstream's
+        segment planner gets an answer instead of an ``AttributeError`` from somewhere deeper. Declining loudly is also
+        what keeps these five honest: reaching one means a transform was classified into a path this project
+        never builds.
 
         Args:
             method: The protocol method that was called.
@@ -413,25 +385,20 @@ _ADAPTER = _StatedGeometryAdapter()
 class RandomAffine:
     """Random affine warp applied jointly to an image and its targets (WP-010).
 
-    Each call samples a rotation in ``[-degrees, degrees]``, per-axis shears in
-    ``[-shear, shear]``, a uniform scale in ``[1 - scale, 1 + scale]`` (floored just
-    above zero) and a translation of ``[-translate, translate]`` times the canvas
-    size on each axis — R1 Table S3's ranges, which is what this class still owns —
-    and states them to one ``fuse-augmentations`` segment, which resamples the image
-    once (bilinear, ``pad_value`` fill, mid-grey ``114/255`` by default). Every
-    target modality rides the same composed matrix. Boxes/polygons are clipped to
-    the canvas and filtered by ``min_box_size`` and ``min_visibility``.
+    Each call samples a rotation in ``[-degrees, degrees]``, per-axis shears in ``[-shear, shear]``, a uniform
+    scale in ``[1 - scale, 1 + scale]`` (floored just above zero) and a translation of ``[-translate, translate]``
+    times the canvas size on each axis — R1 Table S3's ranges, which is what this class still owns — and states them
+    to one ``fuse-augmentations`` segment, which resamples the image once (bilinear, ``pad_value`` fill, mid-grey
+    ``114/255`` by default). Every target modality rides the same composed matrix. Boxes/polygons are clipped to the
+    canvas and filtered by ``min_box_size`` and ``min_visibility``.
 
-    With ``letterbox`` set, upstream's aspect-preserving fit joins the same segment,
-    so the source canvas reaches the letterboxed one in a single resample rather than
-    two (WP-070's saving, WP-156's delegation). Targets are clipped and filtered at
-    the source canvas and only then mapped through the letterbox affine.
+    With ``letterbox`` set, upstream's aspect-preserving fit joins the same segment, so the source canvas reaches the
+    letterboxed one in a single resample rather than two (WP-070's saving, WP-156's delegation). Targets are clipped
+    and filtered at the source canvas and only then mapped through the letterbox affine.
 
-    Rotated boxes take the module docstring's corner-warp-and-re-fit path (WP-058)
-    and are clipped and filtered by the same two thresholds, with ``boxes``
-    recomputed as the envelope of the rotated geometry. That path filters, so it
-    requires ``rboxes`` 1:1 with ``boxes`` and no polygons (WP-056); anything else
-    raises :class:`ValueError`.
+    Rotated boxes take the module docstring's corner-warp-and-re-fit path (WP-058) and are clipped and filtered by
+    the same two thresholds, with ``boxes`` recomputed as the envelope of the rotated geometry. That path filters,
+    so it requires ``rboxes`` 1:1 with ``boxes`` and no polygons (WP-056); anything else raises :class:`ValueError`.
 
     Args:
         degrees: Maximum absolute rotation in degrees. Defaults to ``0.0``.
@@ -439,37 +406,29 @@ class RandomAffine:
             (applied per axis). Defaults to ``0.1``.
         scale: Half-width of the uniform scale range ``[1 - scale, 1 + scale]``; the
             sampled factor is floored just above zero. Defaults to ``0.5``.
-        shear: Maximum absolute shear in degrees, sampled independently per axis.
-            Defaults to ``0.0``.
+        shear: Maximum absolute shear in degrees, sampled independently per axis. Defaults to ``0.0``.
         generator: Optional :class:`torch.Generator` for seeded, reproducible
             sampling. Defaults to ``None`` (global RNG).
-        min_box_size: Minimum clipped side length in pixels for an instance to be
-            kept. Defaults to ``2.0``.
+        min_box_size: Minimum clipped side length in pixels for an instance to be kept. Defaults to ``2.0``.
         min_visibility: Minimum kept-area fraction (clipped-extent area divided by
             pre-clip-extent area) for an instance to be kept. Defaults to ``0.1``.
-        letterbox: Output canvas the warp lands on, as a single ``int`` (square) or
-            an explicit ``(height, width)`` pair, composed into the same resample.
-            Defaults to ``None`` (warp to the input canvas).
-        allow_upscale: Whether ``letterbox`` may enlarge content past its native size
-            when the output canvas is larger than the source. Defaults to ``True``;
-            ignored without ``letterbox``.
-        pad_value: Constant fill for canvas the warp exposes, in the image's value
-            range. Defaults to ``114/255`` (mid-grey, the YOLO-lineage convention,
-            matching :class:`~lucid_yolo.data.letterbox.Letterbox`).
-        centered_input: The caller has already subtracted ``pad_value`` from every
-            input pixel, including any mosaic fill. Skip that same subtraction in
-            the fused segment and restore the fill after resampling. Defaults to
-            ``False``; only a prepared training source supplies centred pixels.
+        letterbox: Output canvas the warp lands on, as a single ``int`` (square) or an explicit ``(height, width)``
+            pair, composed into the same resample. Defaults to ``None`` (warp to the input canvas).
+        allow_upscale: Whether ``letterbox`` may enlarge content past its native size when the output canvas
+            is larger than the source. Defaults to ``True``; ignored without ``letterbox``.
+        pad_value: Constant fill for canvas the warp exposes, in the image's value range. Defaults to ``114/255``
+            (mid-grey, the YOLO-lineage convention, matching :class:`~lucid_yolo.data.letterbox.Letterbox`).
+        centered_input: The caller has already subtracted ``pad_value`` from every input pixel, including any
+            mosaic fill. Skip that same subtraction in the fused segment and restore the fill after resampling.
+            Defaults to ``False``; only a prepared training source supplies centred pixels.
 
     Raises:
         ValueError: If ``pad_value`` is not finite.
 
     Attributes:
-        last_params: The :class:`AffineParams` sampled on the most recent call, or
-            ``None`` before the first call.
-        last_matrix: The ``(3, 3)`` float64 forward matrix from the most recent
-            call, or ``None`` before the first call. This is the **source-canvas**
-            affine, before any letterbox.
+        last_params: The :class:`AffineParams` sampled on the most recent call, or ``None`` before the first call.
+        last_matrix: The ``(3, 3)`` float64 forward matrix from the most recent call, or ``None`` before the
+            first call. This is the **source-canvas** affine, before any letterbox.
         letterbox: The :class:`~lucid_yolo.data.letterbox.Letterbox` supplying the
             output-canvas fit, or ``None`` when the warp lands on the input canvas.
 
@@ -529,16 +488,14 @@ class RandomAffine:
         self.min_visibility = float(min_visibility)
         self.allow_upscale = bool(allow_upscale)
         self.letterbox = None if letterbox is None else Letterbox(letterbox, allow_upscale=allow_upscale)
-        # A second generator, private to the discarded activation gates. Upstream's segment
-        # draws a per-sample activation gate for every transform it holds, unconditionally --
-        # at `prob = 1.0` the draw is made and then ignored. That draw must not come from
-        # `generator`, which would shift the caller's sequence and break the property WP-079
-        # was opened by losing, nor from the global stream, which every other transform
-        # shares. It is seeded off the caller's generator so that a caller who seeds gets a
-        # reproducible gate stream too, and two affines under different seeds get different
-        # ones. Left unseeded it was reproducible only by the conjunction of two premises the
-        # code never stated -- that every gate sits at `prob = 1.0` so its value is discarded,
-        # *and* that `torch.Generator()`'s unseeded state is a fixed constant rather than
+        # A second generator, private to the discarded activation gates. Upstream's segment draws a per-sample
+        # activation gate for every transform it holds, unconditionally -- at `prob = 1.0` the draw is made
+        # and then ignored. That draw must not come from `generator`, which would shift the caller's sequence
+        # and break the property WP-079 was opened by losing, nor from the global stream, which every other transform
+        # shares. It is seeded off the caller's generator so that a caller who seeds gets a reproducible gate
+        # stream too, and two affines under different seeds get different ones. Left unseeded it was reproducible
+        # only by the conjunction of two premises the code never stated -- that every gate sits at `prob = 1.0`
+        # so its value is discarded, *and* that `torch.Generator()`'s unseeded state is a fixed constant rather than
         # entropy. Both hold today; neither is this class's to rely on (L-32).
         self._gate_stream = torch.Generator()
         if generator is not None:
@@ -625,9 +582,8 @@ class RandomAffine:
     def apply(self, image: Tensor, targets: Targets, params: AffineParams) -> tuple[Tensor, Targets]:
         """Warp ``image`` and ``targets`` through ``params``, drawing nothing.
 
-        The application half of the seam. Given the same ``params`` this is a pure
-        function of its inputs, which is what lets an expectation be frozen against
-        stated parameters rather than against a seed (WP-147).
+        The application half of the seam. Given the same ``params`` this is a pure function of its inputs, which is
+        what lets an expectation be frozen against stated parameters rather than against a seed (WP-147).
 
         Args:
             image: CHW image tensor (float, in the same value range as the grey
@@ -683,21 +639,18 @@ class RandomAffine:
     def _segment(self, params: AffineParams) -> FusedAffineSegment:
         """Build the one upstream segment that warps ``params`` (and the letterbox).
 
-        The transforms are stated rather than configured: :class:`_StatedAffine` carries
-        the parameters :meth:`sample` already drew, so the segment is rebuilt per call
-        and :meth:`apply` stays the pure function of its inputs WP-147 made it. A build
-        costs a fraction of the warp it sets up, and the alternative — one segment
-        holding a parameter slot rewritten before each call — is hidden mutable state on
-        a class that a dataloader worker reuses thousands of times.
+        The transforms are stated rather than configured: :class:`_StatedAffine` carries the parameters
+        :meth:`sample` already drew, so the segment is rebuilt per call and :meth:`apply` stays the pure function
+        of its inputs WP-147 made it. A build costs a fraction of the warp it sets up, and the alternative —
+        one segment holding a parameter slot rewritten before each call — is hidden mutable state on a class that a
+        dataloader worker reuses thousands of times.
 
-        Segmentation is upstream's, so this is also where the row's tier-C condition is
-        enforced. Only *adjacent* geometric operations group into one run: a colour
-        operation between two of them would split the run, and each half would then warp
-        the image separately with nothing raising. Two conditions establish that the one
-        matrix is the whole chain — a single segment, and that segment being the
-        matrix-bearing fused kind rather than an exact or crop-resize one, which carry
-        no composed affine (an exact-only or letterbox-only pipeline is exactly the case
-        upstream reports no matrix for).
+        Segmentation is upstream's, so this is also where the row's tier-C condition is enforced. Only *adjacent*
+        geometric operations group into one run: a colour operation between two of them would split the run,
+        and each half would then warp the image separately with nothing raising. Two conditions establish that the
+        one matrix is the whole chain — a single segment, and that segment being the matrix-bearing fused kind
+        rather than an exact or crop-resize one, which carry no composed affine (an exact-only or
+        letterbox-only pipeline is exactly the case upstream reports no matrix for).
 
         Args:
             params: The affine to state, in this module's units (radians and pixels).
@@ -796,9 +749,8 @@ class RandomAffine:
             labels=targets.labels.clone(),
             polygons=clipped_rings,
             difficult=targets.difficult.clone(),
-            # Warped from the raw affine output, never from `clipped_rings`: the ring clamp
-            # exists to keep a mask inside the canvas it is rasterised on, and A70 wants the
-            # opposite for a point. See `_warp_keypoints`.
+            # Warped from the raw affine output, never from `clipped_rings`: the ring clamp exists to keep a mask
+            # inside the canvas it is rasterised on, and A70 wants the opposite for a point. See `_warp_keypoints`.
             keypoints=self._warp_keypoints(targets.keypoints, matrix),
             keypoint_vis=targets.keypoint_vis.clone(),
         )
@@ -822,13 +774,12 @@ class RandomAffine:
     def _warp_boxes(boxes: Tensor, matrix: Tensor) -> Tensor:
         """Warp ``xyxy`` boxes through the affine, upstream's corner-warp-and-re-fit (WP-156).
 
-        :func:`~fuse_augmentations.transform_bbox_xyxy` computes the four corners,
-        maps them through the forward matrix and returns the axis-aligned box that
-        wraps them — the same operation the local ``_transform_box_corners`` performed,
-        and the same trade-off: a general affine sends a rectangle to a parallelogram,
-        so an ``xyxy`` result is the enclosing extent rather than the shape itself.
-        It is batched over images as well as boxes, so the single sample this class
-        handles is wrapped and unwrapped around the one call.
+        :func:`~fuse_augmentations.transform_bbox_xyxy` computes the four corners, maps them through the
+        forward matrix and returns the axis-aligned box that wraps them — the same operation the local
+        ``_transform_box_corners`` performed, and the same trade-off: a general affine sends a rectangle
+        to a parallelogram, so an ``xyxy`` result is the enclosing extent rather than the shape itself.
+        It is batched over images as well as boxes, so the single sample this class handles is wrapped and
+        unwrapped around the one call.
 
         Args:
             boxes: ``(N, 4)`` ``xyxy`` boxes on the source canvas.
@@ -850,23 +801,20 @@ class RandomAffine:
     def _warp_keypoints(keypoints: Tensor, matrix: Tensor) -> Tensor:
         """Warp ``(N, K, 2)`` points through the affine and stop there — no clip (A70).
 
-        Every other modality on this path is clipped after the warp, so the omission
-        here is the whole content of the method. A70 settles what becomes of a point the
-        affine pushes off-canvas on an instance the affine *keeps*: it is carried through
-        unchanged, true coordinate and visibility both. Clamping it to the boundary would
-        invent a target — supervising the model toward a location the anatomy is
-        demonstrably not at — and zeroing its visibility would overload A66's "no
-        annotation exists" with a second, unrecoverable meaning. Neither is a safety
-        measure; both are wrong answers, so this warps and returns.
+        Every other modality on this path is clipped after the warp, so the omission here is the whole content of
+        the method. A70 settles what becomes of a point the affine pushes off-canvas on an instance the affine
+        *keeps*: it is carried through unchanged, true coordinate and visibility both. Clamping it to the boundary
+        would invent a target — supervising the model toward a location the anatomy is demonstrably not at —
+        and zeroing its visibility would overload A66's "no annotation exists" with a second, unrecoverable meaning.
+        Neither is a safety measure; both are wrong answers, so this warps and returns.
 
         The rows themselves still filter with their boxes: the caller hands the result to
-        :meth:`~lucid_yolo.data.targets.Targets.filter`, which selects keypoints on the
-        shared instance axis, so a *dropped* instance takes its points with it. What A70
-        governs is only the kept ones.
+        :meth:`~lucid_yolo.data.targets.Targets.filter`, which selects keypoints on the shared instance axis, so a
+        *dropped* instance takes its points with it. What A70 governs is only the kept ones.
 
-        A keypoint-free ``Targets`` carries the canonical ``(0, 0, 2)`` empty, which
-        round-trips through the reshape and returns the same empty — an exact no-op for
-        detect/segment/obb, which is what keeps the frozen goldens on this transform still.
+        A keypoint-free ``Targets`` carries the canonical ``(0, 0, 2)`` empty, which round-trips through the reshape
+        and returns the same empty — an exact no-op for detect/segment/obb, which is what keeps the frozen goldens
+        on this transform still.
 
         Args:
             keypoints: ``(N, K, 2)`` point coordinates on the source canvas.

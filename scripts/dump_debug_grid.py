@@ -2,13 +2,11 @@
 """Debug visualizer: dump an annotated grid of augmented training samples (WP-015).
 
 Draws ``--samples`` samples through the Phase-1 augmentation pipeline
-(:class:`~lucid_yolo.ptl.datamodule._TrainPipeline`: mosaic, affine, letterbox,
-mixup, copy-paste, HSV jitter, flip) over a fixture-style COCO directory and
-writes a single annotated grid PNG: axis-aligned boxes as rectangles (via
-:func:`torchvision.utils.draw_bounding_boxes`) and instance polygons as outlines
-(via :class:`PIL.ImageDraw`). It is a hand-run inspection aid for the pipeline —
-it never downloads a dataset or reaches the network, only reads an already-present
-COCO split (typically the seeded WP-007 synthetic fixtures).
+(:class:`~lucid_yolo.ptl.datamodule._TrainPipeline`: mosaic, affine, letterbox, mixup, copy-paste, HSV jitter, flip)
+over a fixture-style COCO directory and writes a single annotated grid PNG: axis-aligned boxes as rectangles (via
+:func:`torchvision.utils.draw_bounding_boxes`) and instance polygons as outlines (via :class:`PIL.ImageDraw`). It is
+a hand-run inspection aid for the pipeline — it never downloads a dataset or reaches the network, only reads an
+already-present COCO split (typically the seeded WP-007 synthetic fixtures).
 
 Examples:
     Dump an eight-sample grid from a generated fixture set::
@@ -59,9 +57,8 @@ _MIN_RING_POINTS = 2
 def resolve_coco_split(data_root: Path) -> tuple[Path, Path]:
     """Resolve the images directory and annotation file for a fixture-style COCO dir.
 
-    Accepts either a split directory that directly holds ``_annotations.coco.json``
-    (and its images), or a parent dataset directory whose ``train/`` subdirectory
-    does — the shape the WP-007 fixture generator writes.
+    Accepts either a split directory that directly holds ``_annotations.coco.json`` (and its images), or a parent
+    dataset directory whose ``train/`` subdirectory does — the shape the WP-007 fixture generator writes.
 
     Args:
         data_root: The COCO directory to resolve.
@@ -70,8 +67,7 @@ def resolve_coco_split(data_root: Path) -> tuple[Path, Path]:
         An ``(images_dir, annotation_file)`` pair.
 
     Raises:
-        FileNotFoundError: If no ``_annotations.coco.json`` is found at either
-            ``data_root`` or ``data_root/train``.
+        FileNotFoundError: If no ``_annotations.coco.json`` is found at either ``data_root`` or ``data_root/train``.
 
     Examples:
         ```pycon
@@ -146,8 +142,7 @@ def render_sample(image: Tensor, targets: Targets) -> Tensor:
         targets: The sample's geometry (boxes and instance polygons).
 
     Returns:
-        A CHW ``uint8`` tensor with red box rectangles and lime polygon outlines
-        drawn over the image.
+        A CHW ``uint8`` tensor with red box rectangles and lime polygon outlines drawn over the image.
 
     Examples:
         ```pycon

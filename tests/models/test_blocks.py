@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-016 convolutional primitives (test_blocks.py).
 
-Covers the three blocks in ``lucid_yolo.models.blocks``: stride-1/stride-2 spatial
-behaviour for odd kernels, the depthwise group count, the bottleneck channel
-expansion ratio, the residual add, and a clean eval-mode forward pass.
+Covers the three blocks in ``lucid_yolo.models.blocks``: stride-1/stride-2 spatial behaviour for odd kernels, the
+depthwise group count, the bottleneck channel expansion ratio, the residual add, and a clean eval-mode forward pass.
 """
 
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 
 import pytest
 import torch
@@ -28,7 +28,11 @@ from lucid_yolo.models.blocks import _FullPrecisionAttentionWeights
 
 
 def test_primitives() -> None:
-    """The three primitives satisfy their shape, wiring, and residual contracts."""
+    """The three primitives satisfy their shape, wiring, and residual contracts.
+
+    One walk through ConvBNAct (odd kernels at stride 1 and 2), DepthwiseConv (group count) and Bottleneck (hidden
+    expansion, the residual add when channels match, and no add when they differ even with ``shortcut=True``).
+    """
     # --- ConvBNAct: odd kernels preserve size at stride 1, halve at stride 2 ---
     x = torch.randn(2, 8, 16, 16)
     for kernel_size in (3, 5):
@@ -134,10 +138,21 @@ def test_c3k2_inner_factory_override() -> None:
         assert block(x).shape == (2, 64, 8, 8)
 
 
-def test_c3k2_param_count_increases_with_depth() -> None:
-    """Parameter count strictly increases as more inner units are added."""
-    counts = [sum(p.numel() for p in C3k2(64, 64, n=n).parameters()) for n in (1, 2, 3)]
-    assert counts[0] < counts[1] < counts[2], "each additional inner unit must add parameters"
+@pytest.mark.parametrize(
+    ("build_block", "unit"),
+    [
+        pytest.param(lambda n: C3k2(64, 64, n=n), "inner unit", id="c3k2"),
+        pytest.param(lambda n: C2PSA(128, 128, n=n), "PSABlock", id="c2psa"),
+    ],
+)
+def test_param_count_increases_with_depth(build_block: Callable[[int], torch.nn.Module], unit: str) -> None:
+    """Parameter count strictly increases as more repeated inner units are stacked.
+
+    ``n`` is the repeat count of the block's inner unit (C3k2 inner units, C2PSA PSABlocks); a repeat count that was
+    accepted but not wired into the module tree would leave the count flat across ``n``.
+    """
+    counts = [sum(p.numel() for p in build_block(n).parameters()) for n in (1, 2, 3)]
+    assert counts[0] < counts[1] < counts[2], f"each additional {unit} must add parameters"
 
 
 @pytest.mark.parametrize(
@@ -246,9 +261,8 @@ def test_psablock_preserves_shape(channels: int, size: int) -> None:
 def test_psablock_residual_reduces_to_identity() -> None:
     """Zeroing both branch output BatchNorms reduces the block to the identity.
 
-    Each residual branch (attention output projection and the FFN output) ends in
-    a conv+BN unit; a zeroed BN affine makes that branch emit zeros, so both
-    ``x + attn(x)`` and ``x + ffn(x)`` collapse to ``x``.
+    Each residual branch (attention output projection and the FFN output) ends in a conv+BN unit; a zeroed BN affine
+    makes that branch emit zeros, so both ``x + attn(x)`` and ``x + ffn(x)`` collapse to ``x``.
     """
     block = PSABlock(128).eval()
     for batchnorm in (block.attn.proj[1], block.ffn[1][1]):
@@ -282,12 +296,6 @@ def test_c2psa(in_channels: int, out_channels: int, n: int, e: float, size: int)
     with torch.no_grad():
         out = block(x)
     assert out.shape == (2, out_channels, size, size), "C2PSA must preserve spatial resolution"
-
-
-def test_c2psa_param_count_increases_with_depth() -> None:
-    """Parameter count strictly increases as more PSABlocks are stacked."""
-    counts = [sum(p.numel() for p in C2PSA(128, 128, n=n).parameters()) for n in (1, 2, 3)]
-    assert counts[0] < counts[1] < counts[2], "each additional PSABlock must add parameters"
 
 
 def test_sppf_shortcut() -> None:

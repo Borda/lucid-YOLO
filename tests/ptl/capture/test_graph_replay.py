@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """The shared replay primitives drain before release and keep the fit lifecycle safe, without a GPU.
 
-CUDA graph execution is covered by the ``gpu`` tests of each holder. These cases check the
-host-side contracts the network, segmentation-head and loss holders now share: what a holder
-drains when it releases a recording, that the drain runs before the recording is dropped,
-and that the lifecycle callback neither fails on a module without its holder nor lets a drain
-failure replace the trainer's own exception. CUDA initialization and the device synchronize are the
-only boundaries replaced.
+CUDA graph execution is covered by the ``gpu`` tests of each holder. These cases check the host-side contracts the
+network, segmentation-head and loss holders now share: what a holder drains when it releases a recording, that the
+drain runs before the recording is dropped, and that the lifecycle callback neither fails on a module without its
+holder nor lets a drain failure replace the trainer's own exception. CUDA initialization and the device synchronize are
+the only boundaries replaced.
 """
 
 from __future__ import annotations

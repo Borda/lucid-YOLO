@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for the per-branch detection loss (WP-027).
 
-Covers the three terms against hand-computed values on a crafted
-:class:`AssignResult`, the zero-positive batch (box and L1 vanish, classification
-still trains, gradients finite), the perfect-prediction floor, linear gain
-scaling, the batched scalar-output contract, and gradient flow to both
-predictions. Expected values are derived by hand in the test comments; the math
-is transcribed from R1 sec. 3.3.2 and R4 (arXiv:2108.07755).
+Covers the three terms against hand-computed values on a crafted :class:`AssignResult`, the zero-positive batch (box and
+L1 vanish, classification still trains, gradients finite), the perfect-prediction floor, linear gain scaling, the
+batched scalar-output contract, and gradient flow to both predictions. Expected values are derived by hand in the test
+comments; the math is transcribed from R1 sec. 3.3.2 and R4 (arXiv:2108.07755).
 """
 
 from __future__ import annotations
@@ -55,30 +53,17 @@ def _make_assign(
     )
 
 
-def test_components() -> None:
-    """Each term matches a fully hand-derived value on a 3-anchor scenario.
+def _three_anchor_scenario() -> tuple[Tensor, Tensor, AssignResult]:
+    """Return ``(logits, boxes, assign)`` of the hand-derived three-anchor scene shared by the component tests.
 
-    One image, three anchors, two classes, one ground truth (class 0). Anchors 0
-    and 1 are positives for it, anchor 2 is background:
+    One image, three anchors, two classes, one ground truth (class 0, box ``[0, 0, 2, 2]``). Anchors 0 and 1 are
+    positives with weights 0.8 and 0.4, anchor 2 is background; anchor 0's box is perfect, anchor 1's is
+    ``[0, 0, 1, 1]`` and every class logit is zero.
 
-        align_weights = [0.8, 0.4, 0.0]  -> weight_sum = 1.2
-        target box (anchors 0, 1) = [0, 0, 2, 2]
-
-    Predictions: anchor 0 box is perfect; anchor 1 box = [0, 0, 1, 1]; every
-    class logit is zero (sigmoid 0.5).
-
-    L_box: anchor 0 CIoU loss = 0. Anchor 1: IoU = 1/4, center-dist^2 = 0.5,
-    enclosing diag^2 = 8 -> penalty 1/16, aspect term 0 (both square), so
-    CIoU = 0.25 - 0.0625 = 0.1875 and its loss = 0.8125. Weighted:
-    (0.8*0 + 0.4*0.8125) / 1.2 = 0.325 / 1.2.
-
-    L_l1: anchor 0 = 0; anchor 1 = |1-2| + |1-2| = 2. Weighted:
-    (0.8*0 + 0.4*2) / 1.2 = 0.8 / 1.2.
-
-    L_cls: every logit is 0, so each of the 6 BCE elements = ln 2 regardless of
-    its soft target. Sum = 6 ln 2, normalized: 6 ln 2 / 1.2.
-
-    total = 7.5*L_box + 0.5*L_cls + 6.0*L_l1.
+    Examples:
+        >>> logits, boxes, assign = _three_anchor_scenario()
+        >>> tuple(logits.shape), tuple(boxes.shape), assign.fg_mask.tolist()
+        ((1, 3, 2), (1, 3, 4), [[True, True, False]])
     """
     logits = torch.zeros(1, 3, 2)
     boxes = torch.tensor([[[0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0]]])
@@ -89,6 +74,32 @@ def test_components() -> None:
         target_boxes=target_boxes,
         align_weights=torch.tensor([[0.8, 0.4, 0.0]]),
     )
+    return logits, boxes, assign
+
+
+def test_components() -> None:
+    """Each term matches a fully hand-derived value on a 3-anchor scenario.
+
+    One image, three anchors, two classes, one ground truth (class 0). Anchors 0 and 1 are positives for it, anchor 2 is
+    background:
+
+        align_weights = [0.8, 0.4, 0.0]  -> weight_sum = 1.2
+        target box (anchors 0, 1) = [0, 0, 2, 2]
+
+    Predictions: anchor 0 box is perfect; anchor 1 box = [0, 0, 1, 1]; every class logit is zero (sigmoid 0.5).
+
+    L_box: anchor 0 CIoU loss = 0. Anchor 1: IoU = 1/4, center-dist^2 = 0.5, enclosing diag^2 = 8 -> penalty 1/16,
+    aspect term 0 (both square), so CIoU = 0.25 - 0.0625 = 0.1875 and its loss = 0.8125. Weighted:
+    (0.8*0 + 0.4*0.8125) / 1.2 = 0.325 / 1.2.
+
+    L_l1: anchor 0 = 0; anchor 1 = |1-2| + |1-2| = 2. Weighted: (0.8*0 + 0.4*2) / 1.2 = 0.8 / 1.2.
+
+    L_cls: every logit is 0, so each of the 6 BCE elements = ln 2 regardless of its soft target. Sum = 6 ln 2,
+    normalized: 6 ln 2 / 1.2.
+
+    total = 7.5*L_box + 0.5*L_cls + 6.0*L_l1.
+    """
+    logits, boxes, assign = _three_anchor_scenario()
 
     out = DetectionBranchLoss()(logits, boxes, assign)
 
@@ -105,20 +116,11 @@ def test_components() -> None:
 def test_l1_stride_normalization_divides_by_anchor_stride() -> None:
     """With strides given, the L1 term is measured in stride units (A13 revision, WP-078).
 
-    Same scenario as test_components (only anchor 1 contributes L1 = 2 pixels,
-    weighted 0.8/1.2); per-anchor strides [8, 16, 32] put anchor 1 at stride 16,
-    so the stride-unit term is exactly 1/16 of the pixel-frame value. CIoU and
+    Same scenario as test_components (only anchor 1 contributes L1 = 2 pixels, weighted 0.8/1.2); per-anchor strides [8,
+    16, 32] put anchor 1 at stride 16, so the stride-unit term is exactly 1/16 of the pixel-frame value. CIoU and
     classification are untouched.
     """
-    logits = torch.zeros(1, 3, 2)
-    boxes = torch.tensor([[[0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0]]])
-    target_boxes = torch.tensor([[[0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 0.0, 0.0]]])
-    assign = _make_assign(
-        fg_mask=torch.tensor([[True, True, False]]),
-        target_labels=torch.tensor([[0, 0, -1]]),
-        target_boxes=target_boxes,
-        align_weights=torch.tensor([[0.8, 0.4, 0.0]]),
-    )
+    logits, boxes, assign = _three_anchor_scenario()
 
     pixel = DetectionBranchLoss()(logits, boxes, assign)
     strided = DetectionBranchLoss()(logits, boxes, assign, strides=torch.tensor([8.0, 16.0, 32.0]))
@@ -235,9 +237,8 @@ def _masked_box_losses_oracle(
 ) -> tuple[Tensor, Tensor]:
     """The pre-WP-183 ``_box_losses``, verbatim: boolean gathers over the positives.
 
-    Kept as the reference the dense form is held against. It is the implementation
-    the golden snapshots were captured with, so agreement with it is agreement with
-    every frozen value.
+    Kept as the reference the dense form is held against. It is the implementation the golden snapshots were captured
+    with, so agreement with it is agreement with every frozen value.
 
     Examples:
         >>> assign = _make_assign(
@@ -280,8 +281,8 @@ def _random_boxes(batch: int, anchors: int) -> Tensor:
 def _random_assign(fg_mask: Tensor) -> AssignResult:
     """A contract-conforming assignment over ``fg_mask``: random targets and weights on positives.
 
-    Background anchors carry the documented sentinels — ``-1`` label and index, a zero
-    box, zero weight — which is what makes the dense form's ``torch.where`` load-bearing.
+    Background anchors carry the documented sentinels — ``-1`` label and index, a zero box, zero weight — which is what
+    makes the dense form's ``torch.where`` load-bearing.
 
     Examples:
         >>> assign = _random_assign(torch.tensor([[True, False]]))
@@ -312,17 +313,23 @@ def _mixed_fg_mask() -> Tensor:
 class TestDenseBoxTermsMatchMaskedReference:
     """The dense ``(B, A)`` box terms reproduce the masked-gather implementation (WP-183).
 
-    Each scenario builds one random assignment and scores it twice — once with the
-    shipped dense form and once with the pre-change oracle above — on separate leaf
-    tensors so the two backward passes cannot accumulate into each other. Values and
-    gradients must agree to ``1e-6`` and the gradients must be finite.
+    Each scenario builds one random assignment and scores it twice — once with the shipped dense form and once with the
+    pre-change oracle above — on separate leaf tensors so the two backward passes cannot accumulate into each other.
+    Values and gradients must agree to ``1e-6`` and the gradients must be finite.
     """
 
     @staticmethod
     def _score_both(
         pred_boxes: Tensor, assign: AssignResult, strides: Tensor | None
     ) -> tuple[tuple[Tensor, Tensor, Tensor], tuple[Tensor, Tensor, Tensor]]:
-        """Return ``(box, l1, grad)`` from the dense form and from the oracle, on separate leaves."""
+        """Return ``(box, l1, grad)`` from the dense form and from the oracle, on separate leaves.
+
+        Examples:
+            >>> assign = _random_assign(torch.zeros(1, 2, dtype=torch.bool))
+            >>> dense, oracle = TestDenseBoxTermsMatchMaskedReference._score_both(_random_boxes(1, 2), assign, None)
+            >>> float(dense[0]), float(oracle[0])
+            (0.0, 0.0)
+        """
         weight_sum = assign.align_weights.sum().clamp(min=1.0)
         dense_leaf = pred_boxes.clone().requires_grad_(True)
         dense_box, dense_l1 = DetectionBranchLoss._box_losses(dense_leaf, assign, weight_sum, strides)
@@ -343,8 +350,8 @@ class TestDenseBoxTermsMatchMaskedReference:
     def test_mixed_batch_with_one_empty_image(self, strides: Tensor | None) -> None:
         """A ``B=4`` batch where one image has no positive scores identically in value and gradient.
 
-        The empty image is the row a masked gather drops outright and the dense form
-        carries as exact zeros; the two must sum to the same number either way.
+        The empty image is the row a masked gather drops outright and the dense form carries as exact zeros; the two
+        must sum to the same number either way.
         """
         assign = _random_assign(_mixed_fg_mask())
         pred_boxes = _random_boxes(4, 6)
@@ -361,9 +368,8 @@ class TestDenseBoxTermsMatchMaskedReference:
     def test_all_background_batch_zero_and_connected(self) -> None:
         """A batch with no positive anywhere gives exact zeros and a finite, all-zero gradient.
 
-        This is the empty-mask contract the module docstring states; the oracle
-        reaches it through empty gathers and the dense form through an all-``False``
-        selection, and both must land on the same zero.
+        This is the empty-mask contract the module docstring states; the oracle reaches it through empty gathers and
+        the dense form through an all-``False`` selection, and both must land on the same zero.
         """
         assign = _random_assign(torch.zeros(4, 6, dtype=torch.bool))
         pred_boxes = _random_boxes(4, 6)
@@ -380,10 +386,9 @@ class TestDenseBoxTermsMatchMaskedReference:
     def test_degenerate_background_predictions_leak_nothing(self) -> None:
         """Zero-area and inverted predictions on background anchors reach neither the value nor the gradient.
 
-        A background anchor's target is the all-zero box, so a dense CIoU there is
-        scored on a degenerate pair the oracle never evaluates. Planting a zero box, a
-        box equal to that zero target and an inverted box on background anchors proves
-        the ``torch.where`` selection — and the CIoU guards behind it — keep them out.
+        A background anchor's target is the all-zero box, so a dense CIoU there is scored on a degenerate pair the
+        oracle never evaluates. Planting a zero box, a box equal to that zero target and an inverted box on background
+        anchors proves the ``torch.where`` selection — and the CIoU guards behind it — keep them out.
         """
         fg_mask = torch.tensor([[True, False, False, False], [False, True, False, False]])
         assign = _random_assign(fg_mask)

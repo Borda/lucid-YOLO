@@ -1,65 +1,52 @@
 # SPDX-License-Identifier: Apache-2.0
 """Release guard: decide whether a version tag may ship (WP-006).
 
-The guard runs six independent checks and lets a tag ship only when all six
-pass:
+The guard runs six independent checks and lets a tag ship only when all six pass:
 
-1. **Tag** — the tag must be a ``v0.MINOR.PATCH`` string. A ``1.x`` (or higher)
-   tag is refused with an ADR-002 message: the project is a perpetual 0.x
-   release train and no 1.0 is ever planned, promised, or tagged. Any other
+1. **Tag** — the tag must be a ``v0.MINOR.PATCH`` string. A ``1.x`` (or higher) tag is refused with an ADR-002
+   message: the project is a perpetual 0.x release train and no 1.0 is ever planned, promised, or tagged. Any other
    shape is refused as malformed.
-2. **Changelog** — the changelog must carry a ``## [MINOR.PATCH]`` section for
-   the tag, so every release ships with its notes written.
-3. **Version** — ``lucid_yolo.__version__`` must be the version the tag names.
-   Added by WP-168: the changelog check above is a substring test and never reads
-   the package version, and ``audit_version_single_source.py`` checks only that
-   ``pyproject.toml`` defers to ``__version__`` — neither of them ever sees a tag.
-   Between them, ``v0.8.0`` over a tree still declaring ``0.7.0`` passed every
-   check and shipped a wheel whose version contradicted the tag that built it.
-   The version is parsed statically rather than imported: importing the package
-   executes it, and a guard deciding whether a distribution is shippable must not
-   need that distribution to be importable first.
-4. **Frozen goldens** — ``goldens/frozen/<MAJOR.MINOR>/`` must exist and hold at
-   least one file. A release's whole regression claim is that current code still
-   satisfies every value the release pinned (``scripts/check_goldens.py``), and a
-   minor tagged without its snapshot makes that claim about nothing. Also WP-168.
-5. **Dependency tiers** — shipped imports must be runtime declarations or guarded
-   consumer extras. Added by WP-160 after WP-159 found the
-   guard blind to the one thing a release is: what a consumer installing the
-   distribution actually receives. Phase 14 moved five modules under ``data/`` onto
-   ``fuse-augmentations`` while its requirement sat in the ``dev`` dependency group,
-   so an install omitting that group produced a package that raised ``ImportError``
-   from ``lucid_yolo.data`` — no test caught it, because the development
-   environment installs every group.
-6. **Gate** — the gate command (``make gate`` by default) must exit ``0``. A
-   non-zero exit is a red gate and refuses the tag.
+2. **Changelog** — the changelog must carry a ``## [MINOR.PATCH]`` section for the tag, so every release ships
+   with its notes written.
+3. **Version** — ``lucid_yolo.__version__`` must be the version the tag names. Added by WP-168: the changelog check
+   above is a substring test and never reads the package version, and ``audit_version_single_source.py`` checks only
+   that ``pyproject.toml`` defers to ``__version__`` — neither of them ever sees a tag. Between them, ``v0.8.0``
+   over a tree still declaring ``0.7.0`` passed every check and shipped a wheel whose version contradicted the tag
+   that built it. The version is parsed statically rather than imported: importing the package executes it, and a
+   guard deciding whether a distribution is shippable must not need that distribution to be importable first.
+4. **Frozen goldens** — ``goldens/frozen/<MAJOR.MINOR>/`` must exist and hold at least one file. A release's whole
+   regression claim is that current code still satisfies every value the release pinned (``scripts/check_goldens.py``),
+   and a minor tagged without its snapshot makes that claim about nothing. Also WP-168.
+5. **Dependency tiers** — shipped imports must be runtime declarations or guarded consumer extras. Added by WP-160
+   after WP-159 found the guard blind to the one thing a release is: what a consumer installing the distribution
+   actually receives. Phase 14 moved five modules under ``data/`` onto ``fuse-augmentations`` while its requirement
+   sat in the ``dev`` dependency group, so an install omitting that group produced a package that raised
+   ``ImportError`` from ``lucid_yolo.data`` — no test caught it, because the development environment installs
+   every group.
+6. **Gate** — the gate command (``make gate`` by default) must exit ``0``. A non-zero exit is a red gate
+   and refuses the tag.
 
-Checks 1-5 are *metadata*: each reads a file and answers in milliseconds. Check 6
-is *orchestration*: it re-runs the whole merge bar. The two are separable, and they
-are separated here because leaving them fused made the guard call itself. The
-pre-commit hook runs with ``--metadata-only``; the standalone and workflow
-invocations run every check including the gate:
+Checks 1-5 are *metadata*: each reads a file and answers in milliseconds. Check 6 is *orchestration*: it re-runs
+the whole merge bar. The two are separable, and they are separated here because leaving them fused made the guard
+call itself. The pre-commit hook runs with ``--metadata-only``; the standalone and workflow invocations run every
+check including the gate:
 
-* ``--metadata-only`` runs checks 1-5 and says so in its verdict. It exists
-  because ``make gate`` runs pre-commit, which runs this guard: on a commit whose
-  HEAD *is* a tag the fused form asked for another gate from inside the gate it
-  was already running, so release validation entered a cycle instead of reaching
-  the test and build stages. This mode is not an exemption — it never reports a
-  tag as shippable, only that its metadata is well-formed, and it refuses bad
-  metadata exactly as the full run does.
-* The full run — ``scripts/release_guard.py --tag v0.MINOR.PATCH``, which is what
-  ``.github/workflows/release.yml`` executes on a tag push — runs the gate once,
-  as the outermost caller. Nothing inside that gate asks for another.
+* ``--metadata-only`` runs checks 1-5 and says so in its verdict. It exists because ``make gate`` runs pre-commit,
+  which runs this guard: on a commit whose HEAD *is* a tag the fused form asked for another gate from inside the
+  gate it was already running, so release validation entered a cycle instead of reaching the test and build stages.
+  This mode is not an exemption — it never reports a tag as shippable, only that its metadata is well-formed, and
+  it refuses bad metadata exactly as the full run does.
+* The full run — ``scripts/release_guard.py --tag v0.MINOR.PATCH``, which is what ``.github/workflows/release.yml``
+  executes on a tag push — runs the gate once, as the outermost caller. Nothing inside that gate asks for another.
 
-Deliberately **not** checked: whether the runtime requirements are uploadable to
-PyPI. ``[project].dependencies`` currently carries a direct reference — a git URL,
-legal to build and install and illegal to upload — accepted as D20 with the
-consequence recorded, so a check refusing it would re-litigate a decision rather
-than protect one. What the tier check protects is different and unconditional: a
-distribution that cannot import is broken however it was obtained.
+Deliberately **not** checked: whether the runtime requirements are uploadable to PyPI. ``[project].dependencies``
+currently carries a direct reference — a git URL, legal to build and install and illegal to upload — accepted as
+D20 with the consequence recorded, so a check refusing it would re-litigate a decision rather than protect one.
+What the tier check protects is different and unconditional: a distribution that cannot import is broken however
+it was obtained.
 
-The check functions are importable and pure over their inputs; :func:`main` is a
-thin CLI that prints one verdict line per check and exits non-zero on refusal.
+The check functions are importable and pure over their inputs; :func:`main` is a thin CLI that prints one verdict
+line per check and exits non-zero on refusal.
 
 Examples:
     Guard a well-formed tag against a changelog that names it, with a trivially
@@ -122,8 +109,7 @@ class CheckResult:
     """Outcome of one release-guard check.
 
     Attributes:
-        name: Short check name (``tag``, ``changelog``, ``version``, ``goldens``,
-            ``dependencies``, or ``gate``).
+        name: Short check name (``tag``, ``changelog``, ``version``, ``goldens``, ``dependencies``, or ``gate``).
         passed: Whether the check permits the tag to ship.
         detail: Human-readable verdict explaining the outcome.
     """
@@ -204,9 +190,8 @@ def _declared_version(init_path: Path) -> str | None:
         init_path: The module assigning ``__version__`` as a string literal.
 
     Returns:
-        The assigned version, or ``None`` when the module makes no such literal
-        assignment — a computed or absent ``__version__`` is not a version this can
-        read, and saying so beats returning a guess.
+        The assigned version, or ``None`` when the module makes no such literal assignment — a computed or absent
+        ``__version__`` is not a version this can read, and saying so beats returning a guess.
 
     Examples:
         ```pycon
@@ -273,8 +258,7 @@ def check_frozen_goldens(tag: str, frozen_root: Path = DEFAULT_FROZEN_ROOT) -> C
 
     Args:
         tag: The candidate tag; its ``MAJOR.MINOR`` prefix names the snapshot directory.
-        frozen_root: Root holding one directory per released minor (default:
-            ``<repo>/goldens/frozen``).
+        frozen_root: Root holding one directory per released minor (default: ``<repo>/goldens/frozen``).
 
     Returns:
         A :class:`CheckResult` named ``"goldens"``.
@@ -309,10 +293,9 @@ def check_frozen_goldens(tag: str, frozen_root: Path = DEFAULT_FROZEN_ROOT) -> C
 def _imported_top_levels(package_root: Path) -> set[str]:
     """Collect the top-level modules ``package_root`` imports, minus stdlib and itself.
 
-    Absolute imports only: a relative ``from .x import y`` names nothing outside the
-    package, and a conditional or function-local import is still an import the
-    installed package can execute, so the walk is over every ``Import`` node rather
-    than the module preamble alone.
+    Absolute imports only: a relative ``from .x import y`` names nothing outside the package, and a conditional
+    or function-local import is still an import the installed package can execute, so the walk is over every
+    ``Import`` node rather than the module preamble alone.
 
     Args:
         package_root: Directory of the package a built distribution ships.
@@ -350,12 +333,10 @@ _ABORT_CALLS = frozenset({"sys.exit", "os._exit", "os.abort", "exit", "quit"})
 def _aborts(node: ast.AST) -> bool:
     """Report whether ``node`` ends the code path it sits on instead of falling back.
 
-    Three forms count: a ``raise``, an ``assert`` and a call spelled ``sys.exit``,
-    ``os._exit``, ``os.abort``, ``exit`` or ``quit``. Any ``assert`` counts, not only
-    a falsy constant, matching how a conditional ``raise`` is already treated. The
-    match is on the spelled name only, so an abort reached through a helper call
-    (``_fail()``) or an alias (``import sys as s``) is undetectable statically and
-    reads as a fallback.
+    Three forms count: a ``raise``, an ``assert`` and a call spelled ``sys.exit``, ``os._exit``, ``os.abort``,
+    ``exit`` or ``quit``. Any ``assert`` counts, not only a falsy constant, matching how a conditional ``raise`` is
+    already treated. The match is on the spelled name only, so an abort reached through a helper call (``_fail()``)
+    or an alias (``import sys as s``) is undetectable statically and reads as a fallback.
 
     Args:
         node: Any AST node; the caller walks a handler's subtree and asks this of each node.
@@ -421,17 +402,14 @@ def _catches_absence(handler: ast.ExceptHandler) -> bool:
 def _optional_top_levels(package_root: Path) -> set[str]:
     """Find modules whose every import is protected by a missing-import handler.
 
-    A try around a function definition does not protect the function's later
-    calls. Stop at that scope boundary; only a try inside the function can
-    make its import optional. A handler matches when it catches a missing module
-    (see :func:`_catches_absence`): ``ImportError``, ``ModuleNotFoundError``, or a
-    broad ``Exception``, ``BaseException`` or bare ``except:``. Handler order is not
-    modelled. A matching handler that aborts (see :func:`_aborts`) makes the import
-    required wherever it sits among the handlers: catching absence and aborting
-    the import does not provide a fallback, even when another handler would continue.
-    The cost is a refusal of a broad aborting handler that Python never reaches behind
-    an earlier ``except ImportError``; the reverse mistake, passing an abort Python
-    does reach, cannot occur.
+    A try around a function definition does not protect the function's later calls. Stop at that scope boundary;
+    only a try inside the function can make its import optional. A handler matches when it catches a missing module
+    (see :func:`_catches_absence`): ``ImportError``, ``ModuleNotFoundError``, or a broad ``Exception``,
+    ``BaseException`` or bare ``except:``. Handler order is not modelled. A matching handler that aborts (see
+    :func:`_aborts`) makes the import required wherever it sits among the handlers: catching absence and aborting
+    the import does not provide a fallback, even when another handler would continue. The cost is a refusal of a
+    broad aborting handler that Python never reaches behind an earlier ``except ImportError``; the reverse mistake,
+    passing an abort Python does reach, cannot occur.
 
     Examples:
         ```pycon
@@ -502,21 +480,19 @@ def check_dependency_tiers(
 ) -> CheckResult:
     """Refuse undeclared runtime imports while allowing guarded consumer extras.
 
-    A distribution declared only in a dependency group is absent from the built
-    wheel's own ``Requires-Dist``, so an install that does not ask for that group
-    receives a package raising ``ImportError`` on the module that needs it. The
-    development environment installs every group, which is why no test sees this and
-    why it belongs to the release guard rather than to the suite.
+    A distribution declared only in a dependency group is absent from the built wheel's own ``Requires-Dist``,
+    so an install that does not ask for that group receives a package raising ``ImportError`` on the module that
+    needs it. The development environment installs every group, which is why no test sees this and why it belongs
+    to the release guard rather than to the suite.
 
-    An explicitly declared consumer extra may protect all its imports with a
-    non-aborting handler for ImportError, ModuleNotFoundError or a broad
-    Exception, BaseException or bare ``except:``. It remains optional on hosts
-    where its wheel does not exist; a bare import of the same module still
-    requires a runtime declaration. Dependency groups receive no such exception.
+    An explicitly declared consumer extra may protect all its imports with a non-aborting handler for ImportError,
+    ModuleNotFoundError or a broad Exception, BaseException or bare ``except:``. It remains optional on hosts where
+    its wheel does not exist; a bare import of the same module still requires a runtime declaration. Dependency
+    groups receive no such exception.
 
-    A module that resolves to no installed distribution is reported rather than
-    ignored: it means the environment cannot answer the question, and a guard that
-    treats "unknown" as "fine" is the failure mode this check exists to close.
+    A module that resolves to no installed distribution is reported rather than ignored: it means the environment
+    cannot answer the question, and a guard that treats "unknown" as "fine" is the failure mode this check exists
+    to close.
 
     Args:
         pyproject: Manifest declaring the tiers.
@@ -616,9 +592,8 @@ def check_gate(gate_cmd: str) -> CheckResult:
 def _current_tag() -> str | None:
     """Return the tag exactly naming ``HEAD``, or ``None`` when there is none.
 
-    Backs :func:`main`'s ``--tag`` default so the guard is runnable as a
-    pre-commit hook with no per-invocation argument: most commits are not on a
-    tag, and the hook has nothing to check for them.
+    Backs :func:`main`'s ``--tag`` default so the guard is runnable as a pre-commit hook with no per-invocation
+    argument: most commits are not on a tag, and the hook has nothing to check for them.
 
     Examples:
         ```pycon
@@ -647,12 +622,10 @@ def evaluate_metadata(
 ) -> list[CheckResult]:
     """Run the five file-reading checks and return their results in order.
 
-    Every check here answers from a file in milliseconds, and none of them starts a
-    build or a test run. That is the whole property this function exists to isolate:
-    the gate command runs pre-commit, which runs this guard, so a guard that always
-    ran the gate ran it from inside itself on the one commit that mattered — a
-    release tag. Callers that are *already* inside the gate call this; the caller
-    that owns the gate calls :func:`evaluate`.
+    Every check here answers from a file in milliseconds, and none of them starts a build or a test run.
+    That is the whole property this function exists to isolate: the gate command runs pre-commit, which runs this
+    guard, so a guard that always ran the gate ran it from inside itself on the one commit that mattered — a release
+    tag. Callers that are *already* inside the gate call this; the caller that owns the gate calls :func:`evaluate`.
 
     Args:
         tag: The candidate tag.
@@ -708,13 +681,12 @@ def evaluate(
 ) -> list[CheckResult]:
     """Run every release-guard check, metadata first and the gate last.
 
-    The gate runs last because it is the only expensive check: a malformed tag, an
-    unwritten changelog section, a version the package contradicts, a missing frozen
-    snapshot or a mis-tiered dependency is answerable in milliseconds, and there is
-    no reason to spend three minutes on the suite first.
+    The gate runs last because it is the only expensive check: a malformed tag, an unwritten changelog section,
+    a version the package contradicts, a missing frozen snapshot or a mis-tiered dependency is answerable in
+    milliseconds, and there is no reason to spend three minutes on the suite first.
 
-    Call this only from outside the gate. The gate command runs pre-commit, which
-    runs this guard; a caller already inside it wants :func:`evaluate_metadata`.
+    Call this only from outside the gate. The gate command runs pre-commit, which runs this guard; a caller
+    already inside it wants :func:`evaluate_metadata`.
 
     Args:
         tag: The candidate tag.
@@ -764,11 +736,10 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command-line arguments (defaults to ``sys.argv[1:]``).
 
     Returns:
-        ``0`` only when every check run passes; ``1`` otherwise. Which checks run
-        depends on ``--metadata-only``: with it, the five file-reading checks and no
-        gate; without it, those five and the gate. A passing ``--metadata-only`` run
-        says so in its verdict rather than claiming the tag may ship — it has not
-        asked the question the gate answers.
+        ``0`` only when every check run passes; ``1`` otherwise. Which checks run depends on ``--metadata-only``:
+        with it, the five file-reading checks and no gate; without it, those five and the gate. A passing
+        ``--metadata-only`` run says so in its verdict rather than claiming the tag may ship — it has not asked
+        the question the gate answers.
 
     Examples:
         The verdict lines go to stdout and name the changelog by absolute path,

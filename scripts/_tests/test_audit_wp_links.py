@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Functional-core tests: the work-package cross-link audit script (WP-196).
 
-Covers ``scripts/lint/audit_wp_links.py``'s public contract in isolation, on synthetic
-files under ``tmp_path`` rather than against the live docs tree -- the live tree is
-exercised instead by the ``wp-links`` pre-commit hook each time a ``docs/*.md`` changes.
-This file is the functional-core check pytest owns; the hook is the lint gate that runs it.
+Covers ``scripts/lint/audit_wp_links.py``'s public contract in isolation, on synthetic files under ``tmp_path`` rather
+than against the live docs tree -- the live tree is exercised instead by the ``wp-links`` pre-commit hook each time a
+``docs/*.md`` changes. This file is the functional-core check pytest owns; the hook is the lint gate that runs it.
 """
 
 from __future__ import annotations
@@ -58,16 +57,15 @@ class TestMentions:
     def test_skips_non_prose(self, text: str) -> None:
         """A mention in code, a heading, a link, a comment or a range is not linked.
 
-        Each of these either already points somewhere or names no single page; linking it
-        would nest links, break code, or point a range at its first member only.
+        Each of these either already points somewhere or names no single page; linking it would nest links, break code,
+        or point a range at its first member only.
         """
         assert list(audit.mentions(text)) == []
 
     def test_finds_suffixed_id(self) -> None:
         """A lettered id such as ``WP-091b`` is matched whole, suffix included.
 
-        Twenty-nine WP pages carry a letter suffix; matching only the digits would link
-        ``WP-091b`` to WP-091's page.
+        Twenty-nine WP pages carry a letter suffix; matching only the digits would link ``WP-091b`` to WP-091's page.
         """
         assert [wp_id for _, _, wp_id in audit.mentions("see WP-091b.\n")] == ["091b"]
 
@@ -76,8 +74,8 @@ class TestFindStale:
     def test_fix_links_mention_and_is_idempotent(self, docs: Path) -> None:
         """After ``--fix`` a prose mention is a link and a second check finds nothing stale.
 
-        The hook's clean state has to be a fixed point of the fixer, or every commit after
-        a fix would report the same pages again.
+        The hook's clean state has to be a fixed point of the fixer, or every commit after a fix would report the same
+        pages again.
         """
         (docs / "index.md").write_text("See WP-001 and WP-003.\n", encoding="utf-8")
         audit.find_stale(docs, fix=True)
@@ -96,8 +94,8 @@ class TestFindStale:
     def test_reports_header_after_roadmap_change(self, docs: Path) -> None:
         """A new roadmap row depending on WP-002 makes WP-002's header stale.
 
-        The header copies roadmap data, so the copy has to be re-derived and checked, not
-        trusted: WP-002 gains a dependant it does not list.
+        The header copies roadmap data, so the copy has to be re-derived and checked, not trusted: WP-002 gains
+        a dependant it does not list.
         """
         roadmap = docs / "ROADMAP.md"
         roadmap.write_text(_ROADMAP + "| 004 | d | s | d | 002 | ⬜ |\n", encoding="utf-8")

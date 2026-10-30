@@ -1,30 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 """Commit-message validator for the provenance-carrying commit contract.
 
-Enforces the commit format defined in ``AGENTS.md`` sec. 5: a Conventional
-Commits subject plus mandatory ``WP:``/``Provenance:``/``Assumptions:``/``Gate:``
-trailers, with every provenance source id resolvable against the allowlist in
-``docs/PROVENANCE.md`` and every assumption id against the register in
-``docs/ASSUMPTIONS.md``. Issue references (``#42``) and mentions (``@name``) may only
-appear in the co-author trailers that follow the ``---`` separator and in
-``Signed-off-by:`` lines, which ``git commit -s`` and ``git rebase --signoff`` append
-before it.
+Enforces the commit format defined in ``AGENTS.md`` sec. 5: a Conventional Commits subject plus mandatory
+``WP:``/``Provenance:``/``Assumptions:``/``Gate:`` trailers, with every provenance source id resolvable against
+the allowlist in ``docs/PROVENANCE.md`` and every assumption id against the register in ``docs/ASSUMPTIONS.md``.
+Issue references (``#42``) and mentions (``@name``) may only appear in the co-author trailers that follow the ``---``
+separator and in ``Signed-off-by:`` lines, which ``git commit -s`` and ``git rebase --signoff`` append before it.
 
 Three rules are worth stating here because each is a decision rather than a shape:
 
-* **Denial is a value.** ``Provenance: none`` is accepted the way ``WP: none`` and
-  ``Assumptions: none`` already are, and it may carry its explanation --
-  ``none (implementation efficiency; R1 silent on target rasterisation)``. A value
-  opening with ``none`` is read as *denying* provenance, so an id inside its
-  explanation is a reference and never a citation: it must still resolve, but it
-  cannot satisfy the requirement to name a source. Reading such a line as "cites R1"
-  is the opposite of what it says.
-* **Only the allowlist admits.** Source ids are read from the ``Source allowlist``
-  section of ``docs/PROVENANCE.md`` and never from its ``Placeholders`` table, whose
-  rows share the same shape. A withdrawn or citation-only row is refused by name
-  rather than reported as unknown.
-* **Assumption ids are resolved, not shape-checked.** ``A999`` matching ``^A\\d+$``
-  is not evidence that the register holds a row for it.
+* **Denial is a value.** ``Provenance: none`` is accepted the way ``WP: none`` and ``Assumptions: none`` already
+  are, and it may carry its explanation -- ``none (implementation efficiency; R1 silent on target rasterisation)``.
+  A value opening with ``none`` is read as *denying* provenance, so an id inside its explanation is a reference
+  and never a citation: it must still resolve, but it cannot satisfy the requirement to name a source. Reading such
+  a line as "cites R1" is the opposite of what it says.
+* **Only the allowlist admits.** Source ids are read from the ``Source allowlist`` section of ``docs/PROVENANCE.md``
+  and never from its ``Placeholders`` table, whose rows share the same shape. A withdrawn or citation-only row is
+  refused by name rather than reported as unknown.
+* **Assumption ids are resolved, not shape-checked.** ``A999`` matching ``^A\\d+$`` is not evidence that the register
+  holds a row for it.
 
 Examples:
     Validate a single message file (exit 1 on any violation)::
@@ -52,26 +46,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root for path-based entry points
 from scripts.lint._common import REPO_ROOT
 
-#: Conventional-commit subject: allowed type, optional lowercase scope, ": " then text.
-#: ``refine`` is this project's own addition to the conventional set, for a change
-#: that improves something already correct — a rename, a clearer boundary, a
-#: sharpened comment. ``refactor`` claims behaviour-preserving restructuring and
-#: ``docs`` claims prose, and a rename that crosses code, configs and prose at once
-#: is neither.
+#: Conventional-commit subject: allowed type, optional lowercase scope, ": " then text. ``refine`` is this project's
+#: own addition to the conventional set, for a change that improves something already correct — a rename, a clearer
+#: boundary, a sharpened comment. ``refactor`` claims behaviour-preserving restructuring and ``docs`` claims prose,
+#: and a rename that crosses code, configs and prose at once is neither.
 SUBJECT_RE = re.compile(r"^(feat|fix|test|ci|docs|chore|perf|refactor|refine|exp|release)(\([a-z0-9_-]+\))?: .+")
 #: Maximum subject length (characters).
 SUBJECT_MAX_LEN = 72
 
 #: Trailer matchers (multiline, one capture group each).
-#: ``WP:`` takes a roadmap row id -- digits with an optional lowercase letter, so a
-#: lettered row such as ``197c`` is expressible instead of collapsing onto its numeric
-#: sibling -- or the literal ``none`` for the D18 case: once the
-#: reproduction is complete and the repository public, a change altering no shipped
-#: behaviour, no public symbol, no golden and no documented assumption lands without a
-#: tracked row. ``none`` rather than an omitted trailer, matching ``Assumptions:``, so
-#: the message states that no row applies instead of leaving a reader to decide whether
-#: one was forgotten. The other three trailers stay mandatory: the derivation question
-#: does not go away because the tracking did (WP-144).
+#: ``WP:`` takes a roadmap row id -- digits with an optional lowercase letter, so a lettered row such as ``197c``
+#: is expressible instead of collapsing onto its numeric sibling -- or the literal ``none`` for the D18 case: once
+#: the reproduction is complete and the repository public, a change altering no shipped behaviour, no public symbol,
+#: no golden and no documented assumption lands without a tracked row. ``none`` rather than an omitted trailer,
+#: matching ``Assumptions:``, so the message states that no row applies instead of leaving a reader to decide
+#: whether one was forgotten. The other three trailers stay mandatory: the derivation question does not go away
+#: because the tracking did (WP-144).
 WP_RE = re.compile(r"^WP: (\d+[a-z]?|none)\s*$", re.MULTILINE)
 PROVENANCE_RE = re.compile(r"^Provenance:\s*(.+)$", re.MULTILINE)
 ASSUMPTIONS_RE = re.compile(r"^Assumptions:\s*(.+)$", re.MULTILINE)
@@ -91,32 +81,28 @@ HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 DENIAL_RE = re.compile(r"^none\b", re.IGNORECASE)
 #: Co-author separator: a line containing only dashes.
 SEPARATOR_RE = re.compile(r"^---\s*$", re.MULTILINE)
-#: A DCO sign-off line. Git's own ``-s`` and ``--signoff`` append it as the last body
-#: line, which is before the ``---`` separator when one exists, and the at-sign it
-#: carries is an address rather than a mention: GitHub links ``@name``, not e-mail.
-#: ``docs/CONTRIBUTING.md`` tells contributors to use ``-s``, so the checker must not
-#: refuse what the guide asks for.
+#: A DCO sign-off line. Git's own ``-s`` and ``--signoff`` append it as the last body line, which is before the
+#: ``---`` separator when one exists, and the at-sign it carries is an address rather than a mention: GitHub links
+#: ``@name``, not e-mail. ``docs/CONTRIBUTING.md`` tells contributors to use ``-s``, so the checker must not refuse
+#: what the guide asks for.
 SIGNOFF_RE = re.compile(r"^Signed-off-by:.*$", re.MULTILINE)
-#: What the two banned characters are banned for: GitHub's auto-links. ``#42`` becomes
-#: a link to whatever issue 42 is in whichever repository the commit ends up in, and
-#: ``@ada`` pings an account. A markdown heading (``## What changed``) links nothing,
-#: and pull-request descriptions -- the squash message under this repository's merge
-#: setting -- carry them, so only the linking forms are refused.
+#: What the two banned characters are banned for: GitHub's auto-links. ``#42`` becomes a link to whatever issue 42
+#: is in whichever repository the commit ends up in, and ``@ada`` pings an account. A markdown heading
+#: (``## What changed``) links nothing, and pull-request descriptions -- the squash message under this repository's
+#: merge setting -- carry them, so only the linking forms are refused.
 FORBIDDEN_RE = re.compile(r"(#\d)|(@\w)")
 #: The author address GitHub assigns to a commit made by an App installation --
-#: ``66853113+pre-commit-ci[bot]@users.noreply.github.com`` and its dependabot and
-#: renovate siblings. Range mode skips these commits instead of validating them: a
-#: dependency-pin bump has no algorithmic derivation to name, nobody wrote the message,
-#: and what lands on ``main`` is the maintainer's squash-merge message, which is
-#: written by a person and checked as one. The address is the closest thing a checkout
-#: can see to GitHub's own ``Bot`` account type. It is also self-reported, and a
-#: contributor willing to forge it is the contributor already willing to write a
-#: false trailer, so the check keeps enforcing the shape and leaves the truth where
-#: it was. The DCO GitHub App applies the same exemption to the sign-off it checks.
+#: ``66853113+pre-commit-ci[bot]@users.noreply.github.com`` and its dependabot and renovate siblings. Range mode
+#: skips these commits instead of validating them: a dependency-pin bump has no algorithmic derivation to name,
+#: nobody wrote the message, and what lands on ``main`` is the maintainer's squash-merge message, which is written
+#: by a person and checked as one. The address is the closest thing a checkout can see to GitHub's own ``Bot``
+#: account type. It is also self-reported, and a contributor willing to forge it is the contributor already
+#: willing to write a false trailer, so the check keeps enforcing the shape and leaves the truth where it was.
+#: The DCO GitHub App applies the same exemption to the sign-off it checks.
 BOT_AUTHOR_RE = re.compile(r"\[bot\]@users\.noreply\.github\.com$")
 
-#: Heading text (lowercased, emoji-tolerant) marking the section whose rows admit a
-#: source, and the subsection inside it whose rows do not.
+#: Heading text (lowercased, emoji-tolerant) marking the section whose rows admit a source, and the subsection
+#: inside it whose rows do not.
 _ALLOWLIST_HEADING = "source allowlist"
 _PLACEHOLDER_HEADING = "placeholders"
 
@@ -133,11 +119,10 @@ class Registers:
     Attributes:
         sources: Source ids a message may cite -- the ``Source allowlist`` section's
             rows, minus its ``Placeholders`` table.
-        placeholders: Source ids the allowlist declares and refuses to admit: a
-            withdrawn row, or one registered as legal evidence rather than as an
-            implementation source. Carried separately from ``sources`` so a message
-            naming one is refused as *inadmissible* rather than as *unknown* -- the
-            two are different mistakes and only one of them is a typo.
+        placeholders: Source ids the allowlist declares and refuses to admit: a withdrawn row, or one registered as
+            legal evidence rather than as an implementation source. Carried separately from ``sources`` so a message
+            naming one is refused as *inadmissible* rather than as *unknown* -- the two are different mistakes
+            and only one of them is a typo.
         assumptions: Assumption ids the register holds a row for.
     """
 
@@ -181,17 +166,16 @@ def _rows_by_section(text: str, row_re: re.Pattern[str]) -> list[tuple[str, str,
 def load_registers(provenance: Path = DEFAULT_PROVENANCE, assumptions: Path = DEFAULT_ASSUMPTIONS) -> Registers:
     """Parse the source allowlist and the assumption register into resolvable id sets.
 
-    The allowlist is read by section rather than file-wide: ``docs/PROVENANCE.md``'s
-    ``Placeholders`` table uses the same ``| RN |`` row shape as the admitting
-    sections, so a file-wide scan hands back the withdrawn rows as valid ids.
+    The allowlist is read by section rather than file-wide: ``docs/PROVENANCE.md``'s ``Placeholders`` table uses
+    the same ``| RN |`` row shape as the admitting sections, so a file-wide scan hands back the withdrawn rows
+    as valid ids.
 
     Args:
         provenance: Path to ``docs/PROVENANCE.md``.
         assumptions: Path to ``docs/ASSUMPTIONS.md``.
 
     Returns:
-        The admissible source ids, the declared-but-inadmissible ones, and the
-        registered assumption ids.
+        The admissible source ids, the declared-but-inadmissible ones, and the registered assumption ids.
 
     Examples:
         >>> registers = load_registers()
@@ -254,10 +238,9 @@ def _check_subject(subject: str) -> list[str]:
 def _check_assumptions(value: str, registered: frozenset[int]) -> list[str]:
     """Validate the value of an ``Assumptions:`` trailer against the register.
 
-    Shape and membership are separate failures: ``A9x`` is a malformed id, ``A999``
-    is a well-formed id naming no row. Only the second needed adding -- an id that
-    matches ``^A\\d+$`` and resolves to nothing cites a row the register does not
-    hold, which is the same defect ``Provenance:`` has always refused.
+    Shape and membership are separate failures: ``A9x`` is a malformed id, ``A999`` is a well-formed id naming no row.
+    Only the second needed adding -- an id that matches ``^A\\d+$`` and resolves to nothing cites a row the register
+    does not hold, which is the same defect ``Provenance:`` has always refused.
 
     Args:
         value: The text following ``Assumptions:``.
@@ -320,10 +303,9 @@ def _check_source_ids(ids: list[int], registers: Registers) -> list[str]:
 def _check_provenance(body: str, registers: Registers) -> list[str]:
     """Validate the ``Provenance:`` trailer against the allowlist.
 
-    A value opening with ``none`` denies provenance and is accepted as such, the way
-    ``WP: none`` is: it may carry an explanation, and an id inside that explanation
-    is a reference rather than a citation -- resolved, but never counted as the
-    source the trailer was asked to name.
+    A value opening with ``none`` denies provenance and is accepted as such, the way ``WP: none`` is: it may carry
+    an explanation, and an id inside that explanation is a reference rather than a citation -- resolved, but never
+    counted as the source the trailer was asked to name.
 
     Args:
         body: The message text preceding the co-author separator.
@@ -447,16 +429,14 @@ def _range_commits(*revisions: str) -> list[tuple[str, str]]:
             ``origin/main..HEAD``, or several such as ``HEAD --not --remotes``.
 
     Returns:
-        Full commit hashes paired with their author address; empty when the range
-        selects nothing.
+        Full commit hashes paired with their author address; empty when the range selects nothing.
 
     Raises:
-        UnresolvableRange: When git cannot resolve the range. A shallow checkout has no
-            ``refs/remotes/origin/main``, so the default range exits 128 -- which used to
-            reach the caller as a traceback, a checker crashing rather than reporting.
-            CI fetches full history for the jobs that run this; a contributor cloning
-            shallowly, or working in a fork whose remote is named otherwise, still lands
-            here and is owed a sentence naming the fix rather than a stack trace.
+        UnresolvableRange: When git cannot resolve the range. A shallow checkout has no ``refs/remotes/origin/main``,
+            so the default range exits 128 -- which used to reach the caller as a traceback, a checker crashing
+            rather than reporting. CI fetches full history for the jobs that run this; a contributor cloning
+            shallowly, or working in a fork whose remote is named otherwise, still lands here and is owed a sentence
+            naming the fix rather than a stack trace.
     """
     result = subprocess.run(
         ["git", "log", "--no-merges", "--format=%H%x1f%ae", *revisions],
@@ -479,17 +459,14 @@ def _range_commits(*revisions: str) -> list[tuple[str, str]]:
 def _unpushed_revisions() -> tuple[str, ...]:
     """Return the ``git log`` revisions selecting local commits not yet pushed.
 
-    ``@{upstream}..HEAD`` when the branch tracks a ref this checkout holds: only work
-    not yet on the tracked branch, so a published pull-request branch -- whose
-    messages a squash merge replaces -- is not rechecked. Two ordinary states have no
-    such ref, and ``@{upstream}`` then fails to resolve: a branch never pushed, which
-    is exactly the unpushed work this mode exists for, and a fork pull request checked
-    out by ``gh pr checkout``, whose ``branch.<name>.remote`` is a URL rather than a
-    named remote and so stores no remote-tracking branch. Both fall back to
-    ``HEAD --not --remotes``, every commit no remote-tracking ref already contains; on
-    the fork checkout that includes the contributor's own commits, which is the price
-    of not skipping the never-pushed case. A checkout with no remote at all selects its
-    whole history.
+    ``@{upstream}..HEAD`` when the branch tracks a ref this checkout holds: only work not yet on the tracked branch,
+    so a published pull-request branch -- whose messages a squash merge replaces -- is not rechecked. Two ordinary
+    states have no such ref, and ``@{upstream}`` then fails to resolve: a branch never pushed, which is exactly the
+    unpushed work this mode exists for, and a fork pull request checked out by ``gh pr checkout``, whose
+    ``branch.<name>.remote`` is a URL rather than a named remote and so stores no remote-tracking branch. Both fall
+    back to ``HEAD --not --remotes``, every commit no remote-tracking ref already contains; on the fork checkout that
+    includes the contributor's own commits, which is the price of not skipping the never-pushed case. A checkout with
+    no remote at all selects its whole history.
 
     Returns:
         The revision arguments for :func:`_range_commits`.
@@ -530,9 +507,8 @@ def _report(reports: list[tuple[str, list[str]]], skipped: int = 0) -> int:
 
     Args:
         reports: ``(label, violations)`` pairs, one per validated message.
-        skipped: How many commits range mode left unvalidated because an automation
-            authored them; named in the summary so a clean verdict over a range that
-            validated nothing reads as what it is.
+        skipped: How many commits range mode left unvalidated because an automation authored them; named in the
+            summary so a clean verdict over a range that validated nothing reads as what it is.
 
     Returns:
         ``1`` when any message has violations, otherwise ``0``.

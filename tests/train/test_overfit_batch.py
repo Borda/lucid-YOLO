@@ -1,36 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 """Phase 3 exit gate: the assignment + loss stack is optimizable end to end (WP-030).
 
-This is the Phase 3 sign-off that the STAL / one-to-one assigners
-(:mod:`lucid_yolo.assign`) and the dual-branch loss
-(:class:`~lucid_yolo.losses.dual_loss.DualBranchLoss`) compose into a stack that a
-plain optimizer can drive downhill. The detection head (WP-022) lands
-concurrently and is deliberately *not* used here: instead of a network we
-optimize two learnable prediction tensors directly, so a failure localizes to
-the assignment / loss stack and nothing else.
+This is the Phase 3 sign-off that the STAL / one-to-one assigners (:mod:`lucid_yolo.assign`) and the dual-branch loss
+(:class:`~lucid_yolo.losses.dual_loss.DualBranchLoss`) compose into a stack that a plain optimizer can drive downhill.
+The detection head (WP-022) lands concurrently and is deliberately *not* used here: instead of a network we optimize two
+learnable prediction tensors directly, so a failure localizes to the assignment / loss stack and nothing else.
 
 The learnable predictions are:
 
-- ``logits`` — a ``(B, A, C)`` :class:`~torch.nn.Parameter` of raw class logits,
-  fed to :class:`DualBranchLoss` as both branches' logits; and
-- ``box_raw`` — a ``(B, A, 4)`` :class:`~torch.nn.Parameter` mapped to valid
-  ``xyxy`` boxes by :func:`_decode_boxes`.
+- ``logits`` — a ``(B, A, C)`` :class:`~torch.nn.Parameter` of raw class logits, fed to :class:`DualBranchLoss` as both
+  branches' logits; and
+- ``box_raw`` — a ``(B, A, 4)`` :class:`~torch.nn.Parameter` mapped to valid ``xyxy`` boxes by :func:`_decode_boxes`.
 
-Box parametrization (anchor-centred ltrb). ``box_raw`` holds four raw scalars per
-anchor that :func:`torch.nn.functional.softplus` turns into non-negative
-``(left, top, right, bottom)`` distances (scaled by the anchor's stride so the
-initial extents match the level's footprint). The decoded box is
-``(ax - left, ay - top, ax + right, ay + bottom)`` around the anchor centre
-``(ax, ay)``. Two properties make this the right stand-in for a head: the box is
-always valid (``x2 >= x1`` and ``y2 >= y1`` because every distance is
-non-negative), and because a positive anchor's centre lies inside its assigned
-ground truth (the STAL candidate filter guarantees it), that ground-truth box is
-*exactly* representable — so a perfect overfit is reachable, not merely
+Box parametrization (anchor-centred ltrb). ``box_raw`` holds four raw scalars per anchor that
+:func:`torch.nn.functional.softplus` turns into non-negative ``(left, top, right, bottom)`` distances (scaled by the
+anchor's stride so the initial extents match the level's footprint). The decoded box is
+``(ax - left, ay - top, ax + right, ay + bottom)`` around the anchor centre ``(ax, ay)``. Two properties make this the
+right stand-in for a head: the box is always valid (``x2 >= x1`` and ``y2 >= y1`` because every distance is
+non-negative), and because a positive anchor's centre lies inside its assigned ground truth (the STAL candidate filter
+guarantees it), that ground-truth box is *exactly* representable — so a perfect overfit is reachable, not merely
 approachable.
 
-The 200-step run is shared: a module-scoped fixture runs it once and records the
-per-step loss trajectory plus a single finiteness flag (every loss component and
-every gradient finite at every step), which the monotonic-decrease and
+The 200-step run is shared: a module-scoped fixture runs it once and records the per-step loss trajectory plus a single
+finiteness flag (every loss component and every gradient finite at every step), which the monotonic-decrease and
 no-NaN/Inf tests then read without re-running.
 """
 
@@ -100,8 +92,7 @@ class _Trajectory:
 
     Attributes:
         totals: Per-step total loss (length ``_STEPS``).
-        all_finite: ``True`` iff every loss component and gradient stayed finite
-            at every step.
+        all_finite: ``True`` iff every loss component and gradient stayed finite at every step.
     """
 
     totals: list[float]
@@ -288,9 +279,49 @@ def _step_is_finite(out: DualLossOutput, logits: Tensor, box_raw: Tensor) -> boo
         >>> _step_is_finite(out, logits, box_raw)
         True
     """
-    if not all(bool(torch.isfinite(component).all()) for component in _components(out)):
+    if not _components_finite(out):
         return False
     return bool(torch.isfinite(_grad(logits)).all()) and bool(torch.isfinite(_grad(box_raw)).all())
+
+
+def _forward_loss(loss_fn: DualBranchLoss, batch: _Batch, logits: Tensor, box_raw: Tensor) -> DualLossOutput:
+    """Run ``loss_fn`` on ``batch`` with both branches fed the same ``logits`` and decoded ``box_raw``.
+
+    Examples:
+        >>> batch = _Batch(
+        ...     anchor_points=torch.zeros(1, 2), strides=torch.ones(1),
+        ...     gt_boxes=torch.zeros(2, 1, 4), gt_labels=torch.zeros(2, 1, dtype=torch.int64),
+        ...     gt_mask=torch.ones(2, 1, dtype=torch.bool), num_classes=4,
+        ... )
+        >>> logits, box_raw = _new_predictions(batch)
+        >>> _forward_loss(DualBranchLoss(), batch, logits, box_raw).total.requires_grad
+        True
+    """
+    boxes = _decode_boxes(box_raw, batch.anchor_points, batch.strides)
+    return loss_fn(
+        BranchPrediction(logits, boxes),
+        BranchPrediction(logits, boxes),
+        batch.anchor_points,
+        batch.gt_boxes,
+        batch.gt_labels,
+        batch.gt_mask,
+    )
+
+
+def _components_finite(out: DualLossOutput) -> bool:
+    """Whether every scalar component of a dual-loss output is finite.
+
+    Examples:
+        >>> batch = _Batch(
+        ...     anchor_points=torch.zeros(1, 2), strides=torch.ones(1),
+        ...     gt_boxes=torch.zeros(2, 1, 4), gt_labels=torch.zeros(2, 1, dtype=torch.int64),
+        ...     gt_mask=torch.ones(2, 1, dtype=torch.bool), num_classes=4,
+        ... )
+        >>> logits, box_raw = _new_predictions(batch)
+        >>> _components_finite(_forward_loss(DualBranchLoss(), batch, logits, box_raw))
+        True
+    """
+    return all(bool(torch.isfinite(component).all()) for component in _components(out))
 
 
 def _run_overfit(batch: _Batch) -> _Trajectory:
@@ -307,15 +338,7 @@ def _run_overfit(batch: _Batch) -> _Trajectory:
     all_finite = True
     for _ in range(_STEPS):
         optimizer.zero_grad()
-        boxes = _decode_boxes(box_raw, batch.anchor_points, batch.strides)
-        out = loss_fn(
-            BranchPrediction(logits, boxes),
-            BranchPrediction(logits, boxes),
-            batch.anchor_points,
-            batch.gt_boxes,
-            batch.gt_labels,
-            batch.gt_mask,
-        )
+        out = _forward_loss(loss_fn, batch, logits, box_raw)
         out.total.backward()
         all_finite = all_finite and _step_is_finite(out, logits, box_raw)
         optimizer.step()
@@ -339,21 +362,12 @@ def _one_step(batch: _Batch, alpha: float) -> _StepResult:
     logits, box_raw = _new_predictions(batch)
     loss_fn = DualBranchLoss()
     loss_fn.alpha = alpha
-    boxes = _decode_boxes(box_raw, batch.anchor_points, batch.strides)
-    out = loss_fn(
-        BranchPrediction(logits, boxes),
-        BranchPrediction(logits, boxes),
-        batch.anchor_points,
-        batch.gt_boxes,
-        batch.gt_labels,
-        batch.gt_mask,
-    )
+    out = _forward_loss(loss_fn, batch, logits, box_raw)
     out.total.backward()
     logits_grad, box_grad = _grad(logits), _grad(box_raw)
-    components_finite = all(bool(torch.isfinite(component).all()) for component in _components(out))
     grads_finite = bool(torch.isfinite(logits_grad).all()) and bool(torch.isfinite(box_grad).all())
     return _StepResult(
-        components_finite=components_finite,
+        components_finite=_components_finite(out),
         grads_finite=grads_finite,
         logits_grad_norm=float(logits_grad.norm()),
         box_grad_norm=float(box_grad.norm()),
@@ -384,30 +398,41 @@ def overfit_run(overfit_batch: _Batch) -> _Trajectory:
 
 
 def test_monotonic_overfit(overfit_run: _Trajectory) -> None:
-    """200 Adam steps at least halve the loss with a smoothed, monotone-down trend."""
+    """200 Adam steps at least halve the loss with a smoothed, monotone-down trend.
+
+    The loss is compared as window means at early-to-late checkpoints rather than step by step, because Adam at this
+    learning rate is allowed to jitter locally; the trend, and the factor-of-two drop overall, are what the stack must
+    deliver.
+    """
     checkpoints = [_window_mean(overfit_run.totals, start) for start in _CHECKPOINTS]
     assert all(later < earlier for earlier, later in pairwise(checkpoints)), checkpoints
     assert checkpoints[-1] < _MAX_FINAL_RATIO * checkpoints[0], checkpoints
 
 
 def test_no_nan_inf(overfit_run: _Trajectory) -> None:
-    """Every loss value and every gradient across all 200 steps is finite."""
+    """Every loss value and every gradient across all 200 steps is finite.
+
+    A NaN or Inf anywhere in the run would poison the optimizer state silently, so the finiteness flag recorded at every
+    step by the shared run is asserted alongside the loss trajectory itself.
+    """
     assert overfit_run.all_finite
     assert all(torch.isfinite(torch.tensor(total)) for total in overfit_run.totals)
 
 
-def test_all_leaf_grads_populated(overfit_batch: _Batch) -> None:
-    """One backward populates non-zero gradients on both leaves; components are finite."""
-    result = _one_step(overfit_batch, alpha=DualBranchLoss().alpha)
-    assert result.components_finite
-    assert result.grads_finite
-    assert result.logits_grad_norm > 0.0
-    assert result.box_grad_norm > 0.0
+@pytest.mark.parametrize(
+    "alpha",
+    [
+        pytest.param(DualBranchLoss().alpha, id="alpha-default"),
+        pytest.param(0.0, id="alpha-o2o-only"),
+        pytest.param(1.0, id="alpha-o2m-only"),
+    ],
+)
+def test_leaf_grads_populated_and_finite(overfit_batch: _Batch, alpha: float) -> None:
+    """One backward populates non-zero finite gradients on both leaves at the default and both extreme branch weights.
 
-
-@pytest.mark.parametrize("alpha", [pytest.param(0.0, id="alpha-o2o-only"), pytest.param(1.0, id="alpha-o2m-only")])
-def test_alpha_extremes_train(overfit_batch: _Batch, alpha: float) -> None:
-    """Both branch-weight extremes yield finite loss components and finite gradients."""
+    The default weight is the one training uses; ``alpha`` 0 and 1 leave a single branch carrying the whole loss, and
+    each must still reach both leaves with finite components and gradients.
+    """
     result = _one_step(overfit_batch, alpha=alpha)
     assert result.components_finite
     assert result.grads_finite

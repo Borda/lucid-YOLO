@@ -1,21 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-057 overlapping crop tiling (A21, A39).
 
-Two halves. The placement half is pure integer geometry — window counts, flush edge
-windows, and the DoD's ``test_coverage_no_gaps``, which paints every window onto a mask
-and demands no unpainted pixel for a sweep of sizes, patches and overlaps including ones
-that divide evenly, leave a remainder, or are shorter than the patch on one or both axes.
+Two halves. The placement half is pure integer geometry — window counts, flush edge windows, and the DoD's
+``test_coverage_no_gaps``, which paints every window onto a mask and demands no unpainted pixel for a sweep of sizes,
+patches and overlaps including ones that divide evenly, leave a remainder, or are shorter than the patch on one or both
+axes.
 
-The re-mapping half exercises R18's 0.7 rule: an object wholly inside a window keeps its
-annotation translated and stays easy; an object straddling a boundary appears in *both*
-windows with the flags the rule prescribes, and the two parts' visible fractions sum to
-one — the area-additivity the whole rule rests on. Clipped areas are checked against a
-**shapely** oracle over a randomized sweep of rotated boxes against windows; shapely is a
-dev-only dependency (pyproject ``[dependency-groups] dev``) and appears here as an oracle
-only — never in ``src/``.
+The re-mapping half exercises R18's 0.7 rule: an object wholly inside a window keeps its annotation translated and stays
+easy; an object straddling a boundary appears in *both* windows with the flags the rule prescribes, and the two parts'
+visible fractions sum to one — the area-additivity the whole rule rests on. Clipped areas are checked against a
+**shapely** oracle over a randomized sweep of rotated boxes against windows; shapely is a dev-only dependency (pyproject
+``[dependency-groups] dev``) and appears here as an oracle only — never in ``src/``.
 
-DOTA-v1.0 itself is not on this machine, so nothing here claims real-data verification;
-the one image-level test uses the A26 synthetic OBB fixture set.
+DOTA-v1.0 itself is not on this machine, so nothing here claims real-data verification; the one image-level test uses
+the A26 synthetic OBB fixture set.
 """
 
 from __future__ import annotations
@@ -45,8 +43,8 @@ from lucid_yolo.data import (
     tile_windows,
 )
 
-#: Placement sweep: even division, remainder, short on one axis, short on both, and the
-#: A21 defaults against a DOTA-sized image.
+#: Placement sweep: even division, remainder, short on one axis, short on both, and the A21 defaults against a
+#: DOTA-sized image.
 _PLACEMENT_CASES = [
     pytest.param((10, 10), 6, 2, id="even-division"),
     pytest.param((11, 13), 6, 2, id="remainder-both-axes"),
@@ -210,8 +208,8 @@ def test_straddling_instance_appears_in_both_windows_with_areas_summing_to_one()
     assert left.visible_fraction.item() == pytest.approx(0.7, abs=1e-6)
     assert right.visible_fraction.item() == pytest.approx(0.3, abs=1e-6)
     assert left.visible_fraction.item() + right.visible_fraction.item() == pytest.approx(1.0, abs=1e-6)
-    # U == 0.7 is not below the threshold, so the left part keeps the original annotation
-    # (its box still hangs past the window, exactly as WP-056 leaves boxes unclipped).
+    # U == 0.7 is not below the threshold, so the left part keeps the original annotation (its box still hangs past the
+    # window, exactly as WP-056 leaves boxes unclipped).
     assert left.difficult.tolist() == [False]
     assert torch.allclose(left.targets.rboxes, targets.rboxes, atol=1e-5)
     assert float(left.targets.boxes[0, 2]) == pytest.approx(120.0, abs=1e-5)
@@ -299,9 +297,8 @@ def test_clipped_area_matches_shapely_oracle() -> None:
 def test_emitted_box_contains_clipped_region_and_never_grows() -> None:
     """Each emitted box encloses the shapely-clipped region, with extents never above the whole's.
 
-    The fitted rectangle of a cut corner may reach outside the window — it is a rotated
-    rectangle around a triangular sliver — so containment, not window-boundedness, is the
-    property worth pinning.
+    The fitted rectangle of a cut corner may reach outside the window — it is a rotated rectangle around a triangular
+    sliver — so containment, not window-boundedness, is the property worth pinning.
     """
     generator = torch.Generator().manual_seed(7)
     rboxes = _random_rboxes(generator, count=40, centres=(20.0, 80.0), extents=(10.0, 40.0))
@@ -354,7 +351,7 @@ def test_tile_image_targets_walks_every_window() -> None:
 
 
 class TestCropTargets:
-    """Tests for ``crop_targets``' own input validation."""
+    """Input validation owned by ``crop_targets``: polygons, flag dtype and length, instance axis and window."""
 
     @pytest.mark.parametrize(
         ("targets_kwargs", "difficult", "match"),
@@ -381,13 +378,18 @@ class TestCropTargets:
         with pytest.raises(ValueError, match="must share the instance axis"):
             crop_targets(targets, torch.tensor([0, 0, 10, 10]), difficult=torch.tensor([False]))
 
-    def test_rejects_degenerate_window(self) -> None:
+    @pytest.mark.parametrize(
+        ("window", "match"),
+        [
+            pytest.param(torch.tensor([10, 0, 10, 5]), "positive extent", id="zero-width"),
+            pytest.param(torch.tensor([0, 0, 10]), r"window must be \(4,\)", id="three-entries"),
+        ],
+    )
+    def test_rejects_degenerate_window(self, window: torch.Tensor, match: str) -> None:
         """A window with no extent, or the wrong shape, is a caller error rather than an empty crop."""
         targets = _targets(_rbox(5.0, 5.0, 4.0, 2.0, 0.0), [0])
-        with pytest.raises(ValueError, match="positive extent"):
-            crop_targets(targets, torch.tensor([10, 0, 10, 5]), difficult=torch.tensor([False]))
-        with pytest.raises(ValueError, match=r"window must be \(4,\)"):
-            crop_targets(targets, torch.tensor([0, 0, 10]), difficult=torch.tensor([False]))
+        with pytest.raises(ValueError, match=match):
+            crop_targets(targets, window, difficult=torch.tensor([False]))
 
 
 def test_zero_area_annotation_dropped() -> None:
@@ -449,10 +451,9 @@ def test_image_shape_checked_before_any_cropping() -> None:
 def test_tiles_of_synthetic_obb_image_account_for_every_instance(obb_fixture_dir: Path) -> None:
     """On the A26 synthetic OBB fixtures, the tiles of an image account for all of every instance.
 
-    A dataset-shaped pass over real rotated annotations — DOTA itself is not on this
-    machine, so nothing here is a real-data check. Because the windows cover the image
-    with no gap, the areas an instance contributes across all tiles must sum to at least
-    the area it has inside the image (more, where windows overlap).
+    A dataset-shaped pass over real rotated annotations — DOTA itself is not on this machine, so nothing here is a
+    real-data check. Because the windows cover the image with no gap, the areas an instance contributes across all
+    tiles must sum to at least the area it has inside the image (more, where windows overlap).
     """
     quads = _fixture_obb_quads(obb_fixture_dir)
     rboxes = polygons_to_rboxes(quads)

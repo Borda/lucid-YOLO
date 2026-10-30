@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for the anchor-point grid (WP-025).
 
-Covers the A11 cell-centre placement ``(i + 0.5) * stride``, the row-major
-within-level and level-major across-level ordering, the per-anchor stride
-mapping, the 8400-point count at a 640 input, and argument validation. Expected
+Covers the A11 cell-centre placement ``(i + 0.5) * stride``, the row-major within-level and level-major across-level
+ordering, the per-anchor stride mapping, the 8400-point count at a 640 input, and argument validation. Expected
 coordinates are enumerated by hand, not lifted from any reference.
 """
 
@@ -66,12 +65,11 @@ def test_length_mismatch_raises() -> None:
 def test_canvas_strides_do_not_divide_refused(canvas: tuple[int, int]) -> None:
     """A canvas that does not tile every level raises instead of flooring silently (WP-171).
 
-    The docstring has declared the precondition since WP-025 and nothing checked it, so
-    the floor division answered anyway: ``(100, 100)`` returned the grid of a 96 px
-    canvas, and ``(641, 641)`` returned the *same 8400 anchors as 640* — a grid pairing
-    every prediction with the wrong pixel, with no error anywhere to read as wrong. The
-    two negative sides are separate cases because divisibility alone does not refuse
-    them: ``0 % 32`` and ``-640 % 32`` are both zero, so positivity is its own condition.
+    The docstring has declared the precondition since WP-025 and nothing checked it, so the floor division answered
+    anyway: ``(100, 100)`` returned the grid of a 96 px canvas, and ``(641, 641)`` returned the *same 8400 anchors as
+    640* — a grid pairing every prediction with the wrong pixel, with no error anywhere to read as wrong. The two
+    negative sides are separate cases because divisibility alone does not refuse them: ``0 % 32`` and ``-640 % 32`` are
+    both zero, so positivity is its own condition.
     """
     with pytest.raises(ValueError, match="canvas"):
         anchor_grid(canvas, torch.device("cpu"))
@@ -80,10 +78,9 @@ def test_canvas_strides_do_not_divide_refused(canvas: tuple[int, int]) -> None:
 def test_640_canvas_guard_leaves_8400_anchors_unchanged() -> None:
     """The guard leaves the deployed canvas untouched, at the size every protocol runs.
 
-    A precondition added to a function four call sites already depend on is worth
-    asserting from the accepting side too: the refusal above is only correct if 640 —
-    what both COCO evaluators, single-image inference and the export graph pass — is
-    still built, and built identically.
+    A precondition added to a function four call sites already depend on is worth asserting from the accepting side
+    too: the refusal above is only correct if 640 — what both COCO evaluators, single-image inference and the export
+    graph pass — is still built, and built identically.
     """
     points, strides = anchor_grid((640, 640), torch.device("cpu"))
 

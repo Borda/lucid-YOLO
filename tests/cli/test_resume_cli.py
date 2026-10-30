@@ -1,28 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 """Gate on resuming training from the command line: ``lucid-yolo fit --ckpt_path``.
 
-``tests/ptl/test_resume.py`` drives :class:`~pytorch_lightning.Trainer` directly; this
-file drives the shipped command, on the packaged ``det_nano_smoke`` recipe, the way an
-operator resumes an interrupted run. The interruption is modelled as a real one is: both
-runs are configured for the same three epochs, and the first is stopped after two by
-``max_steps``, which is trainer configuration and not checkpointed state, so the resumed
-run continues to the configured end.
+``tests/ptl/test_resume.py`` drives :class:`~pytorch_lightning.Trainer` directly; this file drives the shipped command,
+on the packaged ``det_nano_smoke`` recipe, the way an operator resumes an interrupted run. The interruption is modelled
+as a real one is: both runs are configured for the same three epochs, and the first is stopped after two by
+``max_steps``, which is trainer configuration and not checkpointed state, so the resumed run continues to the
+configured end.
 
 What a resume must carry across, and what each test asserts:
 
 - the step and epoch counters continue rather than restart;
-- the :class:`~lucid_yolo.ptl.callbacks.EMACallback` shadow and update count are the
-  checkpoint's when training restarts, so the average continues rather than re-seeding
-  from the resumed weights;
+- the :class:`~lucid_yolo.ptl.callbacks.EMACallback` shadow and update count are the checkpoint's when training
+  restarts, so the average continues rather than re-seeding from the resumed weights;
 - the optimizer's momentum state is the checkpoint's;
-- the progressive-loss weight ``alpha`` is the schedule's value for the resumed epoch.
-  The schedule holds no state of its own -- ``alpha`` is a function of the current and
-  final epoch (WP-035) -- so restoring the epoch counter is what restores it, and the
-  test asserts that consequence rather than a stored value.
+- the progressive-loss weight ``alpha`` is the schedule's value for the resumed epoch. The schedule holds no state of
+  its own -- ``alpha`` is a function of the current and final epoch (WP-035) -- so restoring the epoch counter is what
+  restores it, and the test asserts that consequence rather than a stored value.
 
-The checkpoint the command writes is also the realistic input for
-:func:`~lucid_yolo.eval.checkpoint.load_eval_module`, whose hyper-parameters carry
-LightningCLI's ``_instantiator`` entry beside the module's arguments; the last test reads
+The checkpoint the command writes is also the realistic input for :func:`~lucid_yolo.eval.checkpoint.load_eval_module`,
+whose hyper-parameters carry LightningCLI's ``_instantiator`` entry beside the module's arguments; the last test reads
 it back.
 """
 
@@ -102,8 +98,8 @@ def _fit(root: Path, out: Path, *extra: str) -> Path:
 def observed(detseg_fixture_dir: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Observed]:
     """Train, interrupt, resume, and record what each run started from.
 
-    Module-scoped: the two fits are the expensive part, and every test reads the same
-    pair. The recording hooks wrap the real ones, so nothing about training changes.
+    Module-scoped: the two fits are the expensive part, and every test reads the same pair. The recording hooks wrap the
+    real ones, so nothing about training changes.
     """
     tmp_path = tmp_path_factory.mktemp("resume")
     root = tmp_path / "root"
@@ -172,8 +168,8 @@ def test_step_and_epoch_continue(observed: _Observed) -> None:
 def test_ema_continues_from_checkpoint(observed: _Observed) -> None:
     """Training resumes with the checkpoint's EMA shadow and count, then keeps counting.
 
-    A shadow re-seeded from the resumed weights would differ from the stored one after
-    four blends, and a reset counter would end at two rather than six.
+    A shadow re-seeded from the resumed weights would differ from the stored one after four blends, and a reset counter
+    would end at two rather than six.
     """
     stored = _ema_entry(_load(observed.interrupted))
 
@@ -193,8 +189,8 @@ def test_optimizer_state_restored(observed: _Observed) -> None:
 def test_alpha_follows_schedule_at_resumed_epoch(observed: _Observed) -> None:
     """Epoch two, the first after resume, trains at the schedule's epoch-two weight.
 
-    The interrupted run saw epochs zero and one, the resumed run only epoch two; a counter
-    restarted from zero would have recorded a third epoch-zero weight instead.
+    The interrupted run saw epochs zero and one, the resumed run only epoch two; a counter restarted from zero would
+    have recorded a third epoch-zero weight instead.
     """
     schedule = ProgressiveLossSchedule(alpha_init=0.8, alpha_final=0.1)
 

@@ -1,27 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the pose acceptance instrument (WP-134, WP-174).
 
-``lucid-eval`` on a keypoints checkpoint is the acceptance scorer of the keypoint tier,
-and until this file existed its whole scoring body was unexecuted: the module's only
-executable Example is ``>>> callable(run)``, which a broken implementation also satisfies.
-:mod:`tests.eval.test_keypoint_eval` pins the pieces underneath — the prediction adapter,
-OKS matching, which branch each path reads — on hand-built tensors; what was missing is
-the seam that joins them to a directory on disk, which is where the annotation file's
-name, the batching, the sigma table and the report's own keys are decided.
+``lucid-eval`` on a keypoints checkpoint is the acceptance scorer of the keypoint tier, and until this file existed its
+whole scoring body was unexecuted: the module's only executable Example is ``>>> callable(run)``, which a broken
+implementation also satisfies. :mod:`tests.eval.test_keypoint_eval` pins the pieces underneath — the prediction
+adapter, OKS matching, which branch each path reads — on hand-built tensors; what was missing is the seam that joins
+them to a directory on disk, which is where the annotation file's name, the batching, the sigma table and the report's
+own keys are decided.
 
-There is no COCO checkout on the gate machine, so the split is built here: a
-``person_keypoints_val2017.json`` carrying COCO's own 17-point schema beside a ``val2017/``
-of tiny PNGs, the exact layout
-:func:`~lucid_yolo.eval.pose_eval.run` resolves from ``data_root``. An untrained module
-scores near zero and that is fine — what is under test is that the ground truth, the
-predictions and the accumulator meet at all, and that the report says which figures it is
-reporting. "It ran and produced a float" is precisely the claim ``callable(run)`` already
-made.
+There is no COCO checkout on the gate machine, so the split is built here: a ``person_keypoints_val2017.json`` carrying
+COCO's own 17-point schema beside a ``val2017/`` of tiny PNGs, the exact layout :func:`~lucid_yolo.eval.pose_eval.run`
+resolves from ``data_root``. An untrained module scores near zero and that is fine — what is under test is that the
+ground truth, the predictions and the accumulator meet at all, and that the report says which figures it is reporting.
+"It ran and produced a float" is precisely the claim ``callable(run)`` already made.
 
 The refusal is covered from the other side too. ``K != 17`` is a documented contract, and
-:mod:`tests.eval.test_keypoint_eval` already exercises it at ``K=7``; the case added here
-is ``K=16``, the value adjacent to the boundary, where an off-by-one in the comparison
-would let a foreign schema through onto COCO's sigma table.
+:mod:`tests.eval.test_keypoint_eval` already exercises it at ``K=7``; the case added here is ``K=16``, the value
+adjacent to the boundary, where an off-by-one in the comparison would let a foreign schema through onto COCO's sigma
+table.
 """
 
 from __future__ import annotations
@@ -40,37 +36,35 @@ from lucid_yolo.ptl.module import DetectionLitModule
 if TYPE_CHECKING:
     from pathlib import Path
 
-#: COCO's person schema point count, read from the sigma table rather than spelled, so
-#: this file and the protocol cannot disagree about what "the 17-point schema" is.
+#: COCO's person schema point count, read from the sigma table rather than spelled, so this file and the protocol cannot
+#: disagree about what "the 17-point schema" is.
 _COCO_POINTS = len(COCO_KEYPOINT_OKS_SIGMAS)
 
-#: Letterbox side: divisible by the level-32 stride and small enough that two forward
-#: passes over an untrained backbone stay inside a unit test's budget.
+#: Letterbox side: divisible by the level-32 stride and small enough that two forward passes over an untrained backbone
+#: stay inside a unit test's budget.
 _IMG_SIZE = 64
 
-#: Source image size ``(height, width)`` of every fixture image — not square, so the
-#: letterbox carries a real pad rather than a degenerate one.
+#: Source image size ``(height, width)`` of every fixture image — not square, so the letterbox carries a real pad rather
+#: than a degenerate one.
 _IMAGE_SIZE = (40, 56)
 
 #: Images in the built split, and the batch size that leaves the last batch short.
 _NUM_IMAGES = 3
 _BATCH_SIZE = 2
 
-#: The single category a person-keypoints file names. COCO's own person id is 1, and the
-#: protocol's whole argument for this annotation file is that the average is over one
-#: category rather than eighty.
+#: The single category a person-keypoints file names. COCO's own person id is 1, and the protocol's whole argument for
+#: this annotation file is that the average is over one category rather than eighty.
 _PERSON_CATEGORY = 1
 
 
 def _person_annotation(image_id: int, origin: float) -> dict[str, object]:
     """Build one 17-point person annotation whose joints march away from ``origin``.
 
-    The point list is COCO's flat ``(x, y, v)`` triple-per-joint encoding, so its length is
-    ``3 * 17``; every joint is labeled visible, which is what makes the instance count
-    toward OKS at all. ``area`` and ``num_keypoints`` are stated rather than recomputed,
-    because :func:`~lucid_yolo.eval.annotations.load_eval_annotations` hands the OKS scorer
-    the file's own metadata (WP-134) and a fixture that omitted them would exercise a
-    reconstruction this protocol does not perform.
+    The point list is COCO's flat ``(x, y, v)`` triple-per-joint encoding, so its length is ``3 * 17``; every joint is
+    labeled visible, which is what makes the instance count toward OKS at all. ``area`` and ``num_keypoints`` are
+    stated rather than recomputed, because :func:`~lucid_yolo.eval.annotations.load_eval_annotations` hands the OKS
+    scorer the file's own metadata (WP-134) and a fixture that omitted them would exercise a reconstruction this
+    protocol does not perform.
 
     Args:
         image_id: Image the instance belongs to.
@@ -105,9 +99,8 @@ def _person_annotation(image_id: int, origin: float) -> dict[str, object]:
 def _keypoint_module(num_keypoints: int) -> DetectionLitModule:
     """Return an eval-mode single-class keypoint module predicting ``num_keypoints`` points.
 
-    Untrained on purpose: the numbers it produces are not the subject, the path they travel
-    is. ``K`` is a constructor argument (A64), which is exactly what lets the boundary case
-    below hand the protocol a schema it must refuse.
+    Untrained on purpose: the numbers it produces are not the subject, the path they travel is. ``K`` is a constructor
+    argument (A64), which is exactly what lets the boundary case below hand the protocol a schema it must refuse.
 
     Args:
         num_keypoints: Point count ``K`` both head branches predict.
@@ -132,13 +125,49 @@ def _keypoint_module(num_keypoints: int) -> DetectionLitModule:
     return module.eval()
 
 
+def _run_pose(
+    data_root: Path,
+    output: Path | None,
+    *,
+    limit: int = 0,
+    num_keypoints: int = _COCO_POINTS,
+    info: dict[str, object] | None = None,
+) -> int:
+    """Run :func:`~lucid_yolo.eval.pose_eval.run` on an untrained keypoint module with this file's fixed settings.
+
+    Args:
+        data_root: Root holding ``val2017/`` and ``annotations/``.
+        output: Where the report is written, or ``None`` for no report.
+        limit: Images scored, ``0`` meaning the whole split.
+        num_keypoints: Point count ``K`` of the module scored.
+        info: Checkpoint provenance dict handed to the runner. Defaults to a non-EMA checkpoint.
+
+    Returns:
+        The runner's exit code.
+
+    Examples:
+        >>> import inspect
+        >>> list(inspect.signature(_run_pose).parameters)
+        ['data_root', 'output', 'limit', 'num_keypoints', 'info']
+    """
+    return pose_eval.run(
+        _keypoint_module(num_keypoints),
+        {"ema": False} if info is None else info,
+        data_root=data_root,
+        img_size=_IMG_SIZE,
+        batch_size=_BATCH_SIZE,
+        device_name="cpu",
+        limit=limit,
+        output=output,
+    )
+
+
 @pytest.fixture
 def pose_root(tmp_path: Path) -> Path:
     """Build the ``val2017/`` plus ``annotations/person_keypoints_val2017.json`` layout.
 
-    Three images, the middle one carrying two instances and the last one none — the
-    majority shape of a real person-keypoints split, where most images hold no person and
-    the evaluator must still see them.
+    Three images, the middle one carrying two instances and the last one none — the majority shape of a real
+    person-keypoints split, where most images hold no person and the evaluator must still see them.
     """
     root = tmp_path / "coco2017"
     images_dir = root / "val2017"
@@ -169,32 +198,20 @@ class TestPoseReport:
     ) -> None:
         """A pose evaluation writes both paths' box and OKS figures, into a directory it creates.
 
-        This is the whole span an ``>>> callable(run)`` Example left unexecuted: the
-        ``person_keypoints_val2017.json`` name (not ``instances_``, the substitution that
-        divides a person detector's AP by eighty), the letterboxed batching, the
-        :class:`~lucid_yolo.eval.coco_eval.DualPathEvaluator` built with COCO's sigma
-        table, and the report's own keys. The ten keypoint statistics carry the ``oks_``
-        prefix and the twelve box ones keep their bare names, so a reader can tell which
-        column is which; both paths appear, because the ``e2e`` row is the one a training
-        run's ``val/mAP`` is comparable to and quoting a single unlabeled number is the
-        confusion the report exists to end.
+        This is the whole span an ``>>> callable(run)`` Example left unexecuted: the ``person_keypoints_val2017.json``
+        name (not ``instances_``, the substitution that divides a person detector's AP by eighty), the letterboxed
+        batching, the :class:`~lucid_yolo.eval.coco_eval.DualPathEvaluator` built with COCO's sigma table, and the
+        report's own keys. The ten keypoint statistics carry the ``oks_`` prefix and the twelve box ones keep their bare
+        names, so a reader can tell which column is which; both paths appear, because the ``e2e`` row is the one a
+        training run's ``val/mAP`` is comparable to and quoting a single unlabeled number is the confusion the report
+        exists to end.
 
-        ``--output`` points into a directory that does not exist yet, the WP-105 failure:
-        an evaluation that completes, prints its numbers, and then dies writing them turns
-        minutes of work into a traceback.
+        ``--output`` points into a directory that does not exist yet, the WP-105 failure: an evaluation that completes,
+        prints its numbers, and then dies writing them turns minutes of work into a traceback.
         """
         output = tmp_path / "absent" / "nested" / "pose.json"
 
-        code = pose_eval.run(
-            _keypoint_module(_COCO_POINTS),
-            {"ema": False},
-            data_root=pose_root,
-            img_size=_IMG_SIZE,
-            batch_size=_BATCH_SIZE,
-            device_name="cpu",
-            limit=0,
-            output=output,
-        )
+        code = _run_pose(pose_root, output)
 
         assert code == 0
         payload = json.loads(output.read_text())
@@ -214,22 +231,12 @@ class TestPoseReport:
     def test_limit_scores_prefix_rather_than_whole_split(self, pose_root: Path, tmp_path: Path) -> None:
         """``--limit`` stops after N images, and the report counts what it actually scored.
 
-        The count in the report is what a reader compares two runs by, so a limit that
-        truncated the loop while the report still claimed the full split would make the
-        two runs look like the same measurement.
+        The count in the report is what a reader compares two runs by, so a limit that truncated the loop while the
+        report still claimed the full split would make the two runs look like the same measurement.
         """
         output = tmp_path / "pose.json"
 
-        code = pose_eval.run(
-            _keypoint_module(_COCO_POINTS),
-            {"ema": False},
-            data_root=pose_root,
-            img_size=_IMG_SIZE,
-            batch_size=_BATCH_SIZE,
-            device_name="cpu",
-            limit=1,
-            output=output,
-        )
+        code = _run_pose(pose_root, output, limit=1)
 
         assert code == 0
         assert json.loads(output.read_text())["images"] == 1
@@ -237,20 +244,10 @@ class TestPoseReport:
     def test_no_output_path_scores_without_writing_anything(self, pose_root: Path, tmp_path: Path) -> None:
         """``output=None`` still returns success and leaves no file behind.
 
-        The report is optional — a caller reading the printed numbers off a terminal is the
-        common case — so the write must be genuinely conditional rather than defaulting to
-        a path nobody asked for.
+        The report is optional — a caller reading the printed numbers off a terminal is the common case — so the write
+        must be genuinely conditional rather than defaulting to a path nobody asked for.
         """
-        code = pose_eval.run(
-            _keypoint_module(_COCO_POINTS),
-            {"ema": False},
-            data_root=pose_root,
-            img_size=_IMG_SIZE,
-            batch_size=_BATCH_SIZE,
-            device_name="cpu",
-            limit=0,
-            output=None,
-        )
+        code = _run_pose(pose_root, None)
 
         assert code == 0
         assert list(tmp_path.glob("*.json")) == []
@@ -264,24 +261,13 @@ class TestPoseProtocolBoundary:
     ) -> None:
         """``K=16`` exits non-zero naming both counts, scoring nothing against COCO's sigmas.
 
-        :mod:`tests.eval.test_keypoint_eval` pins the same refusal at ``K=7``, a schema no
-        off-by-one produces; sixteen is the value adjacent to the boundary, where a ``<=``
-        or a table padded by one joint would let a foreign schema through and report a
-        real-looking OKS for a correspondence that does not exist — point *i* of a
-        sixteen-point prediction is not point *i* of the annotation. The refusal fires
-        before the annotation file is resolved, which is why the data root here is a path
-        that was never created.
+        :mod:`tests.eval.test_keypoint_eval` pins the same refusal at ``K=7``, a schema no off-by-one produces; sixteen
+        is the value adjacent to the boundary, where a ``<=`` or a table padded by one joint would let a foreign schema
+        through and report a real-looking OKS for a correspondence that does not exist — point *i* of a sixteen-point
+        prediction is not point *i* of the annotation. The refusal fires before the annotation file is resolved, which
+        is why the data root here is a path that was never created.
         """
-        code = pose_eval.run(
-            _keypoint_module(_COCO_POINTS - 1),
-            {},
-            data_root=tmp_path / "absent",
-            img_size=_IMG_SIZE,
-            batch_size=_BATCH_SIZE,
-            device_name="cpu",
-            limit=0,
-            output=None,
-        )
+        code = _run_pose(tmp_path / "absent", None, num_keypoints=_COCO_POINTS - 1, info={})
 
         assert code == 1
         message = capsys.readouterr().out

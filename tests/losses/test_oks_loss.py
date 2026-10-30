@@ -1,15 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gates for the WP-178 OKS loss (R12's definition, A66, A75).
 
-R1 names the term and states no formula, so nothing here can check a published
-number; what a unit test *can* pin is that the module computes R12's OKS exactly
-as written — a hand-computed two-point instance to ``1e-6`` — and every edge the
-training step will hit: a perfect prediction scores zero, a ``v = 0`` point is
-outside the graph rather than merely multiplied by zero (A66), an instance with no
-labelled point is left out of the mean rather than scored as ``0 / 0``, the empty
-batch returns an attached finite zero, the area floor holds, the sigma table
-matches the input's ``K``, and the module carries no parameters and no persistent
-state a checkpoint could pick up.
+R1 names the term and states no formula, so nothing here can check a published number; what a unit test *can* pin is
+that the module computes R12's OKS exactly as written — a hand-computed two-point instance to ``1e-6`` — and every edge
+the training step will hit: a perfect prediction scores zero, a ``v = 0`` point is outside the graph rather than merely
+multiplied by zero (A66), an instance with no labelled point is left out of the mean rather than scored as ``0 / 0``,
+the empty batch returns an attached finite zero, the area floor holds, the sigma table matches the input's ``K``, and
+the module carries no parameters and no persistent state a checkpoint could pick up.
 """
 
 from __future__ import annotations
@@ -21,8 +18,8 @@ import torch
 
 from lucid_yolo.losses import OKSLoss
 
-#: A two-point sigma table with unequal tolerances, so a hand computation that
-#: silently swapped the two points would not come out the same.
+#: A two-point sigma table with unequal tolerances, so a hand computation that silently swapped the two points would not
+#: come out the same.
 _SIGMAS = (0.1, 0.2)
 #: Tolerance of the hand-computed OKS reference, computed in float64.
 _REFERENCE_ATOL = 1e-6
@@ -66,9 +63,8 @@ class TestDefinition:
     def test_instances_meaned_after_own_per_point_mean(self) -> None:
         """Two instances weigh equally however many labelled points each carries.
 
-        R12 normalizes each instance by *its* labelled count before anything is
-        averaged across instances; a single flat mean over points would let a
-        fully-labelled instance outvote a sparsely-labelled one.
+        R12 normalizes each instance by *its* labelled count before anything is averaged across instances; a single flat
+        mean over points would let a fully-labelled instance outvote a sparsely-labelled one.
         """
         loss_fn = OKSLoss(sigmas=_SIGMAS)
         mu_hat, mu_gt, area, _ = _two_point_instance()
@@ -101,8 +97,8 @@ class TestVisibilityMasking:
     def test_unlabelled_point_outside_graph(self) -> None:
         """Corrupting a ``v = 0`` coordinate with ``inf`` changes neither the loss nor a gradient.
 
-        The decisive form of the check: a mask applied *after* the distance would keep
-        the value right and put ``0 * inf = NaN`` into ``mu_hat``'s gradient.
+        The decisive form of the check: a mask applied *after* the distance would keep the value right and put
+        ``0 * inf = NaN`` into ``mu_hat``'s gradient.
         """
         loss_fn = OKSLoss(sigmas=_SIGMAS)
         mu_hat, mu_gt, area, _ = _two_point_instance()
@@ -162,9 +158,8 @@ class TestModuleShape:
     def test_holds_no_parameters_and_empty_state_dict(self) -> None:
         """``k`` is a non-persistent buffer: nothing to train, nothing for a checkpoint to gain.
 
-        The pinned key set of a keypoints module is the detection keys plus the point
-        stems plus ``rle_loss.``; a persistent buffer here would add a key and stop
-        every earlier pose checkpoint loading strictly.
+        The pinned key set of a keypoints module is the detection keys plus the point stems plus ``rle_loss.``; a
+        persistent buffer here would add a key and stop every earlier pose checkpoint loading strictly.
         """
         loss_fn = OKSLoss(sigmas=_SIGMAS)
 

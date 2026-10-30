@@ -1,20 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the ``channels_last`` memory-format policy (WP-182).
 
-On a CUDA accelerator :meth:`~lucid_yolo.ptl.module.DetectionLitModule.setup`
-converts the parameters to ``channels_last`` and the datamodule's
-``on_after_batch_transfer`` hands over images in the same layout. No GPU runs
-here, so what is proved on CPU is the part a layout change can break silently:
-every task at two variants runs a full ``_shared_step`` over ``channels_last``
-weights and images to a finite loss — the one local check that the PSA
-attention's ``view`` over the ``qkv`` projection survives non-contiguous strides —
-the ``detect``/``n`` loss is numerically the same in either layout for the same
-weights and batch, and neither hook touches the layout off CUDA: a CPU batch
-leaves the transfer hook contiguous and a CPU trainer leaves the parameters as
-built.
+On a CUDA accelerator :meth:`~lucid_yolo.ptl.module.DetectionLitModule.setup` converts the parameters to
+``channels_last`` and the datamodule's ``on_after_batch_transfer`` hands over images in the same layout. No GPU runs
+here, so what is proved on CPU is the part a layout change can break silently: every task at two variants runs a full
+``_shared_step`` over ``channels_last`` weights and images to a finite loss — the one local check that the PSA
+attention's ``view`` over the ``qkv`` projection survives non-contiguous strides — the ``detect``/``n`` loss is
+numerically the same in either layout for the same weights and batch, and neither hook touches the layout off CUDA: a
+CPU batch leaves the transfer hook contiguous and a CPU trainer leaves the parameters as built.
 
-Direct ``_shared_step`` calls monkeypatch ``module.log`` to a no-op, as the other
-module tests do, because ``self.log`` needs a trainer.
+Direct ``_shared_step`` calls monkeypatch ``module.log`` to a no-op, as the other module tests do, because ``self.log``
+needs a trainer.
 """
 
 from __future__ import annotations
@@ -180,8 +176,8 @@ def _all_contiguous(module: DetectionLitModule) -> bool:
 class TestChannelsLastStep:
     """Every task at both small variants steps to a finite loss in ``channels_last``."""
 
-    @pytest.mark.parametrize("variant", [pytest.param(variant, id=variant) for variant in _VARIANTS])
-    @pytest.mark.parametrize("task", [pytest.param(task, id=task) for task in _TASKS])
+    @pytest.mark.parametrize("variant", _VARIANTS)
+    @pytest.mark.parametrize("task", _TASKS)
     def test_loss_finite(self, task: str, variant: str) -> None:
         """``channels_last`` weights over ``channels_last`` images run the whole step.
 

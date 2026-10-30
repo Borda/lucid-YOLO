@@ -1,16 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Offline unit gate for the COCO 2017 downloader (``lucid_yolo.data.download``).
 
-Every test here runs without network: the transfer path is exercised by
-monkeypatching ``urllib.request.urlopen`` with an in-memory zip server, and the
-idempotency path monkeypatches it to raise if it is ever called. The tests cover
-the URL constants, the split/annotation-to-archive plan (and its check-data
-layout compatibility), the zip-slip guard, resume/atomic/skip behaviour, the
-SHA-256 verification hook, and the command that drives them.
+Every test here runs without network: the transfer path is exercised by monkeypatching ``urllib.request.urlopen`` with
+an in-memory zip server, and the idempotency path monkeypatches it to raise if it is ever called. The tests cover the
+URL constants, the split/annotation-to-archive plan (and its check-data layout compatibility), the zip-slip guard,
+resume/atomic/skip behaviour, the SHA-256 verification hook, and the command that drives them.
 
-That command is ``lucid-data download``. WP-110 removed the ``lucid-download``
-alias these tests used to parse through, so the spellings asserted here are the
-shipped underscored ones (``--data_root``, ``--splits '[val]'``, ``--force
+That command is ``lucid-data download``. WP-110 removed the ``lucid-download`` alias these tests used to parse through,
+so the spellings asserted here are the shipped underscored ones (``--data_root``, ``--splits '[val]'``, ``--force
 true``) and the parser is the one a wheel installs, not a frozen local copy.
 """
 
@@ -24,6 +21,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 
 import pytest
 
@@ -95,9 +93,8 @@ def _serve(mapping: dict[str, bytes], ranges: list[str | None] | None = None) ->
 
     Args:
         mapping: URL to full payload bytes.
-        ranges: Optional list the ``Range`` header of each request is appended to
-            (``None`` for a request that sent none), so a test can assert *whether*
-            a transfer resumed rather than only that it finished.
+        ranges: Optional list the ``Range`` header of each request is appended to (``None`` for a request that sent
+            none), so a test can assert *whether* a transfer resumed rather than only that it finished.
 
     Returns:
         A ``urlopen`` stand-in honouring ``Range`` with a ``206``.
@@ -134,9 +131,8 @@ def _seed_partial(root: Path, name: str, content: bytes, *, url: str | None, tot
         root: The data root the archive is downloaded into.
         name: Archive file name, e.g. ``"val2017.zip"``.
         content: Bytes already on disk.
-        url: URL to record in the sidecar, or ``None`` to write no sidecar at all --
-            which is what an interrupted run from before the sidecar existed, or from
-            an unrelated tool, leaves behind.
+        url: URL to record in the sidecar, or ``None`` to write no sidecar at all -- which is what an interrupted run
+            from before the sidecar existed, or from an unrelated tool, leaves behind.
         total: Total size to record in the sidecar.
 
     Examples:
@@ -167,12 +163,34 @@ def _raise_if_called(*_args: object, **_kwargs: object) -> Any:
     raise AssertionError("network access attempted during an offline test")
 
 
+#: Fake host serving the one-image val archive, shared by every test that only needs a download to succeed.
+_VAL_SERVER = _serve({_VAL_URL: _val_archive_bytes()})
+#: Fake host serving a two-image val archive, for the tests that count the extracted images.
+_VAL_SERVER_TWO_IMAGES = _serve({_VAL_URL: _val_archive_bytes(num_images=2)})
+
+
+def _cli_download(root: Path, *extra: str) -> list[str]:
+    """Build ``lucid-data download`` arguments for a quiet, annotation-free val download into ``root``.
+
+    Args:
+        root: The ``--data_root`` to pass.
+        *extra: Further flags and values appended verbatim.
+
+    Examples:
+        >>> _cli_download(Path("coco"), "--verify", "true")[:3]
+        ['download', '--data_root', 'coco']
+        >>> _cli_download(Path("coco"), "--verify", "true")[-2:]
+        ['--verify', 'true']
+    """
+    base = ["download", "--data_root", str(root), "--splits", "[val]", "--annotations", "false", "--quiet", "true"]
+    return [*base, *extra]
+
+
 def test_url_constants_use_official_https_host() -> None:
     """The download URLs point at the official S3 host, not a mirror.
 
-    A wrong host here would either fail loudly at request time or, worse, resolve
-    to something that looks like COCO but silently isn't, so the four constants
-    the rest of this module builds requests from are pinned exactly.
+    A wrong host here would either fail loudly at request time or, worse, resolve to something that looks like COCO but
+    silently isn't, so the four constants the rest of this module builds requests from are pinned exactly.
     """
     assert dl.COCO_ZIP_BASE == "https://s3.amazonaws.com/images.cocodataset.org/zips"
     assert dl.COCO_ANNOTATION_BASE == "https://s3.amazonaws.com/images.cocodataset.org/annotations"
@@ -186,16 +204,16 @@ class TestPlanArchives:
     def test_val_only_default(self) -> None:
         """A val-only plan lists the val archive plus the shared annotations archive.
 
-        Each planned archive's sentinel and URL are asserted individually rather than
-        just its name, since a sentinel that drifted from the archive it belongs to
-        would make ``download_coco`` think a split was already present when it isn't.
+        Each planned archive's sentinel and URL are asserted individually rather than just its name, since a sentinel
+        that drifted from the archive it belongs to would make ``download_coco`` think a split was already present when
+        it isn't.
         """
         archives = dl._plan_archives(["val"], annotations=True)
         names = [a.name for a in archives]
         sentinels = [a.sentinel for a in archives]
         assert names == ["val2017.zip", "annotations_trainval2017.zip"]
         assert sentinels == ["val2017", "annotations"]
-        assert archives[0].url == "https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip"
+        assert archives[0].url == _VAL_URL
         expected_annotations_url = (
             "https://s3.amazonaws.com/images.cocodataset.org/annotations/annotations_trainval2017.zip"
         )
@@ -204,9 +222,8 @@ class TestPlanArchives:
     def test_train_and_val(self) -> None:
         """Requesting both splits orders the plan train, then val, then annotations.
 
-        The annotations archive is shared by both splits and must appear once, last,
-        rather than once per split -- a caller downloading both would otherwise fetch
-        and extract the same archive twice.
+        The annotations archive is shared by both splits and must appear once, last, rather than once per split -- a
+        caller downloading both would otherwise fetch and extract the same archive twice.
         """
         archives = dl._plan_archives(["train", "val"], annotations=True)
         assert [a.sentinel for a in archives] == ["train2017", "val2017", "annotations"]
@@ -214,8 +231,8 @@ class TestPlanArchives:
     def test_no_annotations(self) -> None:
         """``annotations=False`` drops the shared archive from the plan entirely.
 
-        An operator who already has annotations, or wants images only, must not pay
-        for or extract the annotations archive at all -- not just skip using it.
+        An operator who already has annotations, or wants images only, must not pay for or extract the annotations
+        archive at all -- not just skip using it.
         """
         archives = dl._plan_archives(["val"], annotations=False)
         assert [a.name for a in archives] == ["val2017.zip"]
@@ -240,9 +257,8 @@ class TestPlanArchives:
     def test_unknown_split_raises(self) -> None:
         """A split name outside ``{train, val}`` raises, naming the bad value.
 
-        COCO's own test split shares no split name with these two, so a typo'd or
-        aspirational ``"test"`` must fail at planning time rather than resolve to an
-        empty archive list that silently downloads nothing.
+        COCO's own test split shares no split name with these two, so a typo'd or aspirational ``"test"`` must fail at
+        planning time rather than resolve to an empty archive list that silently downloads nothing.
         """
         with pytest.raises(ValueError, match="unknown split 'test'"):
             dl._plan_archives(["test"], annotations=False)
@@ -251,35 +267,26 @@ class TestPlanArchives:
 class TestSafeExtract:
     """Tests for ``dl._safe_extract`` (the zip-slip guard)."""
 
-    def test_rejects_parent_traversal(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("member", ["../escape.txt", "../../etc/pwned"])
+    def test_rejects_traversing_member(self, tmp_path: Path, member: str) -> None:
         """A member path escaping the destination via ``../`` is refused, not extracted.
 
-        This is the classic zip-slip: an archive fetched from a URL constant this
-        module controls should be safe, but the guard is exercised anyway since a
-        silent write outside ``dest`` is the failure mode a checksum cannot catch.
-        """
-        archive = tmp_path / "evil.zip"
-        archive.write_bytes(_make_zip({"../escape.txt": b"pwn"}))
-        with pytest.raises(ValueError, match="unsafe member path"):
-            dl._safe_extract(archive, tmp_path / "dest")
-
-    def test_rejects_absolute_member(self, tmp_path: Path) -> None:
-        """An absolute-looking member that still resolves outside ``dest`` is refused.
-
-        zipfile stores an absolute member name with its leading slash stripped, so a
-        naive guard checking only for a leading ``/`` would miss this; the member is
+        This is the classic zip-slip: an archive fetched from a URL constant this module controls should be safe, but
+        the guard is exercised anyway since a silent write outside ``dest`` is the failure mode a checksum cannot
+        catch. The second spelling stands for an absolute-looking member: zipfile stores an absolute member name with
+        its leading slash stripped, so a naive guard checking only for a leading ``/`` would miss it, and the member is
         crafted to still escape via ``../../`` once that slash is gone.
         """
         archive = tmp_path / "evil.zip"
-        archive.write_bytes(_make_zip({"../../etc/pwned": b"pwn"}))
+        archive.write_bytes(_make_zip({member: b"pwn"}))
         with pytest.raises(ValueError, match="unsafe member path"):
             dl._safe_extract(archive, tmp_path / "dest")
 
     def test_accepts_normal_members(self, tmp_path: Path) -> None:
         """Members that stay inside ``dest`` extract normally, the common case.
 
-        The two traversal tests above only prove the guard rejects; this proves it
-        does not also reject the ordinary archive layout ``download_coco`` produces.
+        The traversal test above only proves the guard rejects; this proves it does not also reject the ordinary
+        archive layout ``download_coco`` produces.
         """
         dest = tmp_path / "dest"
         dest.mkdir()
@@ -296,8 +303,8 @@ class TestVerifyChecksum:
     def test_returns_digest_without_expected(self, tmp_path: Path) -> None:
         """With no expected digest, the function reports what it computed rather than pass/fail.
 
-        This is the ``--sha256`` discovery path: an operator who wants to pin a
-        checksum for later runs needs the real digest surfaced, not a boolean.
+        This is the ``--sha256`` discovery path: an operator who wants to pin a checksum for later runs needs the real
+        digest surfaced, not a boolean.
         """
         path = tmp_path / "blob.bin"
         path.write_bytes(b"hello coco")
@@ -308,8 +315,8 @@ class TestVerifyChecksum:
     def test_accepts_matching_digest(self, tmp_path: Path) -> None:
         """An expected digest matches case-insensitively.
 
-        ``--sha256`` values are operator-typed and hex case is not a meaningful
-        distinction, so an uppercase expectation must not fail a lowercase-computed one.
+        ``--sha256`` values are operator-typed and hex case is not a meaningful distinction, so an uppercase
+        expectation must not fail a lowercase-computed one.
         """
         path = tmp_path / "blob.bin"
         path.write_bytes(b"hello coco")
@@ -320,9 +327,8 @@ class TestVerifyChecksum:
     def test_mismatch_raises(self, tmp_path: Path) -> None:
         """A wrong expected digest raises, naming the file rather than just the mismatch.
 
-        A corrupted or tampered download must stop the pipeline here, before
-        extraction, and the error must be actionable -- which file, not just that
-        something somewhere did not match.
+        A corrupted or tampered download must stop the pipeline here, before extraction, and the error must be
+        actionable -- which file, not just that something somewhere did not match.
         """
         path = tmp_path / "blob.bin"
         path.write_bytes(b"hello coco")
@@ -333,17 +339,14 @@ class TestVerifyChecksum:
 class TestDownloadCoco:
     """Tests for ``dl.download_coco`` (end-to-end transfer, monkeypatched network)."""
 
-    def test_produces_check_data_layout(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(urllib.request, "urlopen", _VAL_SERVER_TWO_IMAGES)
+    def test_produces_check_data_layout(self, tmp_path: Path) -> None:
         """A downloaded val split lands in the exact layout ``check_data`` expects.
 
-        The download and the check are two independently maintained pieces of code;
-        this is the seam where a layout drift between them would otherwise surface
-        only as a confusing failure downstream, in training rather than here.
+        The download and the check are two independently maintained pieces of code; this is the seam where a layout
+        drift between them would otherwise surface only as a confusing failure downstream, in training rather than
+        here.
         """
-        val_bytes = _val_archive_bytes(num_images=2)
-        mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": val_bytes}
-        monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
-
         root = dl.download_coco(tmp_path / "coco", ["val"], annotations=False, progress=False)
 
         assert root == tmp_path / "coco"
@@ -354,40 +357,35 @@ class TestDownloadCoco:
         assert (root / "annotations" / "instances_val2017.json").is_file()
         assert result.ok, result.problems
 
-    def test_removes_archive_by_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(urllib.request, "urlopen", _VAL_SERVER)
+    def test_removes_archive_by_default(self, tmp_path: Path) -> None:
         """A finished download does not leave the source zip on disk by default.
 
-        The extracted images and the archive that produced them would otherwise sit
-        side by side, silently doubling disk use for something the caller only ever
-        reads through the extracted tree.
+        The extracted images and the archive that produced them would otherwise sit side by side, silently doubling
+        disk use for something the caller only ever reads through the extracted tree.
         """
-        mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
-        monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
         root = dl.download_coco(tmp_path / "coco", ["val"], annotations=False, progress=False)
         assert not (root / "val2017.zip").exists()
 
-    def test_keeps_archive_when_requested(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(urllib.request, "urlopen", _VAL_SERVER)
+    def test_keeps_archive_when_requested(self, tmp_path: Path) -> None:
         """``keep_archives=True`` overrides the default cleanup and leaves the zip behind.
 
-        An operator re-provisioning several roots from one archive needs this escape
-        hatch; the default in the row above must not be the only path available.
+        An operator re-provisioning several roots from one archive needs this escape hatch; the default in the row
+        above must not be the only path available.
         """
-        mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
-        monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
         root = dl.download_coco(tmp_path / "coco", ["val"], annotations=False, keep_archives=True, progress=False)
         assert (root / "val2017.zip").is_file()
 
     def test_verifies_checksum(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A correct checksum lets a download through; a wrong one raises before extraction.
 
-        Both halves of the contract are exercised in one test since the interesting
-        claim is that ``download_coco`` actually calls the verifier at all -- a
-        checksum accepted with no verifier wired in would pass a matching-digest-only
-        test just as happily.
+        Both halves of the contract are exercised in one test since the interesting claim is that ``download_coco``
+        actually calls the verifier at all -- a checksum accepted with no verifier wired in would pass a
+        matching-digest-only test just as happily.
         """
         payload = _val_archive_bytes()
-        mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": payload}
-        monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
+        monkeypatch.setattr(urllib.request, "urlopen", _serve({_VAL_URL: payload}))
         good = hashlib.sha256(payload).hexdigest()
         root = dl.download_coco(
             tmp_path / "coco", ["val"], annotations=False, checksums={"val2017.zip": good}, progress=False
@@ -403,17 +401,16 @@ class TestDownloadCoco:
                 progress=False,
             )
 
-    def test_skips_extracted_split_without_network(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(urllib.request, "urlopen", _raise_if_called)
+    def test_skips_extracted_split_without_network(self, tmp_path: Path) -> None:
         """A split whose sentinel directory already exists is returned as found, not re-fetched.
 
-        ``urlopen`` is monkeypatched to raise on any call, so a bypassed sentinel
-        check fails loudly -- re-running a download on a complete root must be free,
-        not merely idempotent. Returning without raising is not on its own the
-        contract, though: a skip path that cleared the split before returning, or
-        that handed back some path other than ``data_root``, would also raise
-        nothing. So the pre-existing member file is written with content the archive
-        would never produce and asserted byte-identical afterwards, and the returned
-        path is compared to the root that went in.
+        ``urlopen`` is monkeypatched to raise on any call, so a bypassed sentinel check fails loudly -- re-running a
+        download on a complete root must be free, not merely idempotent. Returning without raising is not on its own
+        the contract, though: a skip path that cleared the split before returning, or that handed back some path other
+        than ``data_root``, would also raise nothing. So the pre-existing member file is written with content the
+        archive would never produce and asserted byte-identical afterwards, and the returned path is compared to the
+        root that went in.
         """
         root = tmp_path / "coco"
         split = root / "val2017"
@@ -421,34 +418,31 @@ class TestDownloadCoco:
         local = split / "000000000000.jpg"  # the name the archive itself extracts
         local.write_bytes(b"local copy, not from the archive")
 
-        monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
         returned = dl.download_coco(root, ["val"], annotations=False, progress=False)
 
         assert returned == root
         assert local.read_bytes() == b"local copy, not from the archive"  # left as found
         assert not (root / "val2017.zip").exists()  # nothing fetched or left behind
 
-    def test_force_redownloads(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(urllib.request, "urlopen", _VAL_SERVER)
+    def test_force_redownloads(self, tmp_path: Path) -> None:
         """``force=True`` re-fetches a split even though its sentinel already exists.
 
-        The companion to the skip test above: the sentinel check has an override, and
-        an operator suspecting a corrupted local split needs a way past it.
+        The companion to the skip test above: the sentinel check has an override, and an operator suspecting a
+        corrupted local split needs a way past it.
         """
         root = tmp_path / "coco"
         (root / "val2017").mkdir(parents=True)
-        mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
-        monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
         dl.download_coco(root, ["val"], annotations=False, force=True, progress=False)
         assert (root / "val2017" / "000000000000.jpg").is_file()
 
-    def test_resumes_partial_sidecar_vouches_for(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_resumes_partial_vouched_by_sidecar(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A ``.part`` whose sidecar names this same URL is resumed, not restarted.
 
-        A large COCO archive over a flaky connection is exactly the case this exists
-        for; re-fetching the whole file on every retry would make some networks never
-        finish a train-split download at all. The ``Range`` header is asserted rather
-        than only the finished tree, because a restart also produces a correct tree --
-        it just pays for the whole archive again, which is the thing being avoided.
+        A large COCO archive over a flaky connection is exactly the case this exists for; re-fetching the whole file on
+        every retry would make some networks never finish a train-split download at all. The ``Range`` header is
+        asserted rather than only the finished tree, because a restart also produces a correct tree -- it just pays for
+        the whole archive again, which is the thing being avoided.
         """
         payload = _val_archive_bytes()
         root = tmp_path / "coco"
@@ -466,11 +460,10 @@ class TestDownloadCoco:
     def test_discards_partial_with_no_sidecar(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A partial nothing vouches for is thrown away and the transfer restarts (L-33).
 
-        The bytes here are not a prefix of the archive at all -- an interrupted run
-        against a different URL, or a stale file from an unrelated tool, leaves exactly
-        this. Resuming on the strength of its length appends the archive's tail to
-        somebody else's head and renames the result into place as ``val2017.zip``, a
-        file that is corrupt in the middle and passes every length check there is.
+        The bytes here are not a prefix of the archive at all -- an interrupted run against a different URL, or a stale
+        file from an unrelated tool, leaves exactly this. Resuming on the strength of its length appends the archive's
+        tail to somebody else's head and renames the result into place as ``val2017.zip``, a file that is corrupt in
+        the middle and passes every length check there is.
         """
         payload = _val_archive_bytes()
         root = tmp_path / "coco"
@@ -487,10 +480,9 @@ class TestDownloadCoco:
     def test_discards_partial_left_by_another_url(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A sidecar naming a different URL invalidates the partial instead of vouching for it.
 
-        The sidecar has to be *checked*, not merely written: a run interrupted while
-        fetching the train archive leaves a partial under its own name, but a changed
-        remote, a redirected host or a hand-edited path all produce a partial whose
-        recorded URL no longer matches the request being made.
+        The sidecar has to be *checked*, not merely written: a run interrupted while fetching the train archive leaves
+        a partial under its own name, but a changed remote, a redirected host or a hand-edited path all produce a
+        partial whose recorded URL no longer matches the request being made.
         """
         payload = _val_archive_bytes()
         root = tmp_path / "coco"
@@ -503,19 +495,18 @@ class TestDownloadCoco:
         assert ranges == [None]
         assert (root / "val2017.zip").read_bytes() == payload
 
-    def test_reports_checksum_it_cannot_verify_on_skipped_split(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    @patch.object(urllib.request, "urlopen", _raise_if_called)
+    def test_reports_unverifiable_checksum_on_skipped_split(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """A digest supplied for an already-extracted split says so instead of passing silently (M-40).
 
-        Confirming an already-provisioned tree is the one thing an operator passes
-        ``--sha256`` for on a *second* run, and it is exactly the path that skips before
-        the verifier -- there is no archive left to hash, the zip having been removed
-        after extraction. Saying nothing reads as confirmation of a check that never ran.
+        Confirming an already-provisioned tree is the one thing an operator passes ``--sha256`` for on a *second* run,
+        and it is exactly the path that skips before the verifier -- there is no archive left to hash, the zip having
+        been removed after extraction. Saying nothing reads as confirmation of a check that never ran.
         """
         root = tmp_path / "coco"
         (root / "val2017").mkdir(parents=True)
-        monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
 
         dl.download_coco(root, ["val"], annotations=False, checksums={"val2017.zip": "deadbeef"}, progress=False)
 
@@ -531,8 +522,8 @@ class TestParseChecksums:
     def test_valid(self) -> None:
         """A well-formed ``name=digest`` list parses into an archive-name-keyed dict.
 
-        This is the shape ``download_coco``'s ``checksums`` argument expects, so the
-        parse result is asserted structurally rather than just checked for success.
+        This is the shape ``download_coco``'s ``checksums`` argument expects, so the parse result is asserted
+        structurally rather than just checked for success.
         """
         assert dl._parse_checksums(["val2017.zip=abc123", "train2017.zip=def456"]) == {
             "val2017.zip": "abc123",
@@ -543,10 +534,9 @@ class TestParseChecksums:
     def test_invalid_raises(self, item: str) -> None:
         """A malformed ``--sha256`` item raises rather than parsing into a wrong pair.
 
-        Three distinct malformations -- an empty digest, an empty name, and a missing
-        ``=`` entirely -- are swept in one parametrized test, since silently accepting
-        any of them would mean a typo'd flag verifies against the wrong (or an empty)
-        expected digest instead of failing at parse time.
+        Three distinct malformations -- an empty digest, an empty name, and a missing ``=`` entirely -- are swept in one
+        parametrized test, since silently accepting any of them would mean a typo'd flag verifies against the wrong (or
+        an empty) expected digest instead of failing at parse time.
         """
         with pytest.raises(ValueError, match="invalid --sha256"):
             dl._parse_checksums([item])
@@ -581,9 +571,9 @@ class TestParseDownloadArgs:
     def test_parses_splits_and_no_annotations(self) -> None:
         """The underscored, list-valued spellings reach the operation function's parameters.
 
-        This is the surface a copy-pasted command depends on, and the one that changed when
-        the dashed alias went (WP-110): a list is ``'[train,val]'``, and a flag that used to
-        be a bare switch now takes an explicit ``true``/``false``.
+        This is the surface a copy-pasted command depends on, and the one that changed when the dashed alias went
+        (WP-110): a list is ``'[train,val]'``, and a flag that used to be a bare switch now takes an explicit
+        ``true``/``false``.
         """
         args = _parse_download(
             [
@@ -608,74 +598,44 @@ class TestParseDownloadArgs:
 class TestMain:
     """Tests for ``data_cli.main`` (the ``download`` subcommand's exit-code contract)."""
 
-    def test_rejects_unknown_split(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(urllib.request, "urlopen", _raise_if_called)
+    def test_rejects_unknown_split(self, tmp_path: Path) -> None:
         """An unknown split name fails the run, without reaching the network.
 
-        The dashed alias rejected it in the parser (``choices=``); the shipped command derives
-        its flags from :func:`download_dataset`'s signature, which has no such constraint, so
-        :func:`_plan_archives` is the guard that matters and the exit code is what a caller
-        sees. The difference is worth pinning: the check moved, it did not disappear.
+        The dashed alias rejected it in the parser (``choices=``); the shipped command derives its flags from
+        :func:`download_dataset`'s signature, which has no such constraint, so :func:`_plan_archives` is the guard that
+        matters and the exit code is what a caller sees. The difference is worth pinning: the check moved, it did not
+        disappear.
         """
-        monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
-
         code = data_cli.main(["download", "--data_root", str(tmp_path), "--splits", "[test]", "--quiet", "true"])
 
         assert code == 1
 
-    def test_returns_zero_on_success(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(urllib.request, "urlopen", _VAL_SERVER)
+    def test_returns_zero_on_success(self, tmp_path: Path) -> None:
         """A clean end-to-end CLI download exits ``0``.
 
-        This is the CLI's own contract, one layer above ``download_coco`` itself:
-        a shell script or CI step checking the exit code needs this to hold even
-        though every path it exercises is already covered piecemeal above.
+        This is the CLI's own contract, one layer above ``download_coco`` itself: a shell script or CI step checking the
+        exit code needs this to hold even though every path it exercises is already covered piecemeal above.
         """
-        mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
-        monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
-        code = data_cli.main(
-            [
-                "download",
-                "--data_root",
-                str(tmp_path / "coco"),
-                "--splits",
-                "[val]",
-                "--annotations",
-                "false",
-                "--quiet",
-                "true",
-            ]
-        )
+        code = data_cli.main(_cli_download(tmp_path / "coco"))
         assert code == 0
 
-    def test_returns_one_on_checksum_failure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(urllib.request, "urlopen", _VAL_SERVER)
+    def test_returns_one_on_checksum_failure(self, tmp_path: Path) -> None:
         """A checksum mismatch surfaces at the CLI as exit ``1``, not an uncaught traceback.
 
-        ``_verify_checksum`` raises ``ValueError`` internally; the CLI boundary is
-        where that must become a script-friendly exit code instead of a stack trace.
+        ``_verify_checksum`` raises ``ValueError`` internally; the CLI boundary is where that must become a
+        script-friendly exit code instead of a stack trace.
         """
-        mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
-        monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
-        code = data_cli.main(
-            [
-                "download",
-                "--data_root",
-                str(tmp_path / "coco"),
-                "--splits",
-                "[val]",
-                "--annotations",
-                "false",
-                "--sha256",
-                "[val2017.zip=bad]",
-                "--quiet",
-                "true",
-            ]
-        )
+        code = data_cli.main(_cli_download(tmp_path / "coco", "--sha256", "[val2017.zip=bad]"))
         assert code == 1
 
     def test_returns_one_on_bad_checksum_arg(self, tmp_path: Path) -> None:
         """A malformed ``--sha256`` value fails at argument parsing, before any network call.
 
-        No ``monkeypatch`` on ``urlopen`` here, deliberately: a real network attempt
-        on a bad flag would mean this validation runs too late to matter.
+        No ``monkeypatch`` on ``urlopen`` here, deliberately: a real network attempt on a bad flag would mean this
+        validation runs too late to matter.
         """
         code = data_cli.main(
             ["download", "--data_root", str(tmp_path / "coco"), "--sha256", "[malformed]", "--quiet", "true"]
@@ -686,8 +646,8 @@ class TestMain:
 def _seed_val_root(root: Path, annotated: int, present: int) -> None:
     """Seed ``root`` with a val split whose annotations list ``annotated`` images.
 
-    Only the first ``present`` of those images are written to disk, so
-    ``present < annotated`` reproduces an interrupted extraction.
+    Only the first ``present`` of those images are written to disk, so ``present < annotated`` reproduces an
+    interrupted extraction.
 
     Examples:
         >>> import tempfile
@@ -710,9 +670,8 @@ def _verify_only(root: Path) -> int:
     """Run ``lucid-data download --verify_only`` over ``root``'s val split.
 
     ``verify_only`` returns before the network path is ever reached (see
-    :func:`~lucid_yolo.data.download.download_dataset`), so a complete root
-    verifies to ``0`` with no monkeypatching needed to keep this example offline.
-    ``--quiet`` silences the download progress bar only, not the verify report, so
+    :func:`~lucid_yolo.data.download.download_dataset`), so a complete root verifies to ``0`` with no monkeypatching
+    needed to keep this example offline. ``--quiet`` silences the download progress bar only, not the verify report, so
     stdout is redirected here to keep the example deterministic.
 
     Examples:
@@ -731,18 +690,17 @@ def _verify_only(root: Path) -> int:
     )
 
 
-def _hint_for_incomplete_split(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> tuple[int, str, str]:
+def _hint_for_incomplete_split(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
     """Drive ``--verify`` over a skipped, incomplete val split; return code and streams.
 
+    The caller patches ``urlopen`` to raise, so a run that reached the network fails loudly.
+
     Examples:
-        >>> callable(_hint_for_incomplete_split)  # needs live tmp_path/monkeypatch/capsys fixtures
+        >>> callable(_hint_for_incomplete_split)  # needs live tmp_path/capsys fixtures
         True
     """
     root = tmp_path / "coco"
     _seed_val_root(root, annotated=2, present=1)
-    monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
 
     code = data_cli.main(
         ["download", "--data_root", str(root), "--splits", "[val]", "--verify", "true", "--quiet", "true"]
@@ -754,82 +712,64 @@ def _hint_for_incomplete_split(
 class TestCliVerify:
     """Tests for the ``download`` subcommand's ``--verify`` / ``--verify_only`` flags."""
 
-    def test_only_passes_on_complete_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """`--verify_only` exits 0 on a complete root without touching the network."""
+    @pytest.mark.parametrize(
+        ("annotated", "present", "expected_code"),
+        [
+            pytest.param(2, 2, 0, id="complete-root-passes"),
+            pytest.param(4, 1, 1, id="missing-images-fail"),
+        ],
+    )
+    @patch.object(urllib.request, "urlopen", _raise_if_called)
+    def test_only_exit_code_tracks_image_completeness(
+        self, tmp_path: Path, annotated: int, present: int, expected_code: int
+    ) -> None:
+        """`--verify_only` exits 0 on a complete root and 1 on one missing images, never touching the network."""
         root = tmp_path / "coco"
-        _seed_val_root(root, annotated=2, present=2)
-        monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
+        _seed_val_root(root, annotated=annotated, present=present)
 
         code = _verify_only(root)
 
-        assert code == 0
+        assert code == expected_code
 
-    def test_only_fails_on_missing_images(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """`--verify_only` exits 1 and reports the shortfall on an incomplete root."""
-        root = tmp_path / "coco"
-        _seed_val_root(root, annotated=4, present=1)
-        monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
-
-        code = _verify_only(root)
-
-        assert code == 1
-
-    def test_only_fails_on_missing_annotation(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(urllib.request, "urlopen", _raise_if_called)
+    def test_only_fails_on_missing_annotation(self, tmp_path: Path) -> None:
         """`--verify_only` exits 1 when the split's annotation JSON is absent."""
         root = tmp_path / "coco"
         (root / "val2017").mkdir(parents=True)
-        monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
 
         code = _verify_only(root)
 
         assert code == 1
 
-    def test_after_download_passes(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(urllib.request, "urlopen", _VAL_SERVER_TWO_IMAGES)
+    def test_after_download_passes(self, tmp_path: Path) -> None:
         """`--verify` after a fresh download of a complete split exits 0."""
-        mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes(num_images=2)}
-        monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
-
-        code = data_cli.main(
-            [
-                "download",
-                "--data_root",
-                str(tmp_path / "coco"),
-                "--splits",
-                "[val]",
-                "--annotations",
-                "false",
-                "--verify",
-                "true",
-                "--quiet",
-                "true",
-            ]
-        )
+        code = data_cli.main(_cli_download(tmp_path / "coco", "--verify", "true"))
 
         assert code == 0
 
+    @patch.object(urllib.request, "urlopen", _raise_if_called)
     def test_after_skipped_incomplete_split_hints_force(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """`--verify` on a skipped, incomplete split exits 1 and prints a `--force` re-run hint."""
-        code, out, err = _hint_for_incomplete_split(tmp_path, monkeypatch, capsys)
+        code, out, err = _hint_for_incomplete_split(tmp_path, capsys)
 
         assert code == 1
         assert "val2017" in out  # the verification report
         expected = f"lucid-data download --data_root {tmp_path / 'coco'} --splits '[val]' --force true"
         assert expected in err  # repair hint
 
-    def test_repair_hint_names_command_that_parses(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    @patch.object(urllib.request, "urlopen", _raise_if_called)
+    def test_repair_hint_names_parseable_command(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """The printed repair hint is a command a caller can paste back into a shell.
 
-        Asserting the hint's *text* only proves a string was printed; the alias removal
-        (WP-110) is exactly the change that can leave a well-formed hint naming a command
-        nothing installs. So the hint is split as a shell would split it and fed back through
-        the shipped parser, which is what makes the assertion mean "runnable" rather than
+        Asserting the hint's *text* only proves a string was printed; the alias removal (WP-110) is exactly the change
+        that can leave a well-formed hint naming a command nothing installs. So the hint is split as a shell would
+        split it and fed back through the shipped parser, which is what makes the assertion mean "runnable" rather than
         "spelled the way this test expects".
         """
-        _, _, err = _hint_for_incomplete_split(tmp_path, monkeypatch, capsys)
+        _, _, err = _hint_for_incomplete_split(tmp_path, capsys)
         hint = next(line.strip() for line in err.splitlines() if line.strip().startswith("lucid-data"))
 
         command, *arguments = shlex.split(hint)

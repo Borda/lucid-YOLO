@@ -105,8 +105,8 @@ def _batch(empty: bool = False, size: int = 2) -> tuple[torch.Tensor, list[Targe
 class _WindowPosition(Callback):
     """Tell whether the current training batch continues an accumulation window rather than opening one.
 
-    Lightning counts ``batch_idx`` from zero in every epoch and opens a window at each multiple of
-    the accumulation, so a batch at any other index meets gradients its window accumulated.
+    Lightning counts ``batch_idx`` from zero in every epoch and opens a window at each multiple of the accumulation, so
+    a batch at any other index meets gradients its window accumulated.
 
     Examples:
         >>> position = _WindowPosition(3)
@@ -129,10 +129,10 @@ def _live_gradient_spy(
 ) -> Callable[[Iterable[torch.Tensor]], None]:
     """Wrap the forward-time gradient copy so each group replaying onto accumulated gradients is recorded.
 
-    The holder calls the copy only on its replay route, so a group in ``seen`` replayed inside an
-    accumulation window and met the gradients that window's earlier batches left alive. A batch
-    opening a window is not counted: Lightning clears gradients only after the training step's
-    forward, so the previous step's gradients are alive there at every accumulation setting.
+    The holder calls the copy only on its replay route, so a group in ``seen`` replayed inside an accumulation window
+    and met the gradients that window's earlier batches left alive. A batch opening a window is not counted: Lightning
+    clears gradients only after the training step's forward, so the previous step's gradients are alive there at every
+    accumulation setting.
 
     Examples:
         >>> seen, position = set(), _WindowPosition(3)
@@ -237,10 +237,9 @@ def test_segment_fit_replays_across_empty_partial_validation_and_ema(
 ) -> None:
     """Real fits preserve MuSGD and EMA through validation, accumulation and unsupported head precision.
 
-    Network-only cells cover every precision and accumulation 2, which carries live gradients
-    into each second replay. Head replay adds the supported bf16 cell, the accumulated cell, where
-    both holders replay and carry live gradients into each second replay, and the fp16
-    retirement, whose warning must name the holder that stays eager.
+    Network-only cells cover every precision and accumulation 2, which carries live gradients into each second replay.
+    Head replay adds the supported bf16 cell, the accumulated cell, where both holders replay and carry live gradients
+    into each second replay, and the fp16 retirement, whose warning must name the holder that stays eager.
     """
     torch.manual_seed(23)
     batches = [_batch(), _batch(True), _batch(size=1)]
@@ -436,10 +435,20 @@ def _eligible_module(cls: type[DetectionLitModule] = DetectionLitModule) -> Dete
     return model
 
 
+def _marked_images() -> torch.Tensor:
+    """Build a CPU batch that claims to be CUDA-resident, so the replay predicates run.
+
+    Examples:
+        >>> _marked_images().shape
+        torch.Size([2, 3, 64, 64])
+    """
+    return torch.rand(2, 3, 64, 64).as_subclass(_CudaMarked)
+
+
 def test_segment_class_level_forward_override_retires_to_native() -> None:
     """A subclass overriding `forward_segmentation` on the class retires replay and stays native."""
     model = _eligible_module(_OverridingModule)
-    images = torch.rand(2, 3, 64, 64).as_subclass(_CudaMarked)
+    images = _marked_images()
     with (
         pytest.warns(UserWarning, match="stays eager: the segmentation forward is overridden or compiled$"),
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("overridden forward must stay native")),
@@ -454,7 +463,7 @@ def test_segment_head_topology_swap_retires_with_topology_reason() -> None:
     model = _eligible_module()
     stem = model.head.o2m.box_stems[0]
     stem.__class__ = type("_SwappedStem", (type(stem),), {})
-    images = torch.rand(2, 3, 64, 64).as_subclass(_CudaMarked)
+    images = _marked_images()
     with (
         pytest.warns(UserWarning, match="stays eager: the segmentation head topology or class forward changed$"),
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("swapped head must stay native")),
@@ -467,16 +476,13 @@ def test_segment_head_topology_swap_retires_with_topology_reason() -> None:
 def test_retired_holder_skips_segment_replay_predicates() -> None:
     """A retired recording sends later steps native without re-walking the head certificate.
 
-    Once retired, the holder answers every call eagerly and ignores later causes, so the
-    dispatch and topology walks could change nothing; a step after retirement skips them
-    and never reaches the recorder.
+    Once retired, the holder answers every call eagerly and ignores later causes, so the dispatch and topology walks
+    could change nothing; a step after retirement skips them and never reaches the recorder.
     """
-    model = _module(capture_network=True)
-    model._capture_network_active = True
-    model._trainer = SimpleNamespace(training=True, accumulate_grad_batches=1)
+    model = _eligible_module()
     with pytest.warns(UserWarning, match="stays eager: a test cause"):
         network_capture(model).retire("a test cause")
-    images = torch.rand(2, 3, 64, 64).as_subclass(_CudaMarked)
+    images = _marked_images()
     with (
         warnings.catch_warnings(),
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("retired holder must stay native")),
@@ -495,12 +501,10 @@ def test_retired_holder_skips_segment_replay_predicates() -> None:
 
 def test_frozen_segment_features_retire_before_cuda_submission() -> None:
     """Frozen features stay native after unfreezing and report the shared-stage cause."""
-    model = _module(capture_network=True)
-    model._capture_network_active = True
-    model._trainer = SimpleNamespace(training=True, accumulate_grad_batches=1)
+    model = _eligible_module()
     model.backbone.requires_grad_(False)
     model.neck.requires_grad_(False)
-    images = torch.rand(2, 3, 64, 64).as_subclass(_CudaMarked)
+    images = _marked_images()
     with (
         pytest.warns(UserWarning, match="shared network features are frozen"),
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("frozen stages must stay native")),
@@ -548,10 +552,8 @@ def test_segmentation_cli_keeps_feature_and_prediction_options_independent(enabl
 
 def test_segment_head_hook_retires_feature_replay_and_stays_observable() -> None:
     """A mutable head cannot change which shared outputs a recorded backward must consume."""
-    model = _module(capture_network=True)
-    model._capture_network_active = True
-    model._trainer = SimpleNamespace(training=True, accumulate_grad_batches=1)
-    images = torch.rand(2, 3, 64, 64).as_subclass(_CudaMarked)
+    model = _eligible_module()
+    images = _marked_images()
     observed = []
     handle = model.head.register_forward_hook(lambda *_: observed.append(True))
     with (
@@ -666,9 +668,9 @@ def test_segment_freeze_after_recording_retires_once() -> None:
 def test_segment_accumulation_change_after_recording_keeps_replay_and_matches_native() -> None:
     """Raising accumulate_grad_batches after epoch one keeps the recording and the native result.
 
-    The recording is made at accumulation 1; epoch two accumulates two batches, so live
-    gradients reach a replay the recording never saw. One recording, no retirement and
-    bitwise-equal weights and optimizer state show the change needs no fallback.
+    The recording is made at accumulation 1; epoch two accumulates two batches, so live gradients reach a replay the
+    recording never saw. One recording, no retirement and bitwise-equal weights and optimizer state show the change
+    needs no fallback.
     """
     initial = _module().state_dict()
     snapshots = []
@@ -695,14 +697,13 @@ def test_segment_accumulation_change_after_recording_keeps_replay_and_matches_na
 def test_segment_head_replay_under_accumulation_matches_native() -> None:
     """Head replay at accumulation 3 ends with the weights, MuSGD, EMA and scaler bytes of a native fit.
 
-    Mirrors ``test_segment_fit_replays_across_empty_partial_validation_and_ema`` with the head holder
-    as the only difference between the arms. Each window opens with a full batch that replays, then
-    a partial batch that misses the recorded signature and accumulates natively, then a second full
-    batch whose replay meets the gradients both left. Every recorded prediction group must replay
-    onto its window's accumulated gradients at least once, so a run whose in-window replay silently
-    went native cannot pass; the gradients leave the static buffers at forward time. The
-    empty-target batch, alone in the last window, leaves mask groups without a backward, so the
-    skipped-backward hold and its release at the next batch run too. The replay arm warns nothing.
+    Mirrors ``test_segment_fit_replays_across_empty_partial_validation_and_ema`` with the head holder as the only
+    difference between the arms. Each window opens with a full batch that replays, then a partial batch that misses the
+    recorded signature and accumulates natively, then a second full batch whose replay meets the gradients both left.
+    Every recorded prediction group must replay onto its window's accumulated gradients at least once, so a run whose
+    in-window replay silently went native cannot pass; the gradients leave the static buffers at forward time. The
+    empty-target batch, alone in the last window, leaves mask groups without a backward, so the skipped-backward hold
+    and its release at the next batch run too. The replay arm warns nothing.
     """
     torch.manual_seed(23)
     batches = [_batch(), _batch(size=1), _batch(), _batch(True)]

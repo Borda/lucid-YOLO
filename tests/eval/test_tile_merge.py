@@ -3,21 +3,19 @@
 
 Two clauses carry this file, and they pull in opposite directions on purpose.
 
-The first is that the merge **removes** the seam duplicate an NMS-free path cannot
-suppress: an object placed in the overlap band of two adjacent tiles and detected by both
-must reach the score once. The second is that the merge **changes nothing else**: over a
-single-tile image there is no seam, no duplicate and nothing to own, so the whole-image
-figure must reproduce the per-tile figure exactly. A merge that quietly improved the
-number would pass the first clause and fail the second, which is why the second is
-written as an exact equality rather than a tolerance.
+The first is that the merge **removes** the seam duplicate an NMS-free path cannot suppress: an object placed in the
+overlap band of two adjacent tiles and detected by both must reach the score once. The second is that the merge
+**changes nothing else**: over a single-tile image there is no seam, no duplicate and nothing to own, so the
+whole-image figure must reproduce the per-tile figure exactly. A merge that quietly improved the number would pass the
+first clause and fail the second, which is why the second is written as an exact equality rather than a tolerance.
 
-Everything runs on hand-built fixtures (A26): a COCO container written in the test, and
-detections written as A45 tuples. No model, no datamodule, no download, no weights (D14)
-— the merge is a function of geometry and the tiling record, so it is tested as one.
+Everything runs on hand-built fixtures (A26): a COCO container written in the test, and detections written as A45
+tuples. No model, no datamodule, no download, no weights (D14) — the merge is a function of geometry and the tiling
+record, so it is tested as one.
 
-The cores are derived from :func:`~lucid_yolo.data.tiling.tile_windows`' real placement
-rather than from windows invented here, so the flush-against-the-edge trailing window and
-the short-axis single window are exercised as the build actually emits them.
+The cores are derived from :func:`~lucid_yolo.data.tiling.tile_windows`' real placement rather than from windows
+invented here, so the flush-against-the-edge trailing window and the short-axis single window are exercised as the
+build actually emits them.
 """
 
 from __future__ import annotations
@@ -45,15 +43,16 @@ if TYPE_CHECKING:
 
     from torch import Tensor
 
-#: Side of the fixture tiles, and of the letterbox canvas they are scored on. Equal by
-#: construction so the letterbox is the identity and the single-tile equality is exact
-#: rather than merely close: an inverse that divides by a ratio of one changes no bits.
+    from lucid_yolo.eval.tile_merge import TileIndex
+
+#: Side of the fixture tiles, and of the letterbox canvas they are scored on. Equal by construction so the letterbox is
+#: the identity and the single-tile equality is exact rather than merely close: an inverse that divides by a ratio of
+#: one changes no bits.
 _TILE = 64
 
-#: The two-tile fixture geometry. A 6 px patch at 2 px overlap over a 10 px axis places
-#: windows at 0 and 4, so the overlap band is ``[4, 6)`` and the core boundary its
-#: midpoint, ``x = 5``. Small enough to reason about by hand, and produced by the same
-#: `tile_windows` the build calls.
+#: The two-tile fixture geometry. A 6 px patch at 2 px overlap over a 10 px axis places windows at 0 and 4, so the
+#: overlap band is ``[4, 6)`` and the core boundary its midpoint, ``x = 5``. Small enough to reason about by hand, and
+#: produced by the same `tile_windows` the build calls.
 _PATCH = 6
 _OVERLAP = 2
 
@@ -113,12 +112,12 @@ def _layout(
 
     Args:
         tmp_path: Directory the file is written into.
-        windows: One entry per tile, in image-id order; each record is written under the
-            window's own :attr:`~lucid_yolo.eval.tile_merge.TileWindow.tile_id`, so a
-            fixture's ids and the ids the index reads back are the same statement.
+        windows: One entry per tile, in image-id order; each record is written under the window's own
+            :attr:`~lucid_yolo.eval.tile_merge.TileWindow.tile_id`, so a fixture's ids and the ids the index reads
+            back are the same statement.
         annotations: Tile annotations, referencing image ids from one.
-        provenance: When ``False``, the A53 window keys are omitted, producing the
-            ordinary COCO container the merge must decline rather than misread.
+        provenance: When ``False``, the A53 window keys are omitted, producing the ordinary COCO container the merge
+            must decline rather than misread.
 
     Returns:
         Path of the written file.
@@ -163,6 +162,28 @@ def _layout(
     return path
 
 
+def _tile_index(path: Path) -> TileIndex:
+    """Load the tile index of a container written by :func:`_layout`, failing if it is not a tiled one.
+
+    Args:
+        path: A container written with window provenance.
+
+    Returns:
+        The index, never ``None``.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     index = _tile_index(_layout(Path(tmp), [TileWindow("a.png", (0, 0), (4, 4), 1)], []))
+        >>> index.windows[0].origin
+        (0, 0)
+    """
+    index = load_tile_index(path)
+    assert index is not None, f"{path} carries no window provenance, so there is no merge to test"
+    return index
+
+
 def _detections(rows: list[list[float]], pad: int = 1) -> Tensor:
     """Build one tile's ``(N, 7)`` A45 detection block, padded as the head emits it.
 
@@ -178,6 +199,27 @@ def _detections(rows: list[list[float]], pad: int = 1) -> Tensor:
         torch.Size([3, 7])
     """
     return torch.tensor([*rows, *([[0.0] * 7] * pad)], dtype=torch.float32)
+
+
+def _to_source(windows: list[TileWindow], blocks: list[Tensor]) -> list[dict[str, Tensor]]:
+    """Map each tile's detection block into source pixels, for tiles letterboxed from ``_PATCH`` squares.
+
+    Args:
+        windows: One window per tile.
+        blocks: One detection block per window, in the same order.
+
+    Returns:
+        One source-pixel prediction dict per tile.
+
+    Examples:
+        >>> mapped = _to_source([TileWindow("a.png", (0, 0), (_PATCH, _PATCH), 1)], [_detections([])])
+        >>> mapped[0]["scores"].shape
+        torch.Size([0])
+    """
+    return [
+        tile_detections_to_source(block, window, (_PATCH, _PATCH))
+        for block, window in zip(blocks, windows, strict=True)
+    ]
 
 
 def _two_tile_windows() -> list[TileWindow]:
@@ -196,6 +238,27 @@ def _two_tile_windows() -> list[TileWindow]:
     ]
 
 
+def _ownership_counts(windows: list[TileWindow], stop: float) -> list[int]:
+    """Return the distinct owner counts over a half-pixel grid of points running from ``-3`` to ``stop`` on both axes.
+
+    Args:
+        windows: The tiling whose cores are checked.
+        stop: Exclusive upper end of the grid on both axes.
+
+    Returns:
+        The sorted distinct number of cores that own a grid point; ``[1]`` means an exact partition.
+
+    Examples:
+        >>> _ownership_counts([TileWindow("a.png", (0, 0), (4, 4), 1)], 6.0)
+        [1]
+    """
+    cores = core_bounds(windows)
+    axis = torch.arange(-3.0, stop, 0.5)
+    points = torch.cartesian_prod(axis, axis)
+    owners = torch.stack([in_core(points, core) for core in cores])
+    return [int(count) for count in owners.sum(dim=0).unique().tolist()]
+
+
 class TestCorePartition:
     """The cores are a partition of the plane, derived from the recorded windows alone."""
 
@@ -208,8 +271,8 @@ class TestCorePartition:
     def test_one_tile_owns_whole_plane(self) -> None:
         """A source image shorter than the patch tiles into one window, which owns all of it.
 
-        This is what makes the single-tile equality structural rather than incidental:
-        with one core there is nothing an ownership filter can remove.
+        This is what makes the single-tile equality structural rather than incidental: with one core there is nothing
+        an ownership filter can remove.
         """
         cores = core_bounds([TileWindow("small.png", (0, 0), (4, 4), 1)])
         assert cores.tolist() == [[-float("inf"), -float("inf"), float("inf"), float("inf")]]
@@ -217,18 +280,14 @@ class TestCorePartition:
     def test_every_point_owned_exactly_once(self) -> None:
         """Over a grid spanning the source image and beyond it, ownership sums to one.
 
-        The window set includes the trailing flush-against-the-edge window an 11 px axis
-        forces, whose overlap with its predecessor is wider than the nominal one.
+        The window set includes the trailing flush-against-the-edge window an 11 px axis forces, whose overlap with its
+        predecessor is wider than the nominal one.
         """
         windows = [
             TileWindow("wide.png", (int(window[0]), int(window[1])), (_PATCH, _PATCH), tile_id)
             for tile_id, window in enumerate(tile_windows((11, 11), patch=_PATCH, overlap=_OVERLAP), start=1)
         ]
-        cores = core_bounds(windows)
-        axis = torch.arange(-3.0, 15.0, 0.5)
-        points = torch.cartesian_prod(axis, axis)
-        owners = torch.stack([in_core(points, core) for core in cores])
-        assert owners.sum(dim=0).unique().tolist() == [1]
+        assert _ownership_counts(windows, 15.0) == [1]
 
     def test_centre_on_boundary_belongs_to_far_side(self) -> None:
         """Low bounds are inclusive and high bounds exclusive, so boundaries never double."""
@@ -240,31 +299,27 @@ class TestCorePartition:
     def test_grid_row_sharing_one_origin_partitions(self) -> None:
         """Two windows at the same x origin and the same width are the ordinary grid case.
 
-        A uniform tiler emits one x origin per column and reuses it down every row, so
-        the shared origin is the rule rather than the exception; the refusal below must
-        not reach it. Four windows, two columns by two rows, still own the plane once.
+        A uniform tiler emits one x origin per column and reuses it down every row, so the shared origin is the rule
+        rather than the exception; the refusal below must not reach it. Four windows, two columns by two rows, still
+        own the plane once.
         """
         windows = [
             TileWindow("grid.png", (x, y), (6, 6), 1 + 2 * row + column)
             for row, y in enumerate((0, 4))
             for column, x in enumerate((0, 4))
         ]
-        cores = core_bounds(windows)
-        axis = torch.arange(-3.0, 13.0, 0.5)
-        points = torch.cartesian_prod(axis, axis)
 
-        owners = torch.stack([in_core(points, core) for core in cores])
+        counts = _ownership_counts(windows, 13.0)
 
-        assert owners.sum(dim=0).unique().tolist() == [1]
+        assert counts == [1]
 
     def test_two_windows_sharing_origin_with_different_spans_refused(self) -> None:
         """An origin needing two boundaries is refused, not silently partitioned by one of them.
 
-        The cores are keyed on the window start, so a start carrying two different ends
-        loses one of them and the axis is then partitioned by whichever span was read
-        last — every detection between the two ends judged against a boundary belonging
-        to the other tiling. No tiler this project ships produces it; a hand-written or
-        externally produced layout can.
+        The cores are keyed on the window start, so a start carrying two different ends loses one of them and the axis
+        is then partitioned by whichever span was read last — every detection between the two ends judged against a
+        boundary belonging to the other tiling. No tiler this project ships produces it; a hand-written or externally
+        produced layout can.
         """
         windows = [TileWindow("mixed.png", (0, 0), (6, 6), 1), TileWindow("mixed.png", (0, 0), (6, 9), 2)]
 
@@ -278,8 +333,7 @@ class TestTileIndex:
     def test_windows_and_ground_truth_read_in_image_id_order(self, tmp_path: Path) -> None:
         """Entry ``i`` describes the tile the unshuffled loader yields ``i``-th."""
         windows = _two_tile_windows()
-        index = load_tile_index(_layout(tmp_path, windows, [_annotation(2, [1.0, 3.0, 2.0, 1.0, 0.0], label=1)]))
-        assert index is not None
+        index = _tile_index(_layout(tmp_path, windows, [_annotation(2, [1.0, 3.0, 2.0, 1.0, 0.0], label=1)]))
         assert [window.origin for window in index.windows] == [(0, 0), (4, 0)]
         assert index.ground_truth[0]["labels"].tolist() == []
         assert index.ground_truth[1]["labels"].tolist() == [1]
@@ -301,22 +355,19 @@ class TestTileIndex:
 class TestSeamDuplicate:
     """The first DoD clause: one object across a seam yields one detection, not two."""
 
-    #: Source ``x`` of the straddling object: inside the overlap band ``[4, 6)``, so both
-    #: windows contain it and both annotate it, and left of the core boundary at ``x = 5``,
-    #: so the first tile owns it.
+    #: Source ``x`` of the straddling object: inside the overlap band ``[4, 6)``, so both windows contain it and both
+    #: annotate it, and left of the core boundary at ``x = 5``, so the first tile owns it.
     _SEAM_X = 4.5
 
     @staticmethod
     def _straddling(tmp_path: Path) -> tuple[Path, list[dict[str, Tensor]]]:
         """Build the straddle, plus a second object the seam does not touch.
 
-        The second object matters to the scoring clause below and to nothing else. COCO
-        average precision is blind to false positives ranked *after* full recall is
-        attained, so a fixture with the straddler alone would score 1.0 whether the
-        duplicate was removed or not; a target that is found later leaves recall to attain
-        after the duplicate, and the duplicate then costs precision where it is measured.
-        The duplicate is given the **higher** score of the two, so the merge is not
-        flattered by the ranking either.
+        The second object matters to the scoring clause below and to nothing else. COCO average precision is blind to
+        false positives ranked *after* full recall is attained, so a fixture with the straddler alone would score 1.0
+        whether the duplicate was removed or not; a target that is found later leaves recall to attain after the
+        duplicate, and the duplicate then costs precision where it is measured. The duplicate is given the **higher**
+        score of the two, so the merge is not flattered by the ranking either.
 
         Returns:
             The container path and the two tiles' predictions, in source pixels.
@@ -332,12 +383,9 @@ class TestSeamDuplicate:
             _detections([[seam, 3.0, 2.0, 1.0, 0.0, 0.90, 0.0], [1.5, 3.0, 2.0, 1.0, 0.0, 0.50, 0.0]]),
             _detections([[seam - 4.0, 3.0, 2.0, 1.0, 0.0, 0.95, 0.0]]),
         ]
-        return _layout(tmp_path, windows, annotations), [
-            tile_detections_to_source(block, window, (_PATCH, _PATCH))
-            for block, window in zip(blocks, windows, strict=True)
-        ]
+        return _layout(tmp_path, windows, annotations), _to_source(windows, blocks)
 
-    def test_both_tiles_detect_it_before_merge(self, tmp_path: Path) -> None:
+    def test_both_tiles_detect_seam_object_before_merge(self, tmp_path: Path) -> None:
         """The duplicate is real: both tiles place a detection at the same source centre."""
         _, mapped = self._straddling(tmp_path)
         centres = torch.cat([entry["rboxes"][:, 0] for entry in mapped])
@@ -346,28 +394,23 @@ class TestSeamDuplicate:
     def test_merge_leaves_exactly_one(self, tmp_path: Path) -> None:
         """The whole DoD clause: one object across a seam, one detection after the merge."""
         path, mapped = self._straddling(tmp_path)
-        index = load_tile_index(path)
-        assert index is not None
-        predictions, ground_truth, names = merge_whole_images(index, mapped)
+        predictions, ground_truth, names = merge_whole_images(_tile_index(path), mapped)
         assert names == ["source.png"]
         at_seam = _at(predictions[0]["rboxes"][:, 0], self._SEAM_X)
         assert int(at_seam.sum()) == 1
         assert predictions[0]["scores"][at_seam].tolist() == pytest.approx([0.9])
         assert int(_at(ground_truth[0]["rboxes"][:, 0], self._SEAM_X).sum()) == 1
 
-    def test_duplicate_it_removes_worth_sixth_of_score(self, tmp_path: Path) -> None:
+    def test_duplicate_removal_worth_sixth_of_score(self, tmp_path: Path) -> None:
         """The clause restated as the number it protects, against one fixed ground truth.
 
-        Both sides are scored against the **merged** ground truth, with the cap off as the
-        whole-image path uses it. Merged predictions score 1.0; the same detections
-        without the ownership filter score 0.835, because the surviving duplicate is a
-        false positive ranked above a target still to be found. That gap is the
+        Both sides are scored against the **merged** ground truth, with the cap off as the whole-image path uses it.
+        Merged predictions score 1.0; the same detections without the ownership filter score 0.835, because the
+        surviving duplicate is a false positive ranked above a target still to be found. That gap is the
         duplicate-detection cost a per-tile score never pays, measured.
         """
         path, mapped = self._straddling(tmp_path)
-        index = load_tile_index(path)
-        assert index is not None
-        predictions, ground_truth, _ = merge_whole_images(index, mapped)
+        predictions, ground_truth, _ = merge_whole_images(_tile_index(path), mapped)
         unmerged = [{key: torch.cat([entry[key] for entry in mapped], dim=0) for key in ("rboxes", "scores", "labels")}]
         assert evaluate_rotated_map(predictions, ground_truth, max_detections=None)["map_50"] == pytest.approx(1.0)
         assert evaluate_rotated_map(unmerged, ground_truth, max_detections=None)["map_50"] == pytest.approx(
@@ -382,10 +425,9 @@ class TestSingleTileEquality:
     def _fixture(tmp_path: Path) -> tuple[Path, Tensor]:
         """Build a one-tile source image and a detection set that partly hits it.
 
-        Deliberately imperfect — one detection lands on a target, one is slightly off,
-        one lands on nothing, and a whole class is never detected — so every compared key
-        is an interior value rather than a saturated 1.0 that many wrong implementations
-        would also produce.
+        Deliberately imperfect — one detection lands on a target, one is slightly off, one lands on nothing, and a
+        whole class is never detected — so every compared key is an interior value rather than a saturated 1.0 that
+        many wrong implementations would also produce.
 
         Returns:
             The container path and the tile's detection block.
@@ -405,23 +447,23 @@ class TestSingleTileEquality:
         )
         return _layout(tmp_path, [window], annotations), detections
 
+    @staticmethod
+    def _per_tile_figure(index: TileIndex, detections: Tensor) -> dict[str, float]:
+        """Score the tile as the existing path does: the head's detections against the tile's own ground truth."""
+        return evaluate_rotated_map(rotated_detections_to_predictions(detections.unsqueeze(0)), [index.ground_truth[0]])
+
     def test_whole_image_figure_reproduces_per_tile_one(self, tmp_path: Path) -> None:
         """Exact equality on every key, with no tolerance anywhere.
 
-        A tolerance here would hide the defect it guards. The per-tile side is what the
-        existing path reports: the detections as the head emits them, against the tile's
-        own ground truth. The whole-image side is the new
-        path over the same detections. With one tile the letterbox is the identity, the
-        window origin is zero and the single core is infinite, so every step of the merge
-        is a no-op and any difference is the merge changing the score for a reason
-        unrelated to merging.
+        A tolerance here would hide the defect it guards. The per-tile side is what the existing path reports: the
+        detections as the head emits them, against the tile's own ground truth. The whole-image side is the new path
+        over the same detections. With one tile the letterbox is the identity, the window origin is zero and the single
+        core is infinite, so every step of the merge is a no-op and any difference is the merge changing the score for a
+        reason unrelated to merging.
         """
         path, detections = self._fixture(tmp_path)
-        index = load_tile_index(path)
-        assert index is not None
-        per_tile = evaluate_rotated_map(
-            rotated_detections_to_predictions(detections.unsqueeze(0)), [index.ground_truth[0]]
-        )
+        index = _tile_index(path)
+        per_tile = self._per_tile_figure(index, detections)
         predictions, ground_truth, _ = merge_whole_images(
             index, [tile_detections_to_source(detections, index.windows[0], (_TILE, _TILE))]
         )
@@ -431,11 +473,7 @@ class TestSingleTileEquality:
     def test_compared_figure_not_saturated(self, tmp_path: Path) -> None:
         """Guard on the guard: an equality between two 1.0s would prove nothing."""
         path, detections = self._fixture(tmp_path)
-        index = load_tile_index(path)
-        assert index is not None
-        per_tile = evaluate_rotated_map(
-            rotated_detections_to_predictions(detections.unsqueeze(0)), [index.ground_truth[0]]
-        )
+        per_tile = self._per_tile_figure(_tile_index(path), detections)
         assert all(0.0 < value < 1.0 for value in per_tile.values()), per_tile
 
 
@@ -445,25 +483,15 @@ class TestOwnershipCost:
     def test_detection_only_non_owning_tile_made_dropped(self, tmp_path: Path) -> None:
         """Whole-image recall is the owner's recall, not the union of both tiles'.
 
-        This is the cost of refusing a confidence-ranked union: the neighbouring tile saw
-        the object and the merge discards it anyway, because ownership is decided by
-        where the detection is and never by whether another tile also fired. A change
-        that makes this test pass with one surviving detection has reintroduced
-        suppression at the seam — see the module docstring before making it.
+        This is the cost of refusing a confidence-ranked union: the neighbouring tile saw the object and the merge
+        discards it anyway, because ownership is decided by where the detection is and never by whether another tile
+        also fired. A change that makes this test pass with one surviving detection has reintroduced suppression at the
+        seam — see the module docstring before making it.
         """
         windows = _two_tile_windows()
         path = _layout(tmp_path, windows, [_annotation(1, [4.5, 3.0, 2.0, 1.0, 0.0])])
-        index = load_tile_index(path)
-        assert index is not None
-        predictions, _, _ = merge_whole_images(
-            index,
-            [
-                tile_detections_to_source(_detections([]), windows[0], (_PATCH, _PATCH)),
-                tile_detections_to_source(
-                    _detections([[0.5, 3.0, 2.0, 1.0, 0.0, 0.8, 0.0]]), windows[1], (_PATCH, _PATCH)
-                ),
-            ],
-        )
+        blocks = [_detections([]), _detections([[0.5, 3.0, 2.0, 1.0, 0.0, 0.8, 0.0]])]
+        predictions, _, _ = merge_whole_images(_tile_index(path), _to_source(windows, blocks))
         assert predictions[0]["rboxes"].shape[0] == 0
 
 
@@ -473,9 +501,8 @@ class TestGroundTruthReconstruction:
     def test_target_seen_whole_by_two_tiles_counted_once(self, tmp_path: Path) -> None:
         """R18 keeps the original annotation above the threshold, so both copies share a centre.
 
-        The cores partition the plane, so exactly one of two identically-placed copies
-        survives — double-counting a non-difficult ground truth is structurally
-        impossible rather than merely unlikely.
+        The cores partition the plane, so exactly one of two identically-placed copies survives — double-counting a
+        non-difficult ground truth is structurally impossible rather than merely unlikely.
         """
         windows = _two_tile_windows()
         path = _layout(
@@ -483,24 +510,21 @@ class TestGroundTruthReconstruction:
             windows,
             [_annotation(1, [4.5, 3.0, 2.0, 1.0, 0.0]), _annotation(2, [0.5, 3.0, 2.0, 1.0, 0.0])],
         )
-        index = load_tile_index(path)
-        assert index is not None
-        _, ground_truth, _ = merge_whole_images(index, [{"rboxes": torch.zeros(0, 5)} | _empty() for _ in windows])
+        _, ground_truth, _ = merge_whole_images(_tile_index(path), [_empty() for _ in windows])
         assert ground_truth[0]["labels"].tolist() == [0]
 
     @staticmethod
     def _with_a_straggler(tmp_path: Path) -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
         """Build a merge whose ground truth keeps a clipped, difficult copy nobody removed.
 
-        Two real targets sit in the first tile, and the second tile carries a clipped part
-        flagged *difficult* whose centre its own core owns. Such a straggler needs an
-        object wider than the overlap — only then can clipping displace a centre across a
-        core boundary — so it is written directly here rather than derived from a tiling
+        Two real targets sit in the first tile, and the second tile carries a clipped part flagged *difficult* whose
+        centre its own core owns. Such a straggler needs an object wider than the overlap — only then can clipping
+        displace a centre across a core boundary — so it is written directly here rather than derived from a tiling
         run; the point under test is what the accumulator does with it.
 
-        The detections find both real targets and the straggler, and the straggler's is
-        ranked **between** them, so a detection the true annotation set would have scored
-        as a false positive lands where precision is still being measured.
+        The detections find both real targets and the straggler, and the straggler's is ranked **between** them, so a
+        detection the true annotation set would have scored as a false positive lands where precision is still being
+        measured.
 
         Returns:
             The merged predictions and ground truth.
@@ -515,29 +539,18 @@ class TestGroundTruthReconstruction:
                 _annotation(2, [1.5, 3.0, 2.0, 1.0, 0.0], difficult=True),
             ],
         )
-        index = load_tile_index(path)
-        assert index is not None
-        predictions, ground_truth, _ = merge_whole_images(
-            index,
-            [
-                tile_detections_to_source(
-                    _detections([[3.0, 3.0, 2.0, 1.0, 0.0, 0.9, 0.0], [1.0, 3.0, 2.0, 1.0, 0.0, 0.3, 0.0]]),
-                    windows[0],
-                    (_PATCH, _PATCH),
-                ),
-                tile_detections_to_source(
-                    _detections([[1.5, 3.0, 2.0, 1.0, 0.0, 0.6, 0.0]]), windows[1], (_PATCH, _PATCH)
-                ),
-            ],
-        )
+        blocks = [
+            _detections([[3.0, 3.0, 2.0, 1.0, 0.0, 0.9, 0.0], [1.0, 3.0, 2.0, 1.0, 0.0, 0.3, 0.0]]),
+            _detections([[1.5, 3.0, 2.0, 1.0, 0.0, 0.6, 0.0]]),
+        ]
+        predictions, ground_truth, _ = merge_whole_images(_tile_index(path), _to_source(windows, blocks))
         return predictions, ground_truth
 
     def test_surviving_clipped_copy_costs_no_recall(self, tmp_path: Path) -> None:
         """A48 keeps a difficult straggler out of the denominator and lets it shadow nothing.
 
-        This is the half of the residual that is genuinely safe: the straggler is carried
-        as difficult, the two real targets are the whole recall denominator, and both are
-        found — so the merge loses nothing to it.
+        This is the half of the residual that is genuinely safe: the straggler is carried as difficult, the two real
+        targets are the whole recall denominator, and both are found — so the merge loses nothing to it.
         """
         predictions, ground_truth = self._with_a_straggler(tmp_path)
 
@@ -547,13 +560,11 @@ class TestGroundTruthReconstruction:
     def test_surviving_clipped_copy_absorbs_would_be_false_positive(self, tmp_path: Path) -> None:
         """The merge's one flattering residual, measured rather than asserted away.
 
-        The same predictions are scored against the ground truth the merge produced and
-        against the whole-image annotation set a straggler-free reconstruction would have
-        given — the two real targets alone. Against the true set the straggler's detection
-        is a false positive ranked above a target still to be found and costs 0.165 of
-        ``map_50``; the merge discards it instead, exactly as R18's devkit discards a
-        detection on a difficult instance. That gap is the direction a whole-image figure
-        from this module errs in, and its size on this fixture.
+        The same predictions are scored against the ground truth the merge produced and against the whole-image
+        annotation set a straggler-free reconstruction would have given — the two real targets alone. Against the true
+        set the straggler's detection is a false positive ranked above a target still to be found and costs 0.165 of
+        ``map_50``; the merge discards it instead, exactly as R18's devkit discards a detection on a difficult instance.
+        That gap is the direction a whole-image figure from this module errs in, and its size on this fixture.
         """
         predictions, ground_truth = self._with_a_straggler(tmp_path)
         real = [{key: value[~ground_truth[0]["difficult"]] for key, value in ground_truth[0].items()}]
@@ -576,8 +587,8 @@ class TestCoordinates:
     def test_non_identity_letterbox_undone_before_translation(self) -> None:
         """A 32x64 tile letterboxed into 64x64 gains 16 px pads; the inverse removes them.
 
-        The order is the point: the letterbox inverse is the existing exact one and the
-        window origin is added afterwards, so nothing here recomputes a pad or a ratio.
+        The order is the point: the letterbox inverse is the existing exact one and the window origin is added
+        afterwards, so nothing here recomputes a pad or a ratio.
         """
         window = TileWindow("a.png", (10, 20), (32, 64), 1)
         mapped = tile_detections_to_source(_detections([[32.0, 32.0, 8.0, 4.0, 0.25, 0.9, 0.0]]), window, (64, 64))
@@ -587,9 +598,8 @@ class TestCoordinates:
     def test_source_image_whose_detections_all_disowned_appears(self, tmp_path: Path) -> None:
         """Predictions and ground truth align by position, so an empty image is an entry."""
         windows = [*_two_tile_windows(), TileWindow("other.png", (0, 0), (_PATCH, _PATCH), 3)]
-        index = load_tile_index(_layout(tmp_path, windows, []))
-        assert index is not None
-        predictions, ground_truth, names = merge_whole_images(index, [_empty() | {"rboxes": torch.zeros(0, 5)}] * 3)
+        index = _tile_index(_layout(tmp_path, windows, []))
+        predictions, ground_truth, names = merge_whole_images(index, [_empty()] * 3)
         assert names == ["source.png", "other.png"]
         assert len(predictions) == len(ground_truth) == 2
 
@@ -597,54 +607,66 @@ class TestCoordinates:
 class TestDetectionCap:
     """A47's 300 is per forward pass; a merged source image is many of them."""
 
-    def test_whole_image_path_scores_every_merged_detection(self) -> None:
-        """With the cap off a 400-detection image keeps all 400, so recall is the model's."""
-        boxes = torch.stack(
-            [torch.tensor([float(index) * 10.0, 5.0, 4.0, 2.0, 0.0]) for index in range(400)],
-        )
-        predictions = [
-            {"rboxes": boxes, "scores": torch.linspace(0.1, 0.9, 400), "labels": torch.zeros(400, dtype=torch.long)}
-        ]
-        targets = [{"rboxes": boxes[-1:], "labels": torch.zeros(1, dtype=torch.long)}]
-        assert evaluate_rotated_map(predictions, targets, max_detections=None)["map_50"] == pytest.approx(1.0)
+    @pytest.mark.parametrize(
+        ("target_rows", "cap_kwargs", "expected_map"),
+        [
+            # With the cap off a 400-detection image keeps all 400, so recall is the model's.
+            pytest.param(slice(-1, None), {"max_detections": None}, 1.0, id="cap-off-scores-every-detection"),
+            # The per-tile path must be bit-identical: the same call without the argument caps.
+            pytest.param(slice(None, 1), {}, 0.0, id="default-cap-unchanged"),
+        ],
+    )
+    def test_cap_decides_which_merged_detections_are_scored(
+        self, target_rows: slice, cap_kwargs: dict[str, None], expected_map: float
+    ) -> None:
+        """The whole-image path scores every merged detection while the default per-tile cap is unchanged.
 
-    def test_default_cap_unchanged(self) -> None:
-        """The per-tile path must be bit-identical: the same call without the argument caps."""
+        The target is the lowest-ranked detection with the cap off, and the highest-ranked box that the default cap of
+        300 never reaches otherwise, so a cap that leaks into either call moves the figure.
+        """
         boxes = torch.stack(
             [torch.tensor([float(index) * 10.0, 5.0, 4.0, 2.0, 0.0]) for index in range(400)],
         )
         predictions = [
             {"rboxes": boxes, "scores": torch.linspace(0.1, 0.9, 400), "labels": torch.zeros(400, dtype=torch.long)}
         ]
-        targets = [{"rboxes": boxes[:1], "labels": torch.zeros(1, dtype=torch.long)}]
-        assert evaluate_rotated_map(predictions, targets)["map_50"] == pytest.approx(0.0)
+        targets = [{"rboxes": boxes[target_rows], "labels": torch.zeros(1, dtype=torch.long)}]
+
+        stats = evaluate_rotated_map(predictions, targets, **cap_kwargs)
+
+        assert stats["map_50"] == pytest.approx(expected_map)
 
 
 class TestPartialSplit:
     """``--limit`` stops part-way through a split; a half-merged image is not scored."""
 
-    def test_incomplete_trailing_source_image_dropped(self, tmp_path: Path) -> None:
-        """One tile of a two-tile image would report a recall the pipeline never attempted."""
-        windows = [*_two_tile_windows(), TileWindow("other.png", (0, 0), (_PATCH, _PATCH), 3)]
-        index = load_tile_index(_layout(tmp_path, windows, []))
-        assert index is not None
-        _, _, names = merge_whole_images(index, [_empty() | {"rboxes": torch.zeros(0, 5)}])
-        assert names == []
+    @pytest.mark.parametrize(
+        ("tiles_seen", "expected_names"),
+        [
+            # One tile of a two-tile image would report a recall the pipeline never attempted.
+            pytest.param(1, [], id="incomplete-trailing-image-dropped"),
+            # Both tiles of the first image are present, so that image is complete and scored.
+            pytest.param(2, ["source.png"], id="prefix-ending-on-boundary-keeps-image"),
+        ],
+    )
+    def test_only_complete_source_images_scored(
+        self, tmp_path: Path, tiles_seen: int, expected_names: list[str]
+    ) -> None:
+        """A split cut short by ``--limit`` merges the source images whose tiles all arrived, and no others.
 
-    def test_prefix_ending_on_boundary_keeps_images(self, tmp_path: Path) -> None:
-        """Both tiles of the first image are present, so that image is complete and scored."""
+        The split holds a two-tile image followed by a one-tile image, and only a prefix of the tiles is scored.
+        """
         windows = [*_two_tile_windows(), TileWindow("other.png", (0, 0), (_PATCH, _PATCH), 3)]
-        index = load_tile_index(_layout(tmp_path, windows, []))
-        assert index is not None
-        _, _, names = merge_whole_images(index, [_empty() | {"rboxes": torch.zeros(0, 5)}] * 2)
-        assert names == ["source.png"]
+        index = _tile_index(_layout(tmp_path, windows, []))
+        _, _, names = merge_whole_images(index, [_empty()] * tiles_seen)
+        assert names == expected_names
 
 
 def _at(centres: Tensor, coordinate: float) -> Tensor:
     """Return the mask of centres sitting at ``coordinate`` on one axis.
 
-    ``tensor == pytest.approx(x)`` collapses to a single bool, which is not what a count
-    of detections at one place needs.
+    ``tensor == pytest.approx(x)`` collapses to a single bool, which is not what a count of detections at one place
+    needs.
 
     Args:
         centres: ``(N,)`` coordinates along one axis.

@@ -1,36 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
 """Instance-mask decode: assemble, crop, binarize, un-letterbox (WP-053a).
 
-The inference-side counterpart of the WP-051 mask loss. Eq. 7 gives per-instance
-mask logits as a linear combination of the ``K`` prototype maps
-(:func:`~lucid_yolo.models.heads.proto.assemble_masks`); turning that into a
-binary mask an evaluator can score takes four further steps, and their order is
-the whole content of this module:
+The inference-side counterpart of the WP-051 mask loss. Eq. 7 gives per-instance mask logits as a linear combination
+of the ``K`` prototype maps (:func:`~lucid_yolo.models.heads.proto.assemble_masks`); turning that into a binary mask
+an evaluator can score takes four further steps, and their order is the whole content of this module:
 
-1. **sigmoid at the prototype grid** — the probabilities are defined there, and
-   it is the cheapest place to compute them (the prototype grid is a quarter of
-   the input's area per A15).
-2. **bilinear upsample of the probabilities** to the letterboxed input
-   resolution. Interpolating probabilities and thresholding afterwards places
-   each boundary where the probability field actually crosses ``0.5``, at
-   sub-prototype-cell precision; thresholding first and upsampling a binary mask
-   would snap every boundary onto the prototype grid, and no amount of later
-   filtering recovers the lost position.
-3. **crop to the predicted box**, using the *same* half-open pixel-centre
-   membership rule (A11) that
-   :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` applies to the
-   ground-truth box at train time. The boxes differ — predicted here, ground
-   truth there — but the membership rule must not, or the model is evaluated
-   under a geometry it was never trained under.
+1. **sigmoid at the prototype grid** — the probabilities are defined there, and it is the cheapest place to compute
+   them (the prototype grid is a quarter of the input's area per A15).
+2. **bilinear upsample of the probabilities** to the letterboxed input resolution. Interpolating probabilities and
+   thresholding afterwards places each boundary where the probability field actually crosses ``0.5``, at
+   sub-prototype-cell precision; thresholding first and upsampling a binary mask would snap every boundary onto
+   the prototype grid, and no amount of later filtering recovers the lost position.
+3. **crop to the predicted box**, using the *same* half-open pixel-centre membership rule (A11) that
+   :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` applies to the ground-truth box at train time. The boxes
+   differ — predicted here, ground truth there — but the membership rule must not, or the model is evaluated under
+   a geometry it was never trained under.
 4. **threshold to bool** at :data:`_MASK_THRESHOLD`.
 
-:func:`masks_to_original` then lands the binary masks in original-image
-coordinates (A10), the frame evaluation scores in. It reads its scale and
-padding from :meth:`~lucid_yolo.data.letterbox.Letterbox.forward_affine` — the
-exact affine whose inverse :func:`~lucid_yolo.decode.common.to_letterboxed_original`
-applies to the boxes — so masks and boxes cannot disagree about the transform.
-That disagreement is the failure this module is most exposed to: it leaves every
-bbox score right and every segm score quietly wrong.
+:func:`masks_to_original` then lands the binary masks in original-image coordinates (A10), the frame evaluation
+scores in. It reads its scale and padding from :meth:`~lucid_yolo.data.letterbox.Letterbox.forward_affine` — the
+exact affine whose inverse :func:`~lucid_yolo.decode.common.to_letterboxed_original` applies to the boxes — so masks
+and boxes cannot disagree about the transform. That disagreement is the failure this module is most exposed to: it
+leaves every bbox score right and every segm score quietly wrong.
 
 Provenance: R1 Eq. 7, R16. Assumptions: A10, A11, A15, A16, A37.
 """
@@ -46,8 +37,8 @@ from lucid_yolo.models.heads.proto import assemble_masks
 
 __all__ = ["decode_instance_masks", "masks_to_original"]
 
-#: Probability above which a decoded mask pixel is foreground (A37). Unspecified
-#: by the papers; ``0.5`` is the neutral cut of a sigmoid trained with BCE.
+#: Probability above which a decoded mask pixel is foreground (A37). Unspecified by the papers; ``0.5`` is the
+#: neutral cut of a sigmoid trained with BCE.
 _MASK_THRESHOLD: float = 0.5
 _MASK_CHUNK_SIZE = 32
 
@@ -61,17 +52,14 @@ def decode_instance_masks(
 ) -> Tensor:
     """Assemble, upsample, box-crop and binarize per-instance masks (A16, A37).
 
-    Runs the four decode steps of the module docstring in order. Assembly stays
-    batched; upsampling and cropping process at most 32 instances per image at a
-    time, bounding the full-canvas float temporary independently of detection
-    count. The final boolean stack still contains every instance. Coordinate
-    tensors are built from ``prototypes`` on the inputs' device.
+    Runs the four decode steps of the module docstring in order. Assembly stays batched; upsampling and cropping
+    process at most 32 instances per image at a time, bounding the full-canvas float temporary independently of
+    detection count. The final boolean stack still contains every instance. Coordinate tensors are built from
+    ``prototypes`` on the inputs' device.
 
-    ``coefficients`` must **already** be gathered for the kept detections, by the
-    very indices ``boxes`` was gathered by
-    (:func:`~lucid_yolo.models.heads.detect.o2o_topk_with_indices`); this function
-    pairs row ``n`` of one with row ``n`` of the other and cannot detect a
-    mismatch.
+    ``coefficients`` must **already** be gathered for the kept detections, by the very indices ``boxes`` was
+    gathered by (:func:`~lucid_yolo.models.heads.detect.o2o_topk_with_indices`); this function pairs row ``n`` of one
+    with row ``n`` of the other and cannot detect a mismatch.
 
     Args:
         prototypes: Raw prototype maps ``(B, K, Hp, Wp)`` from
@@ -86,9 +74,8 @@ def decode_instance_masks(
             :data:`_MASK_THRESHOLD` (``0.5``).
 
     Returns:
-        Boolean instance masks of shape ``(B, N, height, width)``, zero outside
-        each detection's own box. ``N == 0`` returns the empty stack rather than
-        raising — see the note at the top of the body.
+        Boolean instance masks of shape ``(B, N, height, width)``, zero outside each detection's own box. ``N == 0``
+        returns the empty stack rather than raising — see the note at the top of the body.
 
     Examples:
         ```pycon
@@ -105,13 +92,12 @@ def decode_instance_masks(
         ```
     """
     if not coefficients.shape[1]:
-        # `F.interpolate` treats the instance axis as channels and rejects a zero-length
-        # one outright, so an image with no kept detections used to raise here rather
-        # than return nothing. The evaluator never met that, because both decoders hand
-        # this function a fixed 300 rows with the padding included; the predict path
-        # decodes only survivors, and an image can have none. Returning the empty stack
-        # keeps the shape contract — `(B, 0, H, W)`, still boolean, still indexable —
-        # which a caller stacking per-image results needs and a raise does not give it.
+        # `F.interpolate` treats the instance axis as channels and rejects a zero-length one outright, so an image
+        # with no kept detections used to raise here rather than return nothing. The evaluator never met that, because
+        # both decoders hand this function a fixed 300 rows with the padding included; the predict path decodes only
+        # survivors, and an image can have none. Returning the empty stack keeps the shape contract —
+        # `(B, 0, H, W)`, still boolean, still indexable — which a caller stacking per-image results needs and a raise
+        # does not give it.
         return prototypes.new_zeros((prototypes.shape[0], 0, *image_size), dtype=torch.bool)
     probabilities = assemble_masks(prototypes, coefficients).sigmoid()  # (B, N, Hp, Wp)
     masks = prototypes.new_empty((prototypes.shape[0], coefficients.shape[1], *image_size), dtype=torch.bool)
@@ -130,9 +116,8 @@ def _decode_instance_masks_unchunked(
 ) -> Tensor:
     """Retain the original single-resize segmentation graph for ONNX export.
 
-    Eager evaluation uses bounded chunks; export keeps the pre-existing operations
-    and their shapes, avoiding a traced Python loop and additional graph nodes.
-    Export always supplies a positive fixed detection count.
+    Eager evaluation uses bounded chunks; export keeps the pre-existing operations and their shapes, avoiding a
+    traced Python loop and additional graph nodes. Export always supplies a positive fixed detection count.
     """
     probabilities = assemble_masks(prototypes, coefficients).sigmoid()
     upsampled = F.interpolate(probabilities, size=image_size, mode="bilinear", align_corners=False)
@@ -143,11 +128,9 @@ def _decode_instance_masks_unchunked(
 def _box_crop(boxes: Tensor, image_size: tuple[int, int], reference: Tensor) -> Tensor:
     """Return the ``(B, N, H, W)`` half-open pixel-centre box window (A11).
 
-    The membership test is the one
-    :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` uses: a pixel belongs
-    to a box when its centre ``(i + 0.5, j + 0.5)`` falls inside
-    ``[x1, x2) x [y1, y2)``. Coordinate tensors are built on ``reference``'s
-    device and dtype.
+    The membership test is the one :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` uses: a pixel belongs to
+    a box when its centre ``(i + 0.5, j + 0.5)`` falls inside ``[x1, x2) x [y1, y2)``. Coordinate tensors are built
+    on ``reference``'s device and dtype.
     """
     height, width = image_size
     centres_x = torch.arange(width, device=reference.device, dtype=reference.dtype) + 0.5  # (W,)
@@ -161,25 +144,19 @@ def _box_crop(boxes: Tensor, image_size: tuple[int, int], reference: Tensor) -> 
 def masks_to_original(masks: Tensor, letterbox: Letterbox, orig_size: tuple[int, int]) -> Tensor:
     """Un-letterbox binary instance masks back to original-image coordinates (A10).
 
-    The mask-side twin of
-    :func:`~lucid_yolo.decode.common.to_letterboxed_original`: it removes the
-    letterbox padding and undoes the resize for one image's masks, landing them
-    in the frame the ground truth (and therefore the segm metric) lives in.
+    The mask-side twin of :func:`~lucid_yolo.decode.common.to_letterboxed_original`: it removes the letterbox padding
+    and undoes the resize for one image's masks, landing them in the frame the ground truth (and therefore the segm
+    metric) lives in.
 
-    The geometry comes from
-    :meth:`~lucid_yolo.data.letterbox.Letterbox.forward_affine` evaluated for the
-    mask's own canvas — the same ``r``, ``pad_left`` and ``pad_top`` the box path
-    inverts, taken from the same resolver rather than recomputed here, so the two
-    paths cannot drift. Only ``letterbox.allow_upscale`` is read off the passed
-    transform; the canvas is taken from ``masks`` exactly as the box path takes
-    it from the image batch.
+    The geometry comes from :meth:`~lucid_yolo.data.letterbox.Letterbox.forward_affine` evaluated for the mask's own
+    canvas — the same ``r``, ``pad_left`` and ``pad_top`` the box path inverts, taken from the same resolver rather
+    than recomputed here, so the two paths cannot drift. Only ``letterbox.allow_upscale`` is read off the passed
+    transform; the canvas is taken from ``masks`` exactly as the box path takes it from the image batch.
 
-    Resampling is nearest-neighbour, since the input is already binary and
-    interpolating it would only reintroduce a threshold. It is applied by mapping
-    each *output* pixel centre through the forward affine and reading the canvas
-    pixel that contains it — the same point correspondence the box inverse uses,
-    rather than a crop-then-resize whose implicit ratio is the **rounded** content
-    size over the original size instead of ``r`` (A37).
+    Resampling is nearest-neighbour, since the input is already binary and interpolating it would only
+    reintroduce a threshold. It is applied by mapping each *output* pixel centre through the forward affine and reading
+    the canvas pixel that contains it — the same point correspondence the box inverse uses, rather than a
+    crop-then-resize whose implicit ratio is the **rounded** content size over the original size instead of ``r`` (A37).
 
     Args:
         masks: Boolean (or numeric) masks ``(N, H, W)`` for one image, at the
@@ -220,11 +197,10 @@ def masks_to_original(masks: Tensor, letterbox: Letterbox, orig_size: tuple[int,
 def _source_indices(length: int, ratio: float, offset: float, limit: int) -> Tensor:
     """Map ``length`` original pixel centres onto the canvas rows/columns holding them.
 
-    Centre ``i + 0.5`` of the original image sits at ``(i + 0.5) * ratio +
-    offset`` on the letterboxed canvas, and the pixel containing that coordinate
-    is its floor. The arithmetic runs in ``float64`` on the CPU — the affine is
-    float64 by construction and MPS has no double — and the result is clamped
-    into the canvas as a guard against a half-pixel overshoot at the far edge.
+    Centre ``i + 0.5`` of the original image sits at ``(i + 0.5) * ratio + offset`` on the letterboxed canvas, and
+    the pixel containing that coordinate is its floor. The arithmetic runs in ``float64`` on the CPU — the affine is
+    float64 by construction and MPS has no double — and the result is clamped into the canvas as a guard against a
+    half-pixel overshoot at the far edge.
     """
     centres = torch.arange(length, dtype=torch.float64) + 0.5
     return (centres * ratio + offset).floor().long().clamp(0, limit - 1)

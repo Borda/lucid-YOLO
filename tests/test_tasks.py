@@ -1,13 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """The task registry: its four members, their defaults, and the string boundary around them.
 
-:mod:`lucid_yolo.tasks` replaced a set of hand-written copies of the task names and two
-per-task default tables. The tests here pin three things: that the registry holds exactly
-the values those copies held, so the replacement moved nothing; that the tables the
-commands still publish are now read off it with their old contents and key order; and
-that the enum never crosses the checkpoint boundary, because a saved checkpoint is read
-under ``torch.load(weights_only=True)`` and that unpickler refuses a class it was not
-told about.
+:mod:`lucid_yolo.tasks` replaced a set of hand-written copies of the task names and two per-task default tables. The
+tests here pin three things: that the registry holds exactly the values those copies held, so the replacement moved
+nothing; that the tables the commands still publish are now read off it with their old contents and key order; and that
+the enum never crosses the checkpoint boundary, because a saved checkpoint is read under
+``torch.load(weights_only=True)`` and that unpickler refuses a class it was not told about.
 """
 
 from __future__ import annotations
@@ -44,11 +42,10 @@ _NUM_KEYPOINTS = 3
 def _write_checkpoint(module: DetectionLitModule, path: Path) -> Path:
     """Save ``module`` as a Lightning-shaped checkpoint at ``path`` and return the path.
 
-    The dict is the one ``tests/predict/planted.py`` writes — what
-    :func:`~lucid_yolo.eval.checkpoint.load_eval_module` reads — built here rather than
-    imported across test packages. ``hyper_parameters`` is ``dict(module.hparams)``, which
-    is exactly what Lightning's own checkpoint writer stores, so whatever type the
-    constructor recorded is the type the file carries.
+    The dict is the one ``tests/predict/planted.py`` writes — what :func:`~lucid_yolo.eval.checkpoint.load_eval_module`
+    reads — built here rather than imported across test packages. ``hyper_parameters`` is ``dict(module.hparams)``,
+    which is exactly what Lightning's own checkpoint writer stores, so whatever type the constructor recorded is the
+    type the file carries.
 
     Examples:
         >>> import tempfile
@@ -96,22 +93,19 @@ class TestTask:
     def test_members_are_four_tasks_in_registry_order(self) -> None:
         """The registry holds exactly the four names the module accepted, in its order.
 
-        A fifth member fails here on purpose. Adding a task is not one row: ``lucid-eval``
-        accepts every registry member and its dispatch falls through to
-        ``lucid_yolo.eval.detect_eval.run``, which has no task guard of its own, so a fifth
-        task must arrive with its own protocol there, with its own
-        branch in ``lucid-predict``, a renderer in ``lucid_yolo._viz.overlay`` and an
-        entry point in ``lucid_yolo.predict`` — this pin is what makes that a deliberate
-        change rather than a silent one.
+        A fifth member fails here on purpose. Adding a task is not one row: ``lucid-eval`` accepts every registry member
+        and its dispatch falls through to ``lucid_yolo.eval.detect_eval.run``, which has no task guard of its own, so a
+        fifth task must arrive with its own protocol there, with its own branch in ``lucid-predict``, a renderer in
+        ``lucid_yolo._viz.overlay`` and an entry point in ``lucid_yolo.predict`` — this pin is what makes that a
+        deliberate change rather than a silent one.
         """
         assert TASK_NAMES == ("detect", "segment", "obb", "keypoints")
 
     def test_member_equals_its_plain_spelling(self) -> None:
         """A member compares equal to, hashes like and formats as the string a config carries.
 
-        The three properties are what let the string stay at every boundary: a YAML value
-        compares against a member, looks up a member-keyed table, and an f-string message
-        prints the spelling the caller typed.
+        The three properties are what let the string stay at every boundary: a YAML value compares against a member,
+        looks up a member-keyed table, and an f-string message prints the spelling the caller typed.
         """
         table = {Task.OBB: "rotated"}
 
@@ -141,8 +135,8 @@ class TestTaskSpec:
     def test_spec_carries_previous_defaults(self, task: Task, img_size: int, eval_batch_size: int) -> None:
         """Each task's spec holds the side and batch size ``lucid-eval``'s tables hard-coded.
 
-        The numbers are written out rather than read from anywhere, because the point is
-        that the move into the registry changed none of them.
+        The numbers are written out rather than read from anywhere, because the point is that the move into the registry
+        changed none of them.
         """
         assert (task.spec.img_size, task.spec.eval_batch_size) == (img_size, eval_batch_size)
 
@@ -150,9 +144,8 @@ class TestTaskSpec:
     def test_coco_tier_side_equals_decode_default(self, task: Task) -> None:
         """A COCO tier's side is the decode layer's ``COCO_IMG_SIZE``, which the leaf cannot import.
 
-        ``lucid_yolo.decode`` imports the models and torch, so the registry states 640
-        itself; this pin is what keeps the scoring defaults and the per-task defaults one
-        number.
+        ``lucid_yolo.decode`` imports the models and torch, so the registry states 640 itself; this pin is what keeps
+        the scoring defaults and the per-task defaults one number.
         """
         assert task.spec.img_size == COCO_IMG_SIZE
 
@@ -164,9 +157,9 @@ class TestTaskSpec:
     def test_leaf_imports_no_package_module_and_no_torch(self) -> None:
         """Importing the registry loads no other ``lucid_yolo`` module, and neither torch nor numpy.
 
-        Run in a fresh interpreter, because this session has long since imported both. A
-        leaf is what lets ``lucid_yolo.models`` read it — that package sits below
-        ``lucid_yolo.decode`` and cannot import upward without a cycle.
+        Run in a fresh interpreter, because this session has long since imported both. A leaf is what lets
+        ``lucid_yolo.models`` read it — that package sits below ``lucid_yolo.decode`` and cannot import upward without a
+        cycle.
         """
         probe = (
             "import json, sys, lucid_yolo.tasks; "
@@ -181,17 +174,30 @@ class TestTaskSpec:
 class TestDerivedTables:
     """The tables consumers still publish, now read off the registry, against their old literals."""
 
-    def test_eval_image_sizes_keep_contents_and_order(self) -> None:
-        """``DEFAULT_IMG_SIZE`` keeps its old rows in its old key order, oriented first.
+    @pytest.mark.parametrize(
+        ("table", "expected_rows"),
+        [
+            pytest.param(
+                DEFAULT_IMG_SIZE,
+                [("obb", 1024), ("detect", 640), ("segment", 640), ("keypoints", 640)],
+                id="img-size",
+            ),
+            pytest.param(
+                DEFAULT_BATCH_SIZE,
+                [("obb", 8), ("detect", 32), ("segment", 32), ("keypoints", 32)],
+                id="batch-size",
+            ),
+        ],
+    )
+    def test_eval_tables_keep_contents_and_order(
+        self, table: dict[str, int], expected_rows: list[tuple[str, int]]
+    ) -> None:
+        """``DEFAULT_IMG_SIZE`` and ``DEFAULT_BATCH_SIZE`` keep their old rows in their old key order, oriented first.
 
-        Order is part of the contract: three commands' unknown-task refusal lists these
-        keys, and ``tests/cli/test_export.py`` pins that text.
+        Order is part of the contract: three commands' unknown-task refusal lists these keys, and
+        ``tests/cli/test_export.py`` pins that text.
         """
-        assert list(DEFAULT_IMG_SIZE.items()) == [("obb", 1024), ("detect", 640), ("segment", 640), ("keypoints", 640)]
-
-    def test_eval_batch_sizes_keep_contents_and_order(self) -> None:
-        """``DEFAULT_BATCH_SIZE`` keeps its old rows in its old key order."""
-        assert list(DEFAULT_BATCH_SIZE.items()) == [("obb", 8), ("detect", 32), ("segment", 32), ("keypoints", 32)]
+        assert list(table.items()) == expected_rows
 
     def test_module_accepts_registry_names(self) -> None:
         """The module's accepted names are the registry's, in the order its refusal lists them."""
@@ -204,8 +210,8 @@ class TestDerivedTables:
     def test_drawable_tasks_are_plain_sorted_strings(self) -> None:
         """The script's ``--task`` choices stay plain strings, sorted, as argparse prints them.
 
-        A member in an argparse ``choices`` would still validate, and the refusal that
-        lists the tuple would then print ``<Task.OBB: 'obb'>`` instead of ``'obb'``.
+        A member in an argparse ``choices`` would still validate, and the refusal that lists the tuple would then print
+        ``<Task.OBB: 'obb'>`` instead of ``'obb'``.
         """
         assert [(name, type(name)) for name in DRAWABLE_TASKS] == [
             ("detect", str),
@@ -229,10 +235,9 @@ class TestCheckpointTask:
     def test_saved_task_is_plain_str(self, save_checkpoint: Callable[[str], Path], task: str) -> None:
         """A checkpoint's ``task`` is exactly ``str``, even from a module built with a ``Task`` member.
 
-        The member case is the one that matters: the registry makes passing one natural,
-        Lightning's ``save_hyperparameters`` records whatever object the constructor's
-        local holds, and a ``Task`` there would be pickled by class — which the restricted
-        unpickler then refuses, making the file unloadable by every command.
+        The member case is the one that matters: the registry makes passing one natural, Lightning's
+        ``save_hyperparameters`` records whatever object the constructor's local holds, and a ``Task`` there would be
+        pickled by class — which the restricted unpickler then refuses, making the file unloadable by every command.
         """
         payload = torch.load(save_checkpoint(task), map_location="cpu", weights_only=True)
 
@@ -243,8 +248,8 @@ class TestCheckpointTask:
     ) -> None:
         """A checkpoint saved from a ``Task.SEGMENT``-built module loads and reports the plain task.
 
-        The end-to-end form of the pin above: :func:`lucid_yolo.load_eval_module` is the
-        loader every command reads checkpoints through, and it reads them restricted.
+        The end-to-end form of the pin above: :func:`lucid_yolo.load_eval_module` is the loader every command reads
+        checkpoints through, and it reads them restricted.
         """
         loaded, _info = lucid_yolo.load_eval_module(save_checkpoint(Task.SEGMENT), use_ema=False)
 
@@ -293,10 +298,9 @@ class _ResavedKwargsTaskModule(_KwargsTaskModule):
 class TestSubclassCheckpointTask:
     """A subclass forwarding a ``Task`` member still records a plain ``str`` ``task``.
 
-    Lightning's ``save_hyperparameters`` collects constructor arguments from every
-    ``__init__`` frame up the inheritance chain and merges the subclass frames over the
-    base's, ``**kwargs`` contents included, so the subclass's ``Task.DETECT`` replaces
-    the spelling the base constructor normalized its own local to.
+    Lightning's ``save_hyperparameters`` collects constructor arguments from every ``__init__`` frame up the inheritance
+    chain and merges the subclass frames over the base's, ``**kwargs`` contents included, so the subclass's
+    ``Task.DETECT`` replaces the spelling the base constructor normalized its own local to.
     """
 
     def test_saved_task_is_plain_str(self, module_cls: Callable[..., DetectionLitModule], tmp_path: Path) -> None:
@@ -312,8 +316,8 @@ class TestSubclassCheckpointTask:
     def test_initial_snapshot_task_is_plain_str(self, module_cls: Callable[..., DetectionLitModule]) -> None:
         """``hparams_initial``, the copy a logger writes to its hyper-parameter file, holds ``str`` too.
 
-        Lightning takes that snapshot inside ``save_hyperparameters``, so correcting
-        ``hparams`` alone afterwards would leave the logged record carrying the member.
+        Lightning takes that snapshot inside ``save_hyperparameters``, so correcting ``hparams`` alone afterwards would
+        leave the logged record carrying the member.
         """
         module = module_cls(task=Task.DETECT)
 

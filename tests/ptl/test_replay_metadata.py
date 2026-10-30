@@ -34,6 +34,18 @@ def _network() -> nn.Sequential:
     return network
 
 
+def _certified(network: nn.Module) -> tuple[tuple[object, ...], _ModuleMetadata]:
+    """Record a network's signature together with the metadata certificate taken from it.
+
+    Examples:
+        >>> signature, metadata = _certified(_network())
+        >>> isinstance(metadata, _ModuleMetadata)
+        True
+    """
+    signature = _network_signature(network)
+    return signature, _ModuleMetadata(_members(network)[0], signature[0])
+
+
 def test_members_preserve_preorder_and_identity_deduplication() -> None:
     """Aliases retain their first position without losing either tensor namespace."""
     first, second = nn.Linear(3, 5), nn.Linear(5, 2)
@@ -56,9 +68,7 @@ def test_members_preserve_preorder_and_identity_deduplication() -> None:
 def test_unchanged_bindings_skip_full_scalar_inspection() -> None:
     """The optimization must remain observable even when all numerical outputs agree."""
     network = _network()
-    members = _members(network)
-    before = _network_signature(network)
-    metadata = _ModuleMetadata(members[0], before[0])
+    before, metadata = _certified(network)
     with patch("lucid_yolo.ptl.network_capture._module_signature", side_effect=AssertionError("rescanned")):
         assert _network_signature(network, _members(network), metadata) == before
     network[0].weight.data.add_(1)
@@ -73,8 +83,7 @@ def test_unchanged_bindings_skip_full_scalar_inspection() -> None:
 def test_changed_module_contract_reaches_original_signature(mutation: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """A certificate miss rereads the changed contract instead of returning stale metadata."""
     network = _network()
-    before = _network_signature(network)
-    metadata = _ModuleMetadata(_members(network)[0], before[0])
+    before, metadata = _certified(network)
     if mutation == "training":
         network[0].eval()
     elif mutation == "scalar":
@@ -103,8 +112,7 @@ def test_changed_module_contract_reaches_original_signature(mutation: str, monke
 def test_live_tensor_contract_is_not_cached(mutation: str) -> None:
     """Unchanged Python attributes cannot certify a tensor's current storage or layout."""
     network = _network()
-    before = _network_signature(network)
-    metadata = _ModuleMetadata(_members(network)[0], before[0])
+    before, metadata = _certified(network)
     if mutation == "parameter":
         network[0].weight = nn.Parameter(network[0].weight.detach().clone())
     elif mutation == "buffer":
@@ -129,8 +137,7 @@ def test_tensor_attribute_replacement_never_compares_tensor_values() -> None:
     """An equal-valued vector is a cache miss whose fallback keeps the original scalar signature."""
     network = _network()
     network.marker = torch.ones(4)
-    before = _network_signature(network)
-    metadata = _ModuleMetadata(_members(network)[0], before[0])
+    before, metadata = _certified(network)
     network.marker = torch.ones(4)
     assert _network_signature(network, _members(network), metadata) == before
 
@@ -139,8 +146,7 @@ def test_equal_scalar_rebinding_keeps_original_value_semantics() -> None:
     """A new float object may miss the identity certificate without retiring valid scalar metadata."""
     network = _network()
     network[0].scale_marker = float("1.25")
-    before = _network_signature(network)
-    metadata = _ModuleMetadata(_members(network)[0], before[0])
+    before, metadata = _certified(network)
     network[0].scale_marker = float("1.25")
     assert _network_signature(network, _members(network), metadata) == before
 
@@ -232,8 +238,7 @@ def test_scalar_binding_removal_and_key_order_are_not_reused() -> None:
     network = _network()
     network.first = 3
     network.second = 7
-    before = _network_signature(network)
-    metadata = _ModuleMetadata(_members(network)[0], before[0])
+    before, metadata = _certified(network)
     value = vars(network).pop("first")
     network.first = value
     after = _network_signature(network, _members(network), metadata)
@@ -288,8 +293,7 @@ class _DescriptorModeLinear(nn.Linear):
 def test_descriptor_training_mode_is_read_independently_of_attribute_bindings() -> None:
     """Module.eval can change the explicit training field without rebinding an instance attribute."""
     network = nn.Sequential(_DescriptorModeLinear(3, 5))
-    before = _network_signature(network)
-    metadata = _ModuleMetadata(_members(network)[0], before[0])
+    before, metadata = _certified(network)
     network[0].eval()
     actual = _network_signature(network, _members(network), metadata)
     assert actual[0][1][2] is False

@@ -1,75 +1,58 @@
 # SPDX-License-Identifier: Apache-2.0
 """ONNX export gate for the four end-to-end deploy paths (WP-066, WP-151).
 
-Two claims are under test, and the second is the one that needs the machinery. The
-keypoint path joined the other three at WP-151: 0.5.0 released a task whose model
-could not leave PyTorch, so it was the one released task with no graph to gate.
+Two claims are under test, and the second is the one that needs the machinery. The keypoint path joined the other three
+at WP-151: 0.5.0 released a task whose model could not leave PyTorch, so it was the one released task with no graph to
+gate.
 
-**The graph carries no suppression.** R1's architectural claim for the one-to-one
-branch is that it deploys *without* NMS, and the exported graph is where that claim
-is falsifiable: a ``NonMaxSuppression`` node in the emitted model would mean the
-NMS-free path is not what ships. ``test_e2e_graph_ops`` asserts that node's absence —
-and, because an absence proves little on its own, asserts positively that the ops which
-*must* be there are: ``TopK`` (the score ranking that replaces suppression),
-``Conv``, ``Sigmoid``, and for segmentation the ``Einsum`` of Eq. 7. It also pins the
-static output shape :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` documents.
+**The graph carries no suppression.** R1's architectural claim for the one-to-one branch is that it deploys *without*
+NMS, and the exported graph is where that claim is falsifiable: a ``NonMaxSuppression`` node in the emitted model would
+mean the NMS-free path is not what ships. ``test_e2e_graph_ops`` asserts that node's absence — and, because an absence
+proves little on its own, asserts positively that the ops which *must* be there are: ``TopK`` (the score ranking that
+replaces suppression), ``Conv``, ``Sigmoid``, and for segmentation the ``Einsum`` of Eq. 7. It also pins the static
+output shape :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` documents.
 
-**The graph computes what the checkpoint computes.** An op-type assertion passes
-just as happily on a silently wrong export — a mis-baked anchor constant, a decode
-traced down the wrong branch, a transposed tensor.
-``test_e2e_export_matches_checkpoint`` therefore runs the exported model under
-onnxruntime and compares it against the checkpoint-loaded
-:class:`~lucid_yolo.ptl.module.DetectionLitModule` decoded through the same E2E path
-:mod:`lucid_yolo.predict` uses. The comparison is on the decoded A9/A45 detection
-tuple, not on raw head logits: raw-logit parity would hold even if the decode were
-exported wrong, which is the same vacuity the first test guards against, one layer down.
+**The graph computes what the checkpoint computes.** An op-type assertion passes just as happily on a silently wrong
+export — a mis-baked anchor constant, a decode traced down the wrong branch, a transposed tensor.
+``test_e2e_export_matches_checkpoint`` therefore runs the exported model under onnxruntime and compares it against the
+checkpoint-loaded :class:`~lucid_yolo.ptl.module.DetectionLitModule` decoded through the same E2E path
+:mod:`lucid_yolo.predict` uses. The comparison is on the decoded A9/A45 detection tuple, not on raw head logits:
+raw-logit parity would hold even if the decode were exported wrong, which is the same vacuity the first test guards
+against, one layer down.
 
-The route is the point. The fixture writes a Lightning checkpoint, loads it back
-through :func:`~lucid_yolo.eval.checkpoint.load_eval_module` — the path an operator's
-``lucid-eval``, ``lucid-predict`` and ``lucid-export`` runs all take — and exports the
-deployed view of *that*, built by :func:`~lucid_yolo.export.graph_from_module`, the
-shipped bridge from a checkpoint-loaded module to its graph. Weights are random: this
-project ships no trained weights (D14) and the gate is offline, so random weights are the
-honest substitute. Nothing here measures accuracy;
-it measures that two backends agree along a real route.
+The route is the point. The fixture writes a Lightning checkpoint, loads it back through
+:func:`~lucid_yolo.eval.checkpoint.load_eval_module` — the path an operator's ``lucid-eval``, ``lucid-predict`` and
+``lucid-export`` runs all take — and exports the deployed view of *that*, built by
+:func:`~lucid_yolo.export.graph_from_module`, the shipped bridge from a checkpoint-loaded module to its graph. Weights
+are random: this project ships no trained weights (D14) and the gate is offline, so random weights are the honest
+substitute. Nothing here measures accuracy; it measures that two backends agree along a real route.
 
-**Why the fixture is doctored, and why it has to be.** A freshly built model is
-useless for this comparison, and silently so. Its BatchNorms carry
-``running_var=1``/``running_mean=0``, so in eval mode they rescale nothing and the
-signal attenuates through depth until the classifier's contribution — order 1e-7 —
-falls below the float32 resolution of its own ``-log((1-pi)/pi)`` prior bias at 4.6.
-Every one of the 336 anchors then produces the *bit-identical* logit, ``topk`` becomes a
-300-of-336 tie, and the two backends break that tie differently: the test would compare
-two arbitrary orderings and report boxes 80 px apart. So :func:`_discriminative`
-calibrates the BN running statistics with a few forward passes, rescales the
-classification stems to a known logit spread, and biases the box stems positive. Without
-the last of those, every decoded box is inverted or empty and every instance mask comes
-out all-``False`` — a mask comparison that passes by comparing nothing.
+**Why the fixture is doctored, and why it has to be.** A freshly built model is useless for this comparison, and
+silently so. Its BatchNorms carry ``running_var=1``/``running_mean=0``, so in eval mode they rescale nothing and the
+signal attenuates through depth until the classifier's contribution — order 1e-7 — falls below the float32 resolution
+of its own ``-log((1-pi)/pi)`` prior bias at 4.6. Every one of the 336 anchors then produces the *bit-identical* logit,
+``topk`` becomes a 300-of-336 tie, and the two backends break that tie differently: the test would compare two
+arbitrary orderings and report boxes 80 px apart. So :func:`_discriminative` calibrates the BN running statistics with a
+few forward passes, rescales the classification stems to a known logit spread, and biases the box stems positive.
+Without the last of those, every decoded box is inverted or empty and every instance mask comes out all-``False`` — a
+mask comparison that passes by comparing nothing.
 
-Design call — **anchor points and strides are baked into the graph as buffers**, not
-taken as extra inputs. They are arguments to
-:meth:`~lucid_yolo.decode.topk_e2e.TopKDecoder.forward` rather than module state, so an
-exporter must either receive them or constant-fold them; baking makes the graph's single
-input the image, which is what a deployment consumer expects, at the cost of the graph
-being **specific to one input size**. That is normal for ONNX and is stated here rather
-than discovered later. ``test_e2e_graph_ops`` pins it by asserting the graph has exactly
-one input.
+Design call — **anchor points and strides are baked into the graph as buffers**, not taken as extra inputs. They are
+arguments to :meth:`~lucid_yolo.decode.topk_e2e.TopKDecoder.forward` rather than module state, so an exporter must
+either receive them or constant-fold them; baking makes the graph's single input the image, which is what a deployment
+consumer expects, at the cost of the graph being **specific to one input size**. That is normal for ONNX and is stated
+here rather than discovered later. ``test_e2e_graph_ops`` pins it by asserting the graph has exactly one input.
 
-The canvas is 128 px because it puts the anchor count at ``16^2 + 8^2 + 4^2 = 336``,
-above the 300 detection cap, so the decoders emit exactly the documented ``(1, 300, 6)``
-and ``(1, 300, 7)`` with no padding rows — the same regime as the 640 px production
-input, where 8400 anchors sit above the same cap. Every compared row is a real
-detection.
+The canvas is 128 px because it puts the anchor count at ``16^2 + 8^2 + 4^2 = 336``, above the 300 detection cap, so the
+decoders emit exactly the documented ``(1, 300, 6)`` and ``(1, 300, 7)`` with no padding rows — the same regime as the
+640 px production input, where 8400 anchors sit above the same cap. Every compared row is a real detection.
 
-Two things the gate deliberately does not leave to a default. The **opset** is
-:data:`~lucid_yolo.export.ONNX_OPSET`, applied by
-:func:`~lucid_yolo.export.export_graph` — the same call an operator makes, so what is
-certified here is what ships, and a torch upgrade that moved the exporter's default
-opset cannot change the emitted graph while these assertions keep passing. The **scale**
-is not only ``n``: detection is exported at ``s`` as well, because a gate that ran one
-scale would pass on a graph whose shapes happened to be right for one set of channel
-widths — the ``n`` widths are the smallest the registry defines and are the likeliest to
-coincide with a hard-coded one.
+Two things the gate deliberately does not leave to a default. The **opset** is :data:`~lucid_yolo.export.ONNX_OPSET`,
+applied by :func:`~lucid_yolo.export.export_graph` — the same call an operator makes, so what is certified here is what
+ships, and a torch upgrade that moved the exporter's default opset cannot change the emitted graph while these
+assertions keep passing. The **scale** is not only ``n``: detection is exported at ``s`` as well, because a gate that
+ran one scale would pass on a graph whose shapes happened to be right for one set of channel widths — the ``n`` widths
+are the smallest the registry defines and are the likeliest to coincide with a hard-coded one.
 
 Provenance: R1 sec. 3.2.1, R3 sec. 4. Assumptions: A9, A23, A37, A45.
 """
@@ -121,11 +104,10 @@ _NUM_CLASSES = 4
 #: Model scale every task is exported at.
 _VARIANT = "n"
 
-#: The ``(task, variant)`` pairs the gate exports: all four tasks at the default scale,
-#: plus detection at a second one. The second scale is what keeps the shape assertions
-#: from being satisfiable by a graph built for one set of channel widths (see the module
-#: docstring); it rides on detection because the decode it exercises is the one the other
-#: three build on.
+#: The ``(task, variant)`` pairs the gate exports: all four tasks at the default scale, plus detection at a second one.
+#: The second scale is what keeps the shape assertions from being satisfiable by a graph built for one set of channel
+#: widths (see the module docstring); it rides on detection because the decode it exercises is the one the other three
+#: build on.
 _EXPORT_CASES = (
     pytest.param(("detect", _VARIANT), id="detect-n"),
     pytest.param(("segment", _VARIANT), id="segment-n"),
@@ -134,28 +116,26 @@ _EXPORT_CASES = (
     pytest.param(("detect", "s"), id="detect-s"),
 )
 
-#: Point count K the keypoint task is exported at. Deliberately not COCO's 17: K is a
-#: constructor argument, and a gate that only ever ran at 17 would not catch a shape
-#: baked to that number (A64).
+#: Point count K the keypoint task is exported at. Deliberately not COCO's 17: K is a constructor argument, and a gate
+#: that only ever ran at 17 would not catch a shape baked to that number (A64).
 _NUM_KEYPOINTS = 3
 
-#: Standard deviation the classification logits are rescaled to, so the top-k ranking is
-#: decided by the scores rather than by the tie-break (see the module docstring).
+#: Standard deviation the classification logits are rescaled to, so the top-k ranking is decided by the scores rather
+#: than by the tie-break (see the module docstring).
 _TARGET_LOGIT_STD = 2.0
 
-#: Positive bias written into the box stems, so decoded boxes have interiors and the
-#: instance masks are not uniformly empty.
+#: Positive bias written into the box stems, so decoded boxes have interiors and the instance masks are not uniformly
+#: empty.
 _BOX_BIAS = 2.0
 
-#: Decimals the detection rows are rounded to before they are ordered for comparison.
-#: Two backends differ by float32 noise (measured at or below 5e-05), and rows tied on
-#: score are ordered by whichever backend's noise came out larger; rounding well above
-#: that noise makes the ordering — and therefore the pairing — identical on both sides.
+#: Decimals the detection rows are rounded to before they are ordered for comparison. Two backends differ by float32
+#: noise (measured at or below 5e-05), and rows tied on score are ordered by whichever backend's noise came out larger;
+#: rounding well above that noise makes the ordering — and therefore the pairing — identical on both sides.
 _PAIR_QUANTUM = 3
 
-#: Tolerances for the parity comparison, chosen after measuring: boxes came out within
-#: 4.6e-05 and scores within 1.2e-07 across all three heads. Class ids are compared
-#: exactly — they are integers, and a tolerance on them would hide a real disagreement.
+#: Tolerances for the parity comparison, chosen after measuring: boxes came out within 4.6e-05 and scores within 1.2e-07
+#: across all three heads. Class ids are compared exactly — they are integers, and a tolerance on them would hide a real
+#: disagreement.
 _BOX_ATOL = 1e-3
 _SCORE_ATOL = 1e-5
 
@@ -169,9 +149,8 @@ class _Exported:
         variant: The registry scale the model was built at.
         path: The written ``.onnx`` file.
         image: The input the graph was exported and compared on.
-        reference: Eager outputs of the checkpoint-loaded module, decoded through the
-            E2E path — the detection tuple first, then instance masks for ``segment``
-            or gathered point sets for ``keypoints``.
+        reference: Eager outputs of the checkpoint-loaded module, decoded through the E2E path — the detection tuple
+            first, then instance masks for ``segment`` or gathered point sets for ``keypoints``.
     """
 
     task: str
@@ -181,11 +160,9 @@ class _Exported:
     reference: list[Tensor]
 
 
-#: Export graph class each task's module must come back as from
-#: :func:`~lucid_yolo.export.graph_from_module`. The classes were promoted to
-#: :mod:`lucid_yolo.export` (WP-112) so this fixture and :mod:`lucid_yolo.predict`'s
-#: single-image "e2e" path are provably the same composition rather than two that merely
-#: resemble each other.
+#: Export graph class each task's module must come back as from :func:`~lucid_yolo.export.graph_from_module`. The
+#: classes were promoted to :mod:`lucid_yolo.export` (WP-112) so this fixture and :mod:`lucid_yolo.predict`'s
+#: single-image "e2e" path are provably the same composition rather than two that merely resemble each other.
 _GRAPHS: dict[str, type[E2EExportGraph]] = {
     "detect": DetectExportGraph,
     "segment": SegmentExportGraph,
@@ -197,21 +174,17 @@ _GRAPHS: dict[str, type[E2EExportGraph]] = {
 def _discriminative(module: DetectionLitModule) -> DetectionLitModule:
     """Make an untrained module produce a decidable ranking and non-empty boxes.
 
-    Four edits, each answering a specific degeneracy the module docstring describes:
-    the BatchNorm running statistics are calibrated by forward passes in train mode (no
-    gradients, no optimizer — this is not training); the classification stems are
-    rescaled to :data:`_TARGET_LOGIT_STD` after their prior bias is cleared, so scores
-    separate instead of collapsing onto one float32 value; those stems are then
-    re-biased to centre the logits on zero; and the box stems are biased positive so
-    decoded boxes have interiors.
+    Four edits, each answering a specific degeneracy the module docstring describes: the BatchNorm running statistics
+    are calibrated by forward passes in train mode (no gradients, no optimizer — this is not training); the
+    classification stems are rescaled to :data:`_TARGET_LOGIT_STD` after their prior bias is cleared, so scores
+    separate instead of collapsing onto one float32 value; those stems are then re-biased to centre the logits on zero;
+    and the box stems are biased positive so decoded boxes have interiors.
 
-    The centring is what makes the calibration scale-independent, which is the whole
-    point of exporting a second scale. A spread is not enough on its own: at ``s`` the
-    same std-2.0 logits sit around a mean of 1.6, every one of the 336 anchors clears
-    the sigmoid's saturating shoulder, and 300 scores land inside a 0.016-wide band —
-    row-to-row gaps of the same order as the two backends' own float32 disagreement,
-    which is a ranking decided by noise. Centring puts the spread where the sigmoid is
-    steep, at every scale.
+    The centring is what makes the calibration scale-independent, which is the whole point of exporting a second scale.
+    A spread is not enough on its own: at ``s`` the same std-2.0 logits sit around a mean of 1.6, every one of the 336
+    anchors clears the sigmoid's saturating shoulder, and 300 scores land inside a 0.016-wide band — row-to-row gaps of
+    the same order as the two backends' own float32 disagreement, which is a ranking decided by noise. Centring puts the
+    spread where the sigmoid is steep, at every scale.
 
     Args:
         module: A freshly constructed module, modified in place.
@@ -317,8 +290,8 @@ def _eager_reference(module: DetectionLitModule, task: str, image: Tensor) -> li
         image: Input batch of shape ``(1, 3, 128, 128)``.
 
     Returns:
-        The decoded detection tuple, followed by instance masks for ``"segment"`` or
-        gathered point sets for ``"keypoints"``.
+        The decoded detection tuple, followed by instance masks for ``"segment"`` or gathered point sets for
+        ``"keypoints"``.
 
     Examples:
         >>> import tempfile
@@ -365,9 +338,8 @@ def _eager_reference(module: DetectionLitModule, task: str, image: Tensor) -> li
 def _op_types(model: onnx.ModelProto) -> set[str]:
     """Collect every op type in the graph, descending into subgraph attributes.
 
-    Subgraphs are walked because a suppression node hidden inside an ``If`` or ``Loop``
-    body would evade a top-level scan, and an absence claim that a nested node can evade
-    is not an absence claim.
+    Subgraphs are walked because a suppression node hidden inside an ``If`` or ``Loop`` body would evade a top-level
+    scan, and an absence claim that a nested node can evade is not an absence claim.
 
     Args:
         model: The loaded ONNX model.
@@ -460,11 +432,10 @@ def _default_opset(model: onnx.ModelProto) -> int:
 def _paired(rows: np.ndarray) -> np.ndarray:
     """Order detection rows so two backends pair them identically.
 
-    Rows tied on score may be emitted in either order by either backend without either
-    being wrong, so they are put into a total order over all columns. The keys are
-    rounded first: ordering on raw float32 keys re-introduces the same problem one level
-    down, because clustered coordinates differing by less than the backends' own noise
-    would sort differently on each side.
+    Rows tied on score may be emitted in either order by either backend without either being wrong, so they are put into
+    a total order over all columns. The keys are rounded first: ordering on raw float32 keys re-introduces the same
+    problem one level down, because clustered coordinates differing by less than the backends' own noise would sort
+    differently on each side.
 
     Args:
         rows: One image's detections, shape ``(N, 6)`` or ``(N, 7)``.
@@ -493,8 +464,8 @@ def exported(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFa
     image = torch.rand(1, 3, *_CANVAS, generator=torch.Generator().manual_seed(7))
     reference = _eager_reference(module, task, image)
 
-    # Exported through the shipped entry point rather than a `torch.onnx.export` call of
-    # this file's own, so the opset the gate certifies is the opset an operator gets.
+    # Exported through the shipped entry point rather than a `torch.onnx.export` call of this file's own, so the opset
+    # the gate certifies is the opset an operator gets.
     path = export_graph(graph, tmp / f"{task}.onnx", example=image)
     return _Exported(task=task, variant=variant, path=path, image=image, reference=reference)
 
@@ -502,11 +473,10 @@ def exported(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFa
 def test_e2e_graph_ops(exported: _Exported) -> None:
     """The exported E2E graph carries no suppression, does carry the ops it must, is static, and is at the pinned opset.
 
-    The absence of ``NonMaxSuppression`` is R1's deployment claim for the one-to-one
-    branch. It is asserted beside the presence of ``TopK`` — the ranking that stands in
-    for suppression — because an absence in a graph that never got as far as decoding
-    would be free. The opset assertion is what stops all of the above from silently
-    describing a different graph after a torch upgrade moves the exporter's default.
+    The absence of ``NonMaxSuppression`` is R1's deployment claim for the one-to-one branch. It is asserted beside the
+    presence of ``TopK`` — the ranking that stands in for suppression — because an absence in a graph that never got as
+    far as decoding would be free. The opset assertion is what stops all of the above from silently describing a
+    different graph after a torch upgrade moves the exporter's default.
     """
     model = onnx.load(str(exported.path))
     onnx.checker.check_model(model, full_check=True)
@@ -520,8 +490,8 @@ def test_e2e_graph_ops(exported: _Exported) -> None:
     if exported.task == "segment":
         assert "Einsum" in ops, "the segmentation graph does not carry the Eq. 7 mask assembly"
 
-    # One input: the anchor grid and strides are baked in as constants, so the graph is
-    # specific to a 128 px input and takes only the image (see the module docstring).
+    # One input: the anchor grid and strides are baked in as constants, so the graph is specific to a 128 px input and
+    # takes only the image (see the module docstring).
     assert len(model.graph.input) == 1, f"expected the image alone as input, got {len(model.graph.input)}"
     assert _static_shape(model.graph.input[0]) == (1, 3, *_CANVAS)
 
@@ -542,11 +512,10 @@ def test_e2e_export_matches_checkpoint(exported: _Exported) -> None:
     """The exported graph answers what the checkpoint-loaded module answers.
 
     Run under onnxruntime and compared against the eager decode of the module
-    :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returned, on the decoded
-    detection tuple rather than on raw logits. Each side's own descending-score order is
-    checked before anything is re-sorted, then rows are paired canonically: score ties
-    are genuine and the two backends may order tied rows differently without either
-    being wrong.
+    :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returned, on the decoded detection tuple rather than on raw
+    logits. Each side's own descending-score order is checked before anything is re-sorted, then rows are paired
+    canonically: score ties are genuine and the two backends may order tied rows differently without either being
+    wrong.
     """
     session = ort.InferenceSession(str(exported.path), providers=["CPUExecutionProvider"])
     produced = session.run(None, {session.get_inputs()[0].name: exported.image.numpy()})
@@ -556,18 +525,17 @@ def test_e2e_export_matches_checkpoint(exported: _Exported) -> None:
     box_columns = 5 if exported.task == "obb" else 4
     score_column = box_columns
 
-    # The fixture must be discriminative, or the comparison below proves nothing: if
-    # every score were tied, any pairing would match and the test would pass vacuously.
+    # The fixture must be discriminative, or the comparison below proves nothing: if every score were tied, any pairing
+    # would match and the test would pass vacuously.
     scores = reference[:, score_column]
     assert np.ptp(scores) > 0.05, f"{exported.task} scores span only {np.ptp(scores):.3g}; ranking is degenerate"
     widths = reference[:, 2] - reference[:, 0] if box_columns == 4 else reference[:, 2]
     assert (widths > 0).all(), f"{exported.task} produced boxes without interiors; masks would be empty"
 
-    # Descending score is the decoders' documented row order and the only ordering a
-    # consumer reading "the top detection" can rely on. It is asserted here rather than
-    # after `_paired`, which re-sorts both sides canonically and would pair a shuffled
-    # graph's rows up perfectly with the checkpoint's. Exact, no tolerance: each backend
-    # emits its own top-k in its own sorted order, so a violation is a real one.
+    # Descending score is the decoders' documented row order and the only ordering a consumer reading "the top
+    # detection" can rely on. It is asserted here rather than after `_paired`, which re-sorts both sides canonically and
+    # would pair a shuffled graph's rows up perfectly with the checkpoint's. Exact, no tolerance: each backend emits its
+    # own top-k in its own sorted order, so a violation is a real one.
     candidate_scores = candidate[:, score_column]
     assert np.all(np.diff(scores) <= 0), f"{exported.task}: the checkpoint's scores are not descending"
     assert np.all(np.diff(candidate_scores) <= 0), f"{exported.task}: the exported graph's scores are not descending"
@@ -606,9 +574,9 @@ def test_e2e_export_matches_checkpoint(exported: _Exported) -> None:
     if exported.task == "keypoints":
         points_reference = exported.reference[1].numpy()[0][order_reference]
         points_candidate = produced[1][0][order_candidate]
-        # A gather at the wrong anchor still returns finite, in-canvas coordinates, so
-        # the comparison needs the point sets to actually differ from one another --
-        # otherwise every permutation of them matches and the parity claim is vacuous.
+        # A gather at the wrong anchor still returns finite, in-canvas coordinates, so the comparison needs the point
+        # sets to actually differ from one another -- otherwise every permutation of them matches and the parity claim
+        # is vacuous.
         assert np.ptp(points_reference) > 1.0, "every decoded point set is identical; the comparison proves nothing"
         np.testing.assert_allclose(
             points_candidate,
@@ -621,18 +589,16 @@ def test_e2e_export_matches_checkpoint(exported: _Exported) -> None:
 class TestGraphConstruction:
     """What an export graph accepts and refuses before anything is traced.
 
-    The graphs above are exercised on the one canvas the gate exports at. These pin the
-    edges of the contract that canvas sits inside: which canvases are refused, and where
-    the wrapped model ends up.
+    The graphs above are exercised on the one canvas the gate exports at. These pin the edges of the contract that
+    canvas sits inside: which canvases are refused, and where the wrapped model ends up.
     """
 
     def test_rejects_canvas_head_cannot_tile(self) -> None:
         """A canvas not divisible by every head stride is refused at construction.
 
-        100 px is the case the divisibility rule exists for: floor division would hand
-        back a 96 px grid, and every prediction would be paired with the wrong pixel with
-        no error anywhere. The graph inherits the refusal from ``anchor_grid``, which is
-        what makes it a construction-time failure rather than a silently wrong export.
+        100 px is the case the divisibility rule exists for: floor division would hand back a 96 px grid, and every
+        prediction would be paired with the wrong pixel with no error anywhere. The graph inherits the refusal from
+        ``anchor_grid``, which is what makes it a construction-time failure rather than a silently wrong export.
         """
         deployed = Detector(_VARIANT, num_classes=_NUM_CLASSES).eval().deploy().eval()
 
@@ -642,10 +608,9 @@ class TestGraphConstruction:
     def test_segment_rejects_canvas_below_detection_cap(self) -> None:
         """A segmentation canvas yielding fewer anchors than ``k`` is refused at construction.
 
-        64 px yields 84 anchors against a 300-row output, so the decode would emit padding
-        rows carrying anchor index -1, rows with no coefficients of their own. The refusal
-        names the canvas and the cap at construction rather than leaving the graph to
-        answer for rows no anchor produced.
+        64 px yields 84 anchors against a 300-row output, so the decode would emit padding rows carrying anchor index
+        -1, rows with no coefficients of their own. The refusal names the canvas and the cap at construction rather
+        than leaving the graph to answer for rows no anchor produced.
         """
         deployed = Segmenter(_VARIANT, num_classes=_NUM_CLASSES).eval().deploy().eval()
 
@@ -655,9 +620,9 @@ class TestGraphConstruction:
     def test_oriented_small_canvas_padded_to_detection_cap(self) -> None:
         """An oriented graph on a canvas under ``k`` anchors still answers with ``k`` rows (CS-10).
 
-        64 px yields 84 anchors. The rotated top-k used to return 84 rows there, which
-        made the oriented graph the only one whose output length followed the canvas;
-        it now pads like the axis-aligned decoder, and the padding rows are all zero.
+        64 px yields 84 anchors. The rotated top-k used to return 84 rows there, which made the oriented graph the only
+        one whose output length followed the canvas; it now pads like the axis-aligned decoder, and the padding rows
+        are all zero.
         """
         deployed = OrientedDetector(_VARIANT, num_classes=_NUM_CLASSES).eval().deploy().eval()
         graph = OrientedExportGraph(deployed, canvas=(64, 64)).eval()
@@ -671,10 +636,9 @@ class TestGraphConstruction:
     def test_moves_wrapped_model_onto_requested_device(self) -> None:
         """``device`` places the wrapped model, not only the anchor buffers.
 
-        Buffers built on the requested device while the model stayed where the caller left
-        it is a graph that constructs cleanly and fails at its first forward with a device
-        mismatch. The meta device stands in for an accelerator here: it is available
-        everywhere, and nothing has to execute for the placement to be observable.
+        Buffers built on the requested device while the model stayed where the caller left it is a graph that
+        constructs cleanly and fails at its first forward with a device mismatch. The meta device stands in for an
+        accelerator here: it is available everywhere, and nothing has to execute for the placement to be observable.
         """
         deployed = Detector(_VARIANT, num_classes=_NUM_CLASSES).eval().deploy().eval()
 
@@ -684,8 +648,8 @@ class TestGraphConstruction:
         assert next(graph.deployed.parameters()).device.type == "meta"
 
 
-#: Multipliers of the small module the bridge tests build: deliberately no registry row,
-#: since the bridge rebuilds at a module's own numbers rather than a variant name.
+#: Multipliers of the small module the bridge tests build: deliberately no registry row, since the bridge rebuilds at a
+#: module's own numbers rather than a variant name.
 _RAW_SCALING = {"depth": 0.34, "width": 0.25, "max_channels": 64}
 
 
@@ -703,19 +667,18 @@ def _raw_module(task: str) -> DetectionLitModule:
 class TestGraphFromModule:
     """What the checkpoint-to-graph bridge builds, and which modules it refuses.
 
-    The parity tests above run the bridge on the gate's own route. These pin its
-    contract at the edges: the graph class per task, the strict key check in both
-    directions, the shape check behind it, and that the caller's module is left alone.
+    The parity tests above run the bridge on the gate's own route. These pin its contract at the edges: the graph class
+    per task, the strict key check in both directions, the shape check behind it, and that the caller's module is left
+    alone.
     """
 
     @pytest.mark.parametrize("task", ["detect", "segment", "obb", "keypoints"])
     def test_builds_task_graph_at_module_scaling(self, task: str) -> None:
         """Each task's module comes back as that task's graph, carrying the module's own weights.
 
-        The module is built at multipliers matching no registry row, so a bridge that
-        resolved a variant name instead of rebuilding at the module's numbers would
-        refuse it or load the wrong shapes. The first backbone weight is compared by
-        value to show the copy happened.
+        The module is built at multipliers matching no registry row, so a bridge that resolved a variant name instead of
+        rebuilding at the module's numbers would refuse it or load the wrong shapes. The first backbone weight is
+        compared by value to show the copy happened.
         """
         module = _raw_module(task)
 
@@ -728,8 +691,8 @@ class TestGraphFromModule:
     def test_graph_weights_copied_not_shared(self) -> None:
         """The graph owns its weights, so building it never touches the caller's module.
 
-        A shared view would move the module's backbone to the graph's device in place and
-        leave its one-to-many branch behind, a half-moved module the caller still holds.
+        A shared view would move the module's backbone to the graph's device in place and leave its one-to-many branch
+        behind, a half-moved module the caller still holds.
         """
         module = _raw_module("detect")
 
@@ -738,11 +701,11 @@ class TestGraphFromModule:
         assert next(graph.deployed.parameters()).device.type == "meta"
         assert next(module.parameters()).device.type == "cpu"
 
-    def test_unexpected_key_refused_naming_it(self) -> None:
+    def test_unexpected_key_refused_by_name(self) -> None:
         """A key the composite does not hold is refused, by name.
 
-        This is what ``strict=False`` used to hide: the stray entry would have been
-        skipped and the export would have gone ahead without whatever branch it belonged to.
+        This is what ``strict=False`` used to hide: the stray entry would have been skipped and the export would have
+        gone ahead without whatever branch it belonged to.
         """
         module = _raw_module("detect")
         module.register_buffer("stray", torch.zeros(1))
@@ -750,8 +713,12 @@ class TestGraphFromModule:
         with pytest.raises(ValueError, match=r"missing \[\]; unexpected \['stray'\]"):
             graph_from_module(module, canvas=_CANVAS)
 
-    def test_missing_key_refused_naming_it(self) -> None:
-        """A key the composite holds and the module does not supply is refused, by name."""
+    def test_missing_key_refused_by_name(self) -> None:
+        """A key the composite holds and the module does not supply is refused, by name.
+
+        Removing the classifier bias of the first one-to-one class stem leaves every other key matching, so the refusal
+        must name exactly that parameter and report nothing unexpected.
+        """
         module = _raw_module("detect")
         conv = module.head.o2o.cls_stems[0][-1]
         name = next(key for key, value in module.named_parameters() if value is conv.bias)
@@ -763,8 +730,8 @@ class TestGraphFromModule:
     def test_rle_flow_state_dropped_as_training_only(self) -> None:
         """A keypoint module's RLE flow weights are the one extra the check tolerates.
 
-        They are trained, so they ride in every keypoint checkpoint, and nothing at
-        inference reads them; refusing them would refuse every keypoint checkpoint.
+        They are trained, so they ride in every keypoint checkpoint, and nothing at inference reads them; refusing them
+        would refuse every keypoint checkpoint.
         """
         module = _raw_module("keypoints")
         assert any(key.startswith("rle_loss.") for key in module.state_dict())
@@ -776,8 +743,8 @@ class TestGraphFromModule:
     def test_shape_disagreement_refused(self) -> None:
         """Hyperparameters that disagree with the weights are refused rather than exported.
 
-        Every key matches here; only the class count recorded beside the weights is wrong,
-        so the composite is rebuilt one class short and its classifier shapes differ.
+        Every key matches here; only the class count recorded beside the weights is wrong, so the composite is rebuilt
+        one class short and its classifier shapes differ.
         """
         module = _raw_module("detect")
         module.hparams["num_classes"] = _NUM_CLASSES - 1

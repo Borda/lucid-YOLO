@@ -54,10 +54,9 @@ def has_gradient(module: nn.Module) -> bool:
 def tiny_module(task: str = "detect", *, max_channels: int = 256, **kwargs: Any) -> DetectionLitModule:
     """Build an n-scale module with a low channel cap for fast CPU tests.
 
-    ``kwargs`` reaches the constructor untouched, for the task-specific arguments a few
-    tasks require (``num_keypoints`` for ``"keypoints"``, which has no default because the
-    point count is the dataset's property rather than the model's). A caller that wants
-    per-task gains binds them in its own thin wrapper.
+    ``kwargs`` reaches the constructor untouched, for the task-specific arguments a few tasks require (``num_keypoints``
+    for ``"keypoints"``, which has no default because the point count is the dataset's property rather than the
+    model's). A caller that wants per-task gains binds them in its own thin wrapper.
 
     Examples:
         >>> tiny_module().task
@@ -75,11 +74,10 @@ def tiny_module(task: str = "detect", *, max_channels: int = 256, **kwargs: Any)
 def collate_unpacked(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list[Targets]]:
     """Collate, then restore the ``list[Targets]`` the module consumes.
 
-    No datamodule is attached to a bare-loader ``Trainer.fit`` run, so the transfer hook
-    that restores the transport form never fires; this wrapper runs the same collate ->
-    restore round-trip the datamodule performs in production (dequantizing the uint8
-    images and unpacking the targets) so the module receives its float images and ragged
-    target list.
+    No datamodule is attached to a bare-loader ``Trainer.fit`` run, so the transfer hook that restores the transport
+    form never fires; this wrapper runs the same collate -> restore round-trip the datamodule performs in production
+    (dequantizing the uint8 images and unpacking the targets) so the module receives its float images and ragged target
+    list.
 
     Examples:
         >>> import torch
@@ -106,6 +104,21 @@ def _rectangle_ring(box: Tensor) -> Tensor:
     return torch.tensor([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=torch.float32)
 
 
+def _random_boxes(num_boxes: int) -> Tensor:
+    """Draw ``num_boxes`` valid ``xyxy`` boxes: corners within 80 px, sides of 10 to 50 px.
+
+    Draws the corners first and the sizes second from the global torch RNG, an order the callers' later draws depend on.
+
+    Examples:
+        >>> boxes = _random_boxes(3)
+        >>> boxes.shape, bool((boxes[:, 2:] > boxes[:, :2]).all())
+        (torch.Size([3, 4]), True)
+    """
+    top_left = torch.rand(num_boxes, 2) * 80.0
+    size = torch.rand(num_boxes, 2) * 40.0 + 10.0
+    return torch.cat([top_left, top_left + size], dim=1)
+
+
 def segment_targets(num_boxes: int) -> Targets:
     """Build ``num_boxes`` valid ``xyxy`` targets, each with its own polygon ring.
 
@@ -116,9 +129,7 @@ def segment_targets(num_boxes: int) -> Targets:
         >>> targets.boxes.shape, len(targets.polygons)
         (torch.Size([2, 4]), 2)
     """
-    top_left = torch.rand(num_boxes, 2) * 80.0
-    size = torch.rand(num_boxes, 2) * 40.0 + 10.0
-    boxes = torch.cat([top_left, top_left + size], dim=1)
+    boxes = _random_boxes(num_boxes)
     labels = torch.randint(0, NUM_CLASSES, (num_boxes,))
     return Targets(boxes=boxes, labels=labels, polygons=[_rectangle_ring(box) for box in boxes])
 
@@ -126,9 +137,8 @@ def segment_targets(num_boxes: int) -> Targets:
 def oriented_targets(num_boxes: int, difficult: Tensor | None = None) -> Targets:
     """Build elongated, rotated ground truths with envelopes fitted to the same corners.
 
-    Elongation and rotation are load-bearing, not incidental: an axis-aligned or square
-    target sits at the stationary point of both angular terms, where a correctly wired
-    angle stem legitimately receives zero gradient.
+    Elongation and rotation are load-bearing, not incidental: an axis-aligned or square target sits at the stationary
+    point of both angular terms, where a correctly wired angle stem legitimately receives zero gradient.
 
     Examples:
         >>> targets = oriented_targets(2)
@@ -153,20 +163,18 @@ def oriented_targets(num_boxes: int, difficult: Tensor | None = None) -> Targets
 def keypoint_targets(num_boxes: int, visibility: Tensor | None = None) -> Targets:
     """Build boxes with one point set per instance, inside the canvas.
 
-    The points are placed independently of the boxes on purpose: nothing in the
-    objective ties a point to its own box's interior, and a fixture that put them
-    at box centres would let a decode that ignored the anchor grid look correct.
+    The points are placed independently of the boxes on purpose: nothing in the objective ties a point to its own box's
+    interior, and a fixture that put them at box centres would let a decode that ignored the anchor grid look correct.
 
     Examples:
         >>> targets = keypoint_targets(2)
         >>> targets.boxes.shape, targets.keypoints.shape, targets.keypoint_vis.shape
         (torch.Size([2, 4]), torch.Size([2, 3, 2]), torch.Size([2, 3]))
     """
-    top_left = torch.rand(num_boxes, 2) * 80.0
-    size = torch.rand(num_boxes, 2) * 40.0 + 10.0
+    boxes = _random_boxes(num_boxes)
     points = torch.rand(num_boxes, 3, 2) * float(160)
     return Targets(
-        boxes=torch.cat([top_left, top_left + size], dim=1),
+        boxes=boxes,
         labels=torch.randint(0, NUM_CLASSES, (num_boxes,)),
         keypoints=points,
         keypoint_vis=torch.full((num_boxes, 3), 2, dtype=torch.int64) if visibility is None else visibility,

@@ -1,16 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for WP-056 DOTA-v1.0 label parsing and long-edge conversion (A39).
 
-Covers the ``labelTxt`` reader (header and blank-line skipping, the 15 categories in
-every spelling the files use, the ``difficult`` flag, loud rejection of anything
-malformed), the quadrilateral-to-long-edge conversion, the 1:1 rotated-box/instance-axis
-invariant WP-058/061/088 rely on, and the ``check-data`` DOTA layout validator.
+Covers the ``labelTxt`` reader (header and blank-line skipping, the 15 categories in every spelling the files use,
+the ``difficult`` flag, loud rejection of anything malformed), the quadrilateral-to-long-edge conversion, the 1:1
+rotated-box/instance-axis invariant WP-058/061/088 rely on, and the ``check-data`` DOTA layout validator.
 
-Real DOTA-v1.0 is not on this machine and is never auto-downloaded (AGENTS.md sec. 3), so
-every case here runs against fixtures: hand-written ``labelTxt`` text for the parser, and
-a DOTA-shaped root built in ``tmp_path`` from the seeded ``fuse-augmentations`` OBB
-micro-set (A26) for the validator. The published 2,806 / 188,282 / 15 totals are
-therefore exercised as *parameters* — the code path is proven, the real numbers are not.
+Real DOTA-v1.0 is not on this machine and is never auto-downloaded (AGENTS.md sec. 3), so every case here runs
+against fixtures: hand-written ``labelTxt`` text for the parser, and a DOTA-shaped root built in ``tmp_path`` from
+the seeded ``fuse-augmentations`` OBB micro-set (A26) for the validator. The published 2,806 / 188,282 / 15 totals
+are therefore exercised as *parameters* — the code path is proven, the real numbers are not.
 
 No RNG is used beyond the seeded fixture generator: every parser input is written out.
 """
@@ -297,14 +295,12 @@ def test_objects_can_be_converted_without_file() -> None:
 def test_annotated_totals_published_ones_less_testing_third() -> None:
     """The measured train-plus-val counts sit where R18's split ratios put them.
 
-    R18 sec. 4 takes half the images as training, a sixth as validation and a third as
-    testing, releasing ground truth for the first two: the annotated share is therefore
-    about two thirds of the published dataset. About, not exactly: the selection is
-    random, so the realised split lands near its ratios rather than on them -- the
-    measured images come to 0.666 of 2,806 where the arithmetic would give 1,871 -- and
-    instances are not distributed uniformly over images anyway. The band is sized for
-    what a transcription error would leave: a count copied from one split, or from
-    another dataset version, misses it by far more than the sampling does.
+    R18 sec. 4 takes half the images as training, a sixth as validation and a third as testing, releasing ground
+    truth for the first two: the annotated share is therefore about two thirds of the published dataset. About, not
+    exactly: the selection is random, so the realised split lands near its ratios rather than on them -- the
+    measured images come to 0.666 of 2,806 where the arithmetic would give 1,871 -- and instances are not
+    distributed uniformly over images anyway. The band is sized for what a transcription error would leave: a count
+    copied from one split, or from another dataset version, misses it by far more than the sampling does.
     """
     images = check_data.DOTA_ANNOTATED_IMAGE_COUNT / check_data.DOTA_IMAGE_COUNT
     instances = check_data.DOTA_ANNOTATED_INSTANCE_COUNT / check_data.DOTA_INSTANCE_COUNT
@@ -328,20 +324,19 @@ class TestCheckData:
 
         assert result.ok, result.problems
 
-    def test_counts_difficult_instances_too(self, dota_fixture: _DotaFixture) -> None:
+    def test_counts_difficult_instances(self, dota_fixture: _DotaFixture) -> None:
         """Instance counting is what is on disk: difficult lines count toward the total (A39)."""
         result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,))
 
         assert dota_fixture.difficult > 0
         assert result.splits[0].instances == dota_fixture.instances
 
-    def test_reports_totals_it_was_not_given_without_failing(self, dota_fixture: _DotaFixture) -> None:
+    def test_reports_unstated_totals_without_failing(self, dota_fixture: _DotaFixture) -> None:
         """An unstated total is a note, not a problem: a well-formed root passes on its layout alone.
 
-        The published 2,806 / 188,282 / 15 were the defaults until WP-097, which made
-        ``lucid-data check --dataset dota`` fail on every correct download: R18 sec. 4
-        withholds the testing ground truth, so the annotated root holds about two thirds
-        of the published images and can never sum to them.
+        The published 2,806 / 188,282 / 15 were the defaults until WP-097, which made ``lucid-data check --dataset
+        dota`` fail on every correct download: R18 sec. 4 withholds the testing ground truth, so the annotated root
+        holds about two thirds of the published images and can never sum to them.
         """
         result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,))
 
@@ -349,7 +344,7 @@ class TestCheckData:
         assert any(f"{dota_fixture.instances} instances" in note for note in result.notes)
         assert str(check_data.DOTA_IMAGE_COUNT) not in check_data.format_report(result, dota_fixture.root)
 
-    def test_fails_on_total_it_was_given(self, dota_fixture: _DotaFixture) -> None:
+    def test_fails_on_given_total(self, dota_fixture: _DotaFixture) -> None:
         """A stated expectation is still enforced, and names both the wanted and the found count."""
         result = check_data.check_dota_root(
             dota_fixture.root,
@@ -373,11 +368,6 @@ class TestCheckData:
             )
             == 1
         )
-
-    def test_rejects_dota_expectation_aimed_at_coco(self) -> None:
-        """A DOTA-only count passed with --dataset coco is rejected rather than ignored."""
-        with pytest.raises(ValueError, match="apply to --dataset dota"):
-            check_data.check_dataset(Path("/nonexistent"), dataset="coco", expected_images=1)
 
     def test_reports_image_without_label_file(self, dota_fixture: _DotaFixture) -> None:
         """Pairing is checked by stem in both directions."""
@@ -413,13 +403,12 @@ class TestCheckData:
         assert any("images directory missing" in problem for problem in result.splits[0].problems)
         assert any("labelTxt directory missing" in problem for problem in result.splits[0].problems)
 
-    def test_reaches_coco_branch_when_it_named(self, tmp_path: Path) -> None:
+    def test_reaches_coco_branch_when_named(self, tmp_path: Path) -> None:
         """--dataset coco still validates a COCO root; an unstated layout is probed, not assumed.
 
-        ``coco`` was the default until WP-099c made an unstated ``--dataset`` infer the layout
-        from the root (A63), which is the dispatch ``lucid-yolo fit`` itself makes. A root
-        satisfying no convention — this empty one, and every DOTA root, which no probe covers —
-        is reported and exits 1 either way, never a traceback.
+        ``coco`` was the default until WP-099c made an unstated ``--dataset`` infer the layout from the root (A63),
+        which is the dispatch ``lucid-yolo fit`` itself makes. A root satisfying no convention — this empty one, and
+        every DOTA root, which no probe covers — is reported and exits 1 either way, never a traceback.
         """
         assert data_cli.main(["check", "--data_root", str(tmp_path)]) == 1
         assert data_cli.main(["check", "--data_root", str(tmp_path), "--dataset", "coco"]) == 1

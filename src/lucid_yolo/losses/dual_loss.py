@@ -1,50 +1,39 @@
 # SPDX-License-Identifier: Apache-2.0
 """Dual-branch detection loss composition for the anchor-free head (WP-028).
 
-Transcribed by hand from the reproduction's technical specification sections
-3.2.1 and 3.3.2 (R1) and the consistent dual-assignment lineage (R6). The
-detection head carries two branches that share neck features:
+Transcribed by hand from the reproduction's technical specification sections 3.2.1 and 3.3.2 (R1) and the consistent
+dual-assignment lineage (R6). The detection head carries two branches that share neck features:
 
-- the **one-to-many** (o2m) branch trains with dense supervision — a
-  Small-Target-Aware assignment with ``topk = 10`` (many positive anchors per
-  ground truth), which drives fast, high-recall learning; and
+- the **one-to-many** (o2m) branch trains with dense supervision — a Small-Target-Aware assignment with ``topk = 10``
+  (many positive anchors per ground truth), which drives fast, high-recall learning; and
 - the **one-to-one** (o2o) branch trains with a *unique* assignment — a
-  :class:`~lucid_yolo.assign.one_to_one.UniqueAssigner` (``topk = 7`` candidate
-  set reduced by a ``topk2 = 1`` filter to exactly one positive per ground
-  truth), which learns NMS-free, one-prediction-per-object outputs.
+  :class:`~lucid_yolo.assign.one_to_one.UniqueAssigner` (``topk = 7`` candidate set reduced by a ``topk2 = 1`` filter to
+  exactly one positive per ground truth), which learns NMS-free, one-prediction-per-object outputs.
 
 :class:`DualBranchLoss` scores each branch with its own
-:class:`~lucid_yolo.losses.detection_loss.DetectionBranchLoss` (both sharing the
-same gains) against its own assignment, then combines the two totals::
+:class:`~lucid_yolo.losses.detection_loss.DetectionBranchLoss` (both sharing the same gains) against its own assignment,
+then combines the two totals::
 
     L = alpha * L_o2m + (1 - alpha) * L_o2o
 
-``alpha`` is a plain, settable attribute — static here (default ``0.5``). The
-epoch-scheduled ramp ``(0.8, 0.2) -> (0.1, 0.9)`` (R1 Eq. 2-3) is out of scope
-for this work package: it lands as the WP-035 progressive-loss hook, which sets
-this attribute per epoch. Exposing ``alpha`` as a bare attribute is exactly the
-seam that hook writes to. A compiled training step (WP-184) cannot read that
-float inside its traced region without Dynamo guarding on the value and
-recompiling at every epoch of the schedule, so :meth:`DualBranchLoss.__call__`
-also takes the weight as a keyword ``alpha`` tensor built outside the region
-(WP-187); the attribute stays the schedule's record, while the output records
-the weight actually used.
+``alpha`` is a plain, settable attribute — static here (default ``0.5``). The epoch-scheduled ramp
+``(0.8, 0.2) -> (0.1, 0.9)`` (R1 Eq. 2-3) is out of scope for this work package: it lands as the WP-035
+progressive-loss hook, which sets this attribute per epoch. Exposing ``alpha`` as a bare attribute is exactly the seam
+that hook writes to. A compiled training step (WP-184) cannot read that float inside its traced region without Dynamo
+guarding on the value and recompiling at every epoch of the schedule, so :meth:`DualBranchLoss.__call__` also takes
+the weight as a keyword ``alpha`` tensor built outside the region (WP-187); the attribute stays the schedule's record,
+while the output records the weight actually used.
 
-Oriented ground truths (WP-088) ride through on the optional ``gt_rboxes`` argument
-of :meth:`DualBranchLoss.__call__`, which is forwarded unchanged to both assigners.
-It reaches **only** their candidate filter (A25): with it, an anchor is eligible when
-its centre lies inside the rotated ground truth rather than inside the axis-aligned
-envelope. The rotated *objective* is not assembled here — it is composed by the
-oriented training step from :mod:`lucid_yolo.losses.oriented_loss`, against the very
-assignments this class returns.
+Oriented ground truths (WP-088) ride through on the optional ``gt_rboxes`` argument of
+:meth:`DualBranchLoss.__call__`, which is forwarded unchanged to both assigners. It reaches **only** their candidate
+filter (A25): with it, an anchor is eligible when its centre lies inside the rotated ground truth rather than inside
+the axis-aligned envelope. The rotated *objective* is not assembled here — it is composed by the oriented training step
+from :mod:`lucid_yolo.losses.oriented_loss`, against the very assignments this class returns.
 
-The two assigners are exposed as :attr:`DualBranchLoss.o2m_assigner` and
-:attr:`DualBranchLoss.o2o_assigner` so callers can inspect or reconfigure the
-assignment independently of the loss. Both consume per-anchor class
-*probabilities*, so :meth:`DualBranchLoss.__call__` maps each branch's raw
-logits through a sigmoid for the assigner while feeding the raw logits to the
-loss; the assigner runs under ``no_grad``, so this mapping never carries a
-gradient.
+The two assigners are exposed as :attr:`DualBranchLoss.o2m_assigner` and :attr:`DualBranchLoss.o2o_assigner` so callers
+can inspect or reconfigure the assignment independently of the loss. Both consume per-anchor class *probabilities*, so
+:meth:`DualBranchLoss.__call__` maps each branch's raw logits through a sigmoid for the assigner while feeding the raw
+logits to the loss; the assigner runs under ``no_grad``, so this mapping never carries a gradient.
 """
 
 from __future__ import annotations
@@ -87,28 +76,22 @@ class BranchPrediction(NamedTuple):
 class DualLossOutput:
     """Combined dual-branch loss, its two per-branch breakdowns, and both assignments.
 
-    ``total`` is the ``alpha``-weighted combination of the two branch totals;
-    the ``o2m`` and ``o2o`` fields carry each branch's full
-    :class:`~lucid_yolo.losses.detection_loss.DetectionLossOutput` (its pre-gain
-    ``box``/``cls``/``l1`` terms and gain-weighted ``total``), and ``alpha`` is
-    the branch weight used for this call.
+    ``total`` is the ``alpha``-weighted combination of the two branch totals; the ``o2m`` and ``o2o`` fields carry each
+    branch's full :class:`~lucid_yolo.losses.detection_loss.DetectionLossOutput` (its pre-gain ``box``/``cls``/``l1``
+    terms and gain-weighted ``total``), and ``alpha`` is the branch weight used for this call.
 
-    The two :class:`~lucid_yolo.assign.tal.AssignResult` values are returned rather
-    than kept private because any *other* term supervising the same positives —
-    the WP-087 instance-mask loss is the first — must score the ground truth each
-    anchor was actually assigned to here. Recomputing the assignment at the call
-    site would create a second selection path free to disagree with this one, and
-    a mask scored against the wrong (but plausible) instance is invisible in the
-    loss value.
+    The two :class:`~lucid_yolo.assign.tal.AssignResult` values are returned rather than kept private because any
+    *other* term supervising the same positives — the WP-087 instance-mask loss is the first — must score the ground
+    truth each anchor was actually assigned to here. Recomputing the assignment at the call site would create a second
+    selection path free to disagree with this one, and a mask scored against the wrong (but plausible) instance is
+    invisible in the loss value.
 
     Attributes:
-        total: ``alpha * o2m.total + (1 - alpha) * o2o.total``; the scalar to
-            backpropagate.
+        total: ``alpha * o2m.total + (1 - alpha) * o2o.total``; the scalar to backpropagate.
         o2m: One-to-many branch loss output (dense ``topk = 10`` assignment).
         o2o: One-to-one branch loss output (unique ``topk = 7 -> 1`` assignment).
-        alpha: Branch weight applied to the o2m total (o2o gets ``1 - alpha``) —
-            the :attr:`DualBranchLoss.alpha` float when no override is supplied,
-            otherwise the override tensor itself, without a read back to the host.
+        alpha: Branch weight applied to the o2m total (o2o gets ``1 - alpha``) — the :attr:`DualBranchLoss.alpha` float
+            when no override is supplied, otherwise the override tensor itself, without a read back to the host.
         o2m_assign: The dense assignment the o2m branch was scored against.
         o2o_assign: The unique assignment the o2o branch was scored against.
     """
@@ -124,28 +107,23 @@ class DualLossOutput:
 class DualBranchLoss:
     """Compose the one-to-many and one-to-one detection-branch losses.
 
-    Holds two :class:`~lucid_yolo.losses.detection_loss.DetectionBranchLoss`
-    instances (identical gains), a dense o2m assigner
-    (:class:`~lucid_yolo.assign.stal.SmallTargetAssigner`, ``topk = 10``), and a
-    unique o2o assigner (:class:`~lucid_yolo.assign.one_to_one.UniqueAssigner`,
-    ``topk = 7`` reduced to one). The object is stateless apart from its gains,
-    assigners, and the settable :attr:`alpha`, so a single instance is reused
-    across the training run. It is coordinate-scale agnostic in the same way as
-    the per-branch loss: predicted and ground-truth boxes only need to share a
-    frame (see :class:`~lucid_yolo.losses.detection_loss.DetectionBranchLoss`).
+    Holds two :class:`~lucid_yolo.losses.detection_loss.DetectionBranchLoss` instances (identical gains), a dense o2m
+    assigner (:class:`~lucid_yolo.assign.stal.SmallTargetAssigner`, ``topk = 10``), and a unique o2o assigner
+    (:class:`~lucid_yolo.assign.one_to_one.UniqueAssigner`, ``topk = 7`` reduced to one). The object is stateless apart
+    from its gains, assigners, and the settable :attr:`alpha`, so a single instance is reused across the training run.
+    It is coordinate-scale agnostic in the same way as the per-branch loss: predicted and ground-truth boxes only need
+    to share a frame (see :class:`~lucid_yolo.losses.detection_loss.DetectionBranchLoss`).
 
     Args:
         box_gain: Weight on each branch's Complete-IoU term (A13 default ``7.5``).
         cls_gain: Weight on each branch's classification term (A13 default ``0.5``).
         l1_gain: Weight on each branch's L1 box term (A13 default ``6.0``).
         o2m_topk: Candidate count for the dense o2m assignment (default ``10``).
-        o2o_topk: Candidate-set size for the o2o assignment before the unique
-            ``topk2 = 1`` reduction (default ``7``).
+        o2o_topk: Candidate-set size for the o2o assignment before the unique ``topk2 = 1`` reduction (default ``7``).
         alpha: Initial branch weight for ``L = alpha * L_o2m + (1 - alpha) *
             L_o2o`` (static default ``0.5``; the WP-035 schedule sets it per
             epoch).
-        s_min: Small-target surrogate threshold shared by both assigners (the
-            smallest stride, ``8.0`` at 640 input).
+        s_min: Small-target surrogate threshold shared by both assigners (the smallest stride, ``8.0`` at 640 input).
         s_ref: Small-target surrogate replacement size shared by both assigners
             (the next stride, ``16.0`` at 640 input).
         fused_assignment: Request the optional CUDA assignment passes on both branches.
@@ -216,35 +194,25 @@ class DualBranchLoss:
             gt_boxes: ``(B, N, 4)`` padded ground-truth boxes in ``xyxy`` pixels.
             gt_labels: ``(B, N)`` long class ids; padded slots are ignored.
             gt_mask: ``(B, N)`` bool marking real ground truths.
-            strides: Optional ``(A,)`` per-anchor level strides, forwarded to
-                both branch losses so their L1 terms are measured in stride
-                units (A13 revision, WP-078). The training path always passes
-                strides.
-            gt_rboxes: Optional ``(B, N, 5)`` rotated ground truths in the
-                long-edge convention, entry ``(b, n)`` describing the same object
-                as ``gt_boxes[b, n]``. Forwarded verbatim to **both** assigners,
-                where it switches candidacy to point-in-rotated-rect containment
-                (WP-061, A25) and nothing else: the IoU, the alignment metric, the
-                targets and the weights keep running on the axis-aligned
-                envelopes. Omitted (the default) leaves the assignment, and
-                therefore every tensor operation on this path, exactly as it was —
+            strides: Optional ``(A,)`` per-anchor level strides, forwarded to both branch losses so their L1 terms are
+                measured in stride units (A13 revision, WP-078). The training path always passes strides.
+            gt_rboxes: Optional ``(B, N, 5)`` rotated ground truths in the long-edge convention, entry ``(b, n)``
+                describing the same object as ``gt_boxes[b, n]``. Forwarded verbatim to **both** assigners, where it
+                switches candidacy to point-in-rotated-rect containment (WP-061, A25) and nothing else: the IoU, the
+                alignment metric, the targets and the weights keep running on the axis-aligned envelopes. Omitted (the
+                default) leaves the assignment, and therefore every tensor operation on this path, exactly as it was —
                 which is what keeps the detection objective bit-identical.
-            alpha: Optional 0-d ``float64`` tensor carrying the branch weight for
-                this call in place of :attr:`alpha`. The compiled detection step
-                (WP-184) passes it because a Python float read inside the traced
-                region is a Dynamo guard on its value, and the WP-035 schedule
-                changes it every epoch — one recompile per epoch until
-                ``cache_size_limit`` dropped the region to eager (WP-187). The
-                blend casts it to each branch total's dtype after forming
-                ``1 - alpha`` in double, which is exactly the arithmetic the
-                Python-float form does, so the total is bit-identical either
-                way. Omitted (the default) blends with the attribute.
+            alpha: Optional 0-d ``float64`` tensor carrying the branch weight for this call in place of :attr:`alpha`.
+                The compiled detection step (WP-184) passes it because a Python float read inside the traced region is
+                a Dynamo guard on its value, and the WP-035 schedule changes it every epoch — one recompile per epoch
+                until ``cache_size_limit`` dropped the region to eager (WP-187). The blend casts it to each branch
+                total's dtype after forming ``1 - alpha`` in double, which is exactly the arithmetic the Python-float
+                form does, so the total is bit-identical either way. Omitted (the default) blends with the attribute.
 
         Returns:
             A :class:`DualLossOutput` with the combined ``total``, each branch's
-            :class:`~lucid_yolo.losses.detection_loss.DetectionLossOutput`, the
-            ``alpha`` used, and both branches' assignments (so a mask term can
-            supervise exactly these positives instead of assigning again).
+            :class:`~lucid_yolo.losses.detection_loss.DetectionLossOutput`, the ``alpha`` used, and both branches'
+            assignments (so a mask term can supervise exactly these positives instead of assigning again).
 
         Examples:
             ```pycon

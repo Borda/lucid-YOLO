@@ -1,31 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 """Score a loaded checkpoint on the COCO protocol its task defines, and return the numbers.
 
-:func:`score_coco` is the Python door to the dual-path acceptance protocol: the same
-annotation load, letterboxed batching, single forward pass per batch and E2E-plus-NMS
-decode that ``lucid-eval`` runs for a ``detect``, ``segment`` or ``keypoints``
-checkpoint, handed back as a :class:`CocoScore` rather than printed. The command's two
-COCO runners, :func:`lucid_yolo.eval.detect_eval.run` and
-:func:`lucid_yolo.eval.pose_eval.run`, are thin wrappers over the same two private
-stages, so a caller in a notebook and an operator at a terminal cannot be scored by
-different code.
+:func:`score_coco` is the Python door to the dual-path acceptance protocol: the same annotation load, letterboxed
+batching, single forward pass per batch and E2E-plus-NMS decode that ``lucid-eval`` runs for a ``detect``, ``segment``
+or ``keypoints`` checkpoint, handed back as a :class:`CocoScore` rather than printed. The command's two COCO runners,
+:func:`lucid_yolo.eval.detect_eval.run` and :func:`lucid_yolo.eval.pose_eval.run`, are thin wrappers over the same two
+private stages, so a caller in a notebook and an operator at a terminal cannot be scored by different code.
 
-The stages are split where the command needs to speak. :func:`_prepare_coco_run` does
-everything that can fail before the expensive part — reads the ground truth, resolves
-the device, builds the evaluator — and :func:`_score_run` is the expensive part. A
-runner prints its banner between the two, so an operator learns how many images and
-which device before minutes of scoring rather than after; the library path calls both
-with nothing in between and prints nothing.
+The stages are split where the command needs to speak. :func:`_prepare_coco_run` does everything that can fail before
+the expensive part — reads the ground truth, resolves the device, builds the evaluator — and :func:`_score_run` is
+the expensive part. A runner prints its banner between the two, so an operator learns how many images and which device
+before minutes of scoring rather than after; the library path calls both with nothing in between and prints nothing.
 
-Which protocol applies is the checkpoint's property, the rule ``lucid-eval`` follows:
-a ``segment`` checkpoint scores masks unless ``masks=False``, a ``keypoints`` checkpoint
-is scored against COCO's person-keypoints file with the OKS sigma table, and an ``obb``
-checkpoint is refused, because rotated mAP over tiles is a different protocol
+Which protocol applies is the checkpoint's property, the rule ``lucid-eval`` follows: a ``segment`` checkpoint scores
+masks unless ``masks=False``, a ``keypoints`` checkpoint is scored against COCO's person-keypoints file with the OKS
+sigma table, and an ``obb`` checkpoint is refused, because rotated mAP over tiles is a different protocol
 (:func:`lucid_yolo.eval.rotated_eval.run`).
 
-Provenance: R1 Table 7, R1 sec. 4.4 (dual-path protocol), R1 Table S9 (segmentation
-protocol), R12 (COCO keypoint protocol and the OKS sigma table). Assumptions: A9, A10,
-A37.
+Provenance: R1 Table 7, R1 sec. 4.4 (dual-path protocol), R1 Table S9 (segmentation protocol), R12 (COCO keypoint
+protocol and the OKS sigma table). Assumptions: A9, A10, A37.
 """
 
 from __future__ import annotations
@@ -60,21 +53,19 @@ if TYPE_CHECKING:
 
 __all__ = ["CocoScore", "score_coco"]
 
-#: Points in COCO's person schema, and so in the keypoint protocol's ground truth, its
-#: sigma table and any checkpoint it can score.
+#: Points in COCO's person schema, and so in the keypoint protocol's ground truth, its sigma table and any checkpoint
+#: it can score.
 _COCO_PERSON_POINTS = len(COCO_KEYPOINT_OKS_SIGMAS)
 
-#: Checkpoint tasks the COCO protocol scores. ``obb`` is absent on purpose: rotated mAP
-#: over tiles merged back onto source images is :mod:`lucid_yolo.eval.rotated_eval`.
+#: Checkpoint tasks the COCO protocol scores. ``obb`` is absent on purpose: rotated mAP over tiles merged back onto
+#: source images is :mod:`lucid_yolo.eval.rotated_eval`.
 _COCO_TASKS = ("detect", "segment", "keypoints")
 
-#: Images per forward pass when the caller does not choose; ``lucid-eval``'s own
-#: default for every COCO task.
+#: Images per forward pass when the caller does not choose; ``lucid-eval``'s own default for every COCO task.
 _DEFAULT_BATCH_SIZE = 32
 
-#: Annotation file under ``<data_root>/annotations/`` per task. A keypoint checkpoint
-#: is one category, and scored against the 80-category instances file its mAP would be
-#: divided by eighty (see :mod:`lucid_yolo.eval.pose_eval`).
+#: Annotation file under ``<data_root>/annotations/`` per task. A keypoint checkpoint is one category, and scored
+#: against the 80-category instances file its mAP would be divided by eighty (see :mod:`lucid_yolo.eval.pose_eval`).
 _ANNOTATION_FILES = {
     "detect": "instances_val2017.json",
     "segment": "instances_val2017.json",
@@ -90,11 +81,10 @@ class CocoScore:
     """The dual-path COCO report of one checkpoint, as numbers rather than printed text.
 
     Attributes:
-        report: ``{"e2e": stats, "nms": stats}``. Each ``stats`` holds the twelve COCO
-            box statistics under their bare names (``map`` is mAP50-95, then ``map_50``,
-            ``map_75`` and the size and recall breakdowns), plus the twelve ``segm_``
-            mask statistics for a segmentation checkpoint scored with masks, or the ten
-            ``oks_`` keypoint statistics for a keypoint checkpoint.
+        report: ``{"e2e": stats, "nms": stats}``. Each ``stats`` holds the twelve COCO box statistics under their bare
+            names (``map`` is mAP50-95, then ``map_50``, ``map_75`` and the size and recall breakdowns), plus the
+            twelve ``segm_`` mask statistics for a segmentation checkpoint scored with masks, or the ten ``oks_``
+            keypoint statistics for a keypoint checkpoint.
         images: How many images were scored, after any ``limit``.
         seconds: Wall time of the scoring pass, excluding the annotation load.
 
@@ -115,20 +105,15 @@ class CocoScore:
 class _SegmentationForward(nn.Module):
     """Present a segmentation checkpoint under the forward contract the evaluator expects.
 
-    :meth:`DetectionLitModule.forward` returns the detection head's output alone
-    — deliberately, since that is what the E2E decode, the epoch metric and the
-    export path all ask for. The evaluator decides to score masks structurally,
-    by whether the forward returns a
-    :class:`~lucid_yolo.models.build.SegmentOutput`, so handing it the module
-    unwrapped would silently produce a *detection* report from a segmentation
-    checkpoint: no prototypes, no predicted masks, twelve keys, no error, and the
-    cost of the ground-truth masks paid for nothing.
+    :meth:`DetectionLitModule.forward` returns the detection head's output alone — deliberately, since that is what
+    the E2E decode, the epoch metric and the export path all ask for. The evaluator decides to score masks
+    structurally, by whether the forward returns a :class:`~lucid_yolo.models.build.SegmentOutput`, so handing it
+    the module unwrapped would silently produce a *detection* report from a segmentation checkpoint: no prototypes,
+    no predicted masks, twelve keys, no error, and the cost of the ground-truth masks paid for nothing.
 
-    The wrapped module is registered as a child, so ``.to()`` and ``.eval()``
-    reach it, and the forward delegates to the module's own
-    :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward_segmentation` rather
-    than recomposing the backbone, neck and mask branches here — that composition
-    exists once, on purpose.
+    The wrapped module is registered as a child, so ``.to()`` and ``.eval()`` reach it, and the forward delegates
+    to the module's own :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward_segmentation` rather than
+    recomposing the backbone, neck and mask branches here — that composition exists once, on purpose.
 
     Args:
         module: A checkpoint-loaded module whose ``task`` is ``"segment"``.
@@ -192,12 +177,11 @@ class _CocoRun:
 def _require_coco_person_schema(module: DetectionLitModule) -> int:
     """Return a keypoint checkpoint's point count, refusing any ``K`` but COCO's 17.
 
-    Refused rather than scored on an invented sigma table. This protocol's ground truth is
-    COCO's 17-point person schema, so a checkpoint predicting some other ``K`` has no
-    correspondence to it at all -- point ``i`` of the prediction is not point ``i`` of the
-    annotation, and R12's sigmas measure annotator variance on joints that are not the ones
-    being predicted (A67 makes the same argument for the synthetic symbol schema, which is
-    scored by its own gate on its own uniform sigma, never here).
+    Refused rather than scored on an invented sigma table. This protocol's ground truth is COCO's 17-point person
+    schema, so a checkpoint predicting some other ``K`` has no correspondence to it at all -- point ``i`` of the
+    prediction is not point ``i`` of the annotation, and R12's sigmas measure annotator variance on joints that are
+    not the ones being predicted (A67 makes the same argument for the synthetic symbol schema, which is scored by
+    its own gate on its own uniform sigma, never here).
 
     Args:
         module: A ``keypoints`` checkpoint module.
@@ -278,9 +262,8 @@ def _prepare_coco_run(
     """Build everything a scoring pass needs, without running it.
 
     Reads the ground truth (with masks and keypoints as asked), cuts it to ``limit``, resolves the device and builds the
-    evaluator. The evaluator always carries COCO's sigma table, which only a keypoint
-    checkpoint's points ever reach; a segmentation one with ``masks`` is wrapped so its
-    forward returns the mask branch too.
+    evaluator. The evaluator always carries COCO's sigma table, which only a keypoint checkpoint's points ever reach;
+    a segmentation one with ``masks`` is wrapped so its forward returns the mask branch too.
 
     Args:
         module: The eval-mode module.
@@ -369,11 +352,9 @@ def score_coco(
 ) -> CocoScore:
     """Score a checkpoint on COCO val2017 through both decode paths and return the numbers.
 
-    The protocol is the one ``lucid-eval`` runs, chosen by the module's own ``task``:
-    box mAP for ``detect``, box plus ``segm_`` mask mAP for ``segment`` (box only with
-    ``masks=False``), box plus ``oks_`` keypoint mAP against
-    ``person_keypoints_val2017.json`` for ``keypoints``. Nothing is printed and no file
-    is written.
+    The protocol is the one ``lucid-eval`` runs, chosen by the module's own ``task``: box mAP for ``detect``, box
+    plus ``segm_`` mask mAP for ``segment`` (box only with ``masks=False``), box plus ``oks_`` keypoint mAP against
+    ``person_keypoints_val2017.json`` for ``keypoints``. Nothing is printed and no file is written.
 
     Args:
         module: An eval-mode module, as
@@ -398,11 +379,10 @@ def score_coco(
         The two paths' statistics, the scored image count and the scoring time.
 
     Raises:
-        ValueError: If the module's task is not ``detect``, ``segment`` or
-            ``keypoints``; if a keypoint checkpoint's ``K`` is not COCO's 17; if
-            ``limit``, ``batch_size``, ``img_size`` or ``eval_backend`` is outside its
-            domain; if ``data_root`` is missing while an override is; or if ``device``
-            names a backend this machine does not have.
+        ValueError: If the module's task is not ``detect``, ``segment`` or ``keypoints``; if a keypoint checkpoint's
+            ``K`` is not COCO's 17; if ``limit``, ``batch_size``, ``img_size`` or ``eval_backend`` is outside its
+            domain; if ``data_root`` is missing while an override is; or if ``device`` names a backend this machine
+            does not have.
 
     Examples:
         ```pycon

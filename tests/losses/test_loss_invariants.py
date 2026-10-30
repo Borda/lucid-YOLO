@@ -1,29 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """Invariant gate for the detection objective (WP-082).
 
-These tests exist because of what the Det-smoke tier runs cost. WP-078 (the L1 term
-measured in pixels while its gain is calibrated for stride units) survived 474
-tests, five green goldens, 96% line coverage, and three full COCO training runs.
-It never crashed, never produced a NaN, never changed a tensor shape. It was a
-*semantic* defect, and a suite that checks shapes and finiteness is structurally
-blind to those.
+These tests exist because of what the Det-smoke tier runs cost. WP-078 (the L1 term measured in pixels while its gain is
+calibrated for stride units) survived 474 tests, five green goldens, 96% line coverage, and three full COCO training
+runs. It never crashed, never produced a NaN, never changed a tensor shape. It was a *semantic* defect, and a suite that
+checks shapes and finiteness is structurally blind to those.
 
 Two invariants pin it:
 
-* **frame** — passing strides must divide the L1 term by exactly the positive
-  anchor's stride. This pins the coordinate frame itself, independently of what
-  the predictions happen to be, and is the precise guard.
-* **scale** — on a state whose boxes are essentially correct, the L1 term must be
-  a fraction of a stride. In the pixel frame the same state reads 8x larger.
+* **frame** — passing strides must divide the L1 term by exactly the positive anchor's stride. This pins the coordinate
+  frame itself, independently of what the predictions happen to be, and is the precise guard.
+* **scale** — on a state whose boxes are essentially correct, the L1 term must be a fraction of a stride. In the pixel
+  frame the same state reads 8x larger.
 
-A note on what is deliberately *not* tested here: an absolute bound on any one
-term's share of the objective. Measured on a converged state the L1 share is
-10.7% in the broken frame against 1.5% in the correct one — both comfortably
-under any threshold a reader would accept, so such a test would look like
-protection while catching nothing. The 97.1% share that WP-078 actually produced
-came from *unconverged* boxes with large pixel errors, a state no cheap fixture
-reproduces faithfully. The ratio invariant above catches the defect at its
-source instead.
+A note on what is deliberately *not* tested here: an absolute bound on any one term's share of the objective. Measured
+on a converged state the L1 share is 10.7% in the broken frame against 1.5% in the correct one — both comfortably under
+any threshold a reader would accept, so such a test would look like protection while catching nothing. The 97.1% share
+that WP-078 actually produced came from *unconverged* boxes with large pixel errors, a state no cheap fixture reproduces
+faithfully. The ratio invariant above catches the defect at its source instead.
 """
 
 from __future__ import annotations
@@ -37,27 +31,25 @@ from lucid_yolo.models.heads.detect import decode_ltrb
 _NUM_CLASSES = 6
 _IMG_SIZE = 128
 
-#: Ceiling on the raw (pre-gain) L1 term for a state whose boxes are essentially
-#: correct. Stride-unit L1 measures 0.75 there; the pixel frame reads 5.99 on the
-#: identical predictions, so 2.0 separates them with room on both sides.
+#: Ceiling on the raw (pre-gain) L1 term for a state whose boxes are essentially correct. Stride-unit L1 measures 0.75
+#: there; the pixel frame reads 5.99 on the identical predictions, so 2.0 separates them with room on both sides.
 _MAX_CONVERGED_L1 = 2.0
 
-#: Offset applied to the encoded distances, in stride units, so the L1 term is
-#: non-zero without making the boxes wrong enough to collapse the IoU weighting.
+#: Offset applied to the encoded distances, in stride units, so the L1 term is non-zero without making the boxes wrong
+#: enough to collapse the IoU weighting.
 _LTRB_OFFSET = 0.2
 
 
 def _converged_state() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Build a prediction state resembling a partially trained model.
 
-    Balance cannot be measured at random initialization: alignment weights carry
-    ``IoU ** beta`` with beta 6, so an untrained head's near-zero overlap drives
-    every weight to ~1e-13 and the box and L1 terms read exactly zero no matter
-    how the loss is scaled. The defect this file guards against only surfaces once
-    boxes are roughly right and L1 is the term still carrying weight.
+    Balance cannot be measured at random initialization: alignment weights carry ``IoU ** beta`` with beta 6, so an
+    untrained head's near-zero overlap drives every weight to ~1e-13 and the box and L1 terms read exactly zero no
+    matter how the loss is scaled. The defect this file guards against only surfaces once boxes are roughly right and
+    L1 is the term still carrying weight.
 
-    Every anchor is therefore made to predict one ground-truth box, offset by a
-    fifth of a stride, with class logits confident at the true class.
+    Every anchor is therefore made to predict one ground-truth box, offset by a fifth of a stride, with class logits
+    confident at the true class.
 
     Returns:
         ``(logits, ltrb, anchor_points, strides, gt_boxes, gt_labels)``.
@@ -125,15 +117,12 @@ def test_pixel_frame_l1_would_trip_scale_guard() -> None:
     assert _l1_term(None) > _MAX_CONVERGED_L1
 
 
-@pytest.mark.parametrize(
-    "stride",
-    [pytest.param(8.0, id="p3"), pytest.param(16.0, id="p4"), pytest.param(32.0, id="p5")],
-)
+@pytest.mark.parametrize("stride", [8.0, 16.0, 32.0])
 def test_l1_term_measured_in_stride_units(stride: float) -> None:
     """The stride-normalized L1 term scales as 1/stride against the pixel frame (WP-078 guard).
 
-    Pins the coordinate frame directly: whatever the predictions happen to be,
-    passing strides must divide the term by exactly that stride.
+    Pins the coordinate frame directly: whatever the predictions happen to be, passing strides must divide the term by
+    exactly that stride. The three strides are the P3, P4 and P5 pyramid levels.
     """
     generator = torch.Generator().manual_seed(0)
     anchor_points = torch.tensor([[4.0, 4.0]])

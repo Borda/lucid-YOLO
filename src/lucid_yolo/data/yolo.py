@@ -1,98 +1,83 @@
 # SPDX-License-Identifier: Apache-2.0
 """YOLO-format dataset reading: a ``data.yaml`` plus a tree of label text files (WP-099).
 
-The format is a directory convention rather than a schema. A dataset ships a ``data.yaml``
-naming its class list and its per-split image directories, and one ``.txt`` file per image
-whose stem matches the image's::
+The format is a directory convention rather than a schema. A dataset ships a ``data.yaml`` naming its class list and its
+per-split image directories, and one ``.txt`` file per image whose stem matches the image's::
 
     data.yaml
     train/images/30074_jpg.rf.10fa6c.jpg      train/labels/30074_jpg.rf.10fa6c.txt
     valid/images/...                          valid/labels/...
 
-Each label line is one object, whitespace-separated, class index first and every coordinate
-**normalized** to the image side it measures — ``x`` divided by the width, ``y`` by the
-height::
+Each label line is one object, whitespace-separated, class index first and every coordinate **normalized** to the image
+side it measures — ``x`` divided by the width, ``y`` by the height::
 
     cls cx cy w h                              (detection, five fields)
     cls x1 y1 x2 y2 x3 y3 x4 y4                (oriented, nine fields)
 
-The class index is 0-based into the ``names`` list, so the list order *is* the label space
-and no remapping happens on read — unlike :mod:`lucid_yolo.data.coco`, whose category ids
-are sparse and get compacted.
+The class index is 0-based into the ``names`` list, so the list order *is* the label space and no remapping happens on
+read — unlike :mod:`lucid_yolo.data.coco`, whose category ids are sparse and get compacted.
 
-Which reading applies is the caller's ``oriented`` flag, never a sniffed field count: a file
-whose rows carry the wrong number of fields for the declared variant is a file this reader
-cannot account for, and guessing the variant from it is how a mis-exported tree gets parsed
-into plausible nonsense. Every rejection names the file and the 1-based line, as
+Which reading applies is the caller's ``oriented`` flag, never a sniffed field count: a file whose rows carry the wrong
+number of fields for the declared variant is a file this reader cannot account for, and guessing the variant from it is
+how a mis-exported tree gets parsed into plausible nonsense. Every rejection names the file and the 1-based line, as
 :mod:`lucid_yolo.data.dota` does.
 
 Output contract:
-    Targets are the same :class:`~lucid_yolo.data.targets.Targets` the COCO path produces, so
-    assignment, loss and metric code is untouched. Detection reading fills ``boxes`` (pixel
-    ``xyxy``, clamped to the canvas) and ``labels``. Oriented reading denormalizes each row's
-    quadrilateral and routes it through :func:`~lucid_yolo.data.rotated_geom.polygons_to_rboxes`,
-    exactly as :mod:`lucid_yolo.data.dota` and the oriented COCO path do, with ``boxes`` the
-    envelope of that same ring — so ``boxes[i]`` and ``rboxes[i]`` are one object by
-    construction. ``polygons`` stays empty on both readings, and ``difficult`` is all-``False``:
-    the format carries no per-instance flag, which is what A51's default already means.
+    Targets are the same :class:`~lucid_yolo.data.targets.Targets` the COCO path produces, so assignment, loss and
+    metric code is untouched. Detection reading fills ``boxes`` (pixel ``xyxy``, clamped to the canvas) and ``labels``.
+    Oriented reading denormalizes each row's quadrilateral and routes it through
+    :func:`~lucid_yolo.data.rotated_geom.polygons_to_rboxes`, exactly as :mod:`lucid_yolo.data.dota` and the oriented
+    COCO path do, with ``boxes`` the envelope of that same ring — so ``boxes[i]`` and ``rboxes[i]`` are one object by
+    construction. ``polygons`` stays empty on both readings, and ``difficult`` is all-``False``: the format carries no
+    per-instance flag, which is what A51's default already means.
 
 When a malformed row is found, and by whom (L-31):
-    This reader validates a row **lazily**, at the ``__getitem__`` that needs it, where
-    :mod:`lucid_yolo.data.coco` validates its whole annotation file at construction. The
-    asymmetry is the formats': one COCO split is one JSON, so parsing it early costs one
-    read, while a YOLO split is one text file per image, and opening every one of them at
-    construction would front-load a full pass over the tree onto every run — including the
-    runs that never reach most of it.
+    This reader validates a row **lazily**, at the ``__getitem__`` that needs it, where :mod:`lucid_yolo.data.coco`
+    validates its whole annotation file at construction. The asymmetry is the formats': one COCO split is one JSON, so
+    parsing it early costs one read, while a YOLO split is one text file per image, and opening every one of them at
+    construction would front-load a full pass over the tree onto every run — including the runs that never reach most
+    of it.
 
-    The consequence is real and is not papered over: a tree with one bad row hours into an
-    epoch raises there, not at ``fit`` start. What makes that acceptable is that the
-    whole-tree scan exists as its own step — ``lucid-data check`` parses **every** row of
-    every split through :func:`scan_yolo_label_file`, this module's own grammar, and reports
-    the file and 1-based line of each rejection. It is the pre-flight for ``lucid-yolo fit``
-    (see :mod:`lucid_yolo.data.check`), and running it is how a YOLO root is held to the
-    guarantee the COCO reader gives for free. Skipping it is choosing the late failure.
+    The consequence is real and is not papered over: a tree with one bad row hours into an epoch raises there, not at
+    ``fit`` start. What makes that acceptable is that the whole-tree scan exists as its own step — ``lucid-data check``
+    parses **every** row of every split through :func:`scan_yolo_label_file`, this module's own grammar, and reports
+    the file and 1-based line of each rejection. It is the pre-flight for ``lucid-yolo fit`` (see
+    :mod:`lucid_yolo.data.check`), and running it is how a YOLO root is held to the guarantee the COCO reader gives for
+    free. Skipping it is choosing the late failure.
 
 Provenance:
-    R18 for the quadrilateral convention the oriented rows carry and for the long-edge fit they
-    are converted by. The format itself was read from a **published dataset export** — the
-    Roboflow Universe ``gongx/cars-jnnoy`` v1 YOLO export (CC BY 4.0), vendored under
-    ``supervision/releases/v0.29.0/cars-dataset/`` on this machine — never from any
-    implementation's reader (AGENTS.md prime directive). Measured from its 70-image train
-    split: fields lie in ``(0, 1]``, derived corners land exactly on ``0`` and ``1`` (the
-    export clips boxes to the image), class indices are ``0, 1, 2`` against ``nc: 3``, its
-    ``data.yaml`` writes ``train: ../train/images`` beside a real ``train/images`` tree, and
-    every image has a label file with no empty ones among them.
+    R18 for the quadrilateral convention the oriented rows carry and for the long-edge fit they are converted by. The
+    format itself was read from a **published dataset export** — the Roboflow Universe ``gongx/cars-jnnoy`` v1 YOLO
+    export (CC BY 4.0), vendored under ``supervision/releases/v0.29.0/cars-dataset/`` on this machine — never from any
+    implementation's reader (AGENTS.md prime directive). Measured from its 70-image train split: fields lie in
+    ``(0, 1]``, derived corners land exactly on ``0`` and ``1`` (the export clips boxes to the image), class indices
+    are ``0, 1, 2`` against ``nc: 3``, its ``data.yaml`` writes ``train: ../train/images`` beside a real
+    ``train/images`` tree, and every image has a label file with no empty ones among them.
 
 Assumptions:
-    * **Split entries are relative to the ``data.yaml``, with the published ``../`` prefix
-      absorbed.** The export writes ``../train/images`` for a directory that actually sits at
-      ``<root>/train/images`` beside the yaml, so the literal reading escapes the root. Both
-      are tried, literal first, and neither resolving is an error naming every path attempted
-      — not a third guess.
-    * **A row's fields must lie in ``[0, 1]``, exactly, with no tolerance.** A coordinate
-      outside it is not a slightly-off box, it is a coordinate that was never normalized — a
-      file written in pixels reads as boxes hundreds of image-widths away, and clamping turns
-      the whole file into a wall of degenerate edge boxes it would then train on. The bound is
-      compared exactly because the values arrive as decimal text and the published export
+    * **Split entries are relative to the ``data.yaml``, with the published ``../`` prefix absorbed.** The export
+      writes ``../train/images`` for a directory that actually sits at ``<root>/train/images`` beside the yaml, so the
+      literal reading escapes the root. Both are tried, literal first, and neither resolving is an error naming every
+      path attempted — not a third guess.
+    * **A row's fields must lie in ``[0, 1]``, exactly, with no tolerance.** A coordinate outside it is not a
+      slightly-off box, it is a coordinate that was never normalized — a file written in pixels reads as boxes
+      hundreds of image-widths away, and clamping turns the whole file into a wall of degenerate edge boxes it would
+      then train on. The bound is compared exactly because the values arrive as decimal text and the published export
       already writes its clipped corners as exact ``0`` and ``1``.
-    * **A derived pixel box is clamped to the canvas**, as :mod:`lucid_yolo.data.coco` clamps
-      COCO's ``xywh``: the file's own numbers must be normalized (rejected above), but the
-      geometry they describe may still round a half-pixel past an edge.
-    * **A missing label file is an error; an empty one is a background image.** Writing a
-      zero-byte file is a positive statement that the image holds no objects; not writing one
-      is silence, and reading silence as "no objects" turns a half-finished export into a
-      dataset that trains on backgrounds without saying so. ``allow_missing_labels=True`` opts
-      into the other reading for a dataset that genuinely omits them.
-    * **Images are enumerated by sorted file name** over :data:`IMAGE_SUFFIXES`. The format has
-      no manifest — there is no ``images`` array as in COCO — so the directory listing is the
-      index, sorted for a stable, reproducible order.
-    * **The oriented row is exactly nine fields, class first.** The roadmap row states eight
-      normalized polygon coordinates, and class-first follows the detection row; a ten-field
-      row (R18's trailing ``difficult`` flag, which the normalized variant has no published
-      spelling for here) is rejected rather than assumed away.
-    * **``names`` may be a list or an index-keyed mapping.** Only the list form is evidenced;
-      a mapping is accepted when its keys are exactly ``0..K-1``, which validates itself, and
-      rejected otherwise.
+    * **A derived pixel box is clamped to the canvas**, as :mod:`lucid_yolo.data.coco` clamps COCO's ``xywh``: the
+      file's own numbers must be normalized (rejected above), but the geometry they describe may still round a
+      half-pixel past an edge.
+    * **A missing label file is an error; an empty one is a background image.** Writing a zero-byte file is a positive
+      statement that the image holds no objects; not writing one is silence, and reading silence as "no objects" turns
+      a half-finished export into a dataset that trains on backgrounds without saying so.
+      ``allow_missing_labels=True`` opts into the other reading for a dataset that genuinely omits them.
+    * **Images are enumerated by sorted file name** over :data:`IMAGE_SUFFIXES`. The format has no manifest — there is
+      no ``images`` array as in COCO — so the directory listing is the index, sorted for a stable, reproducible order.
+    * **The oriented row is exactly nine fields, class first.** The roadmap row states eight normalized polygon
+      coordinates, and class-first follows the detection row; a ten-field row (R18's trailing ``difficult`` flag,
+      which the normalized variant has no published spelling for here) is rejected rather than assumed away.
+    * **``names`` may be a list or an index-keyed mapping.** Only the list form is evidenced; a mapping is accepted
+      when its keys are exactly ``0..K-1``, which validates itself, and rejected otherwise.
 """
 
 from __future__ import annotations
@@ -128,8 +113,8 @@ __all__ = [
     "scan_yolo_label_file",
 ]
 
-#: Image extensions the reader enumerates, lower-cased. ``.jpg`` is what the published export
-#: writes; ``.png`` is what this project's synthetic fixtures do (A26).
+#: Image extensions the reader enumerates, lower-cased. ``.jpg`` is what the published export writes; ``.png`` is what
+#: this project's synthetic fixtures do (A26).
 IMAGE_SUFFIXES: tuple[str, ...] = (".jpg", ".jpeg", ".png")
 #: Split keys a ``data.yaml`` may name, in the spelling it uses for each.
 _SPLIT_KEYS: tuple[str, ...] = ("train", "val", "test")
@@ -161,9 +146,8 @@ class _Row:
 class YoloDataConfig:
     """A dataset's own ``data.yaml``: its class names and its split image directories.
 
-    Split entries are kept as written and resolved on demand by :meth:`images_dir`, so a
-    ``test:`` line pointing at a directory that was never downloaded costs nothing until
-    someone asks for that split.
+    Split entries are kept as written and resolved on demand by :meth:`images_dir`, so a ``test:`` line pointing at a
+    directory that was never downloaded costs nothing until someone asks for that split.
 
     Attributes:
         root: Directory holding the ``data.yaml``; split entries resolve against it.
@@ -194,9 +178,9 @@ class YoloDataConfig:
     def read(cls, data_yaml: Path) -> YoloDataConfig:
         """Parse a ``data.yaml`` into its class names and split entries.
 
-        Keys the format does not define (the export's ``roboflow:`` metadata block, for
-        instance) are ignored. ``nc``, when present, must agree with the length of ``names``:
-        a file disagreeing with itself is one whose class space cannot be trusted.
+        Keys the format does not define (the export's ``roboflow:`` metadata block, for instance) are ignored. ``nc``,
+        when present, must agree with the length of ``names``: a file disagreeing with itself is one whose class space
+        cannot be trusted.
 
         Args:
             data_yaml: Path to the dataset's ``data.yaml``.
@@ -205,8 +189,8 @@ class YoloDataConfig:
             The parsed configuration, rooted at the file's own directory.
 
         Raises:
-            ValueError: If the document is not a mapping, ``names`` is missing or malformed,
-                or ``nc`` contradicts it. The file is named in every message.
+            ValueError: If the document is not a mapping, ``names`` is missing or malformed, or ``nc`` contradicts it.
+                The file is named in every message.
             OSError: If the file cannot be read.
 
         Examples:
@@ -233,10 +217,9 @@ class YoloDataConfig:
     def images_dir(self, split: str) -> Path:
         """Resolve one split's image directory from the entry the file wrote.
 
-        The entry is tried literally against the file's own directory first, then with its
-        leading ``..`` components dropped — the published export writes ``../train/images``
-        for a tree that sits at ``<root>/train/images``, and the literal reading of that
-        escapes the root.
+        The entry is tried literally against the file's own directory first, then with its leading ``..`` components
+        dropped — the published export writes ``../train/images`` for a tree that sits at ``<root>/train/images``, and
+        the literal reading of that escapes the root.
 
         Args:
             split: Split name as keyed in the file, e.g. ``"train"`` or ``"val"``.
@@ -278,39 +261,34 @@ class YoloDataConfig:
 class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     """YOLO-format dataset yielding the same ``(image, Targets)`` pairs the COCO reader does.
 
-    Images are the sorted :data:`IMAGE_SUFFIXES` files of ``images_dir``; each one's label file
-    is the same stem under ``labels_dir``. Labels are parsed per sample rather than at
-    construction — one image's text is a handful of rows, so the copy-on-write pressure that
-    made the COCO reader precompute (WP-073) does not arise, and reading them here keeps the
-    image's own decoded size as the denormalizing scale. A malformed row therefore raises at
-    the ``__getitem__`` that reads it, not at construction; ``lucid-data check`` is the
-    pre-flight that parses every row of the tree up front, and the module docstring states
-    why the two readers differ here.
+    Images are the sorted :data:`IMAGE_SUFFIXES` files of ``images_dir``; each one's label file is the same stem under
+    ``labels_dir``. Labels are parsed per sample rather than at construction — one image's text is a handful of rows, so
+    the copy-on-write pressure that made the COCO reader precompute (WP-073) does not arise, and reading them here
+    keeps the image's own decoded size as the denormalizing scale. A malformed row therefore raises at the
+    ``__getitem__`` that reads it, not at construction; ``lucid-data check`` is the pre-flight that parses every row of
+    the tree up front, and the module docstring states why the two readers differ here.
 
     Args:
         images_dir: Directory holding the split's images.
         labels_dir: Directory holding one ``.txt`` per image, matched by stem.
         names: Class names in index order; the length bounds every row's class index.
         transforms: Optional per-image geometric transform applied to every sample.
-        oriented: Read nine-field rows as quadrilaterals and fit rotated boxes, instead of
-            five-field ``cls cx cy w h`` rows. The variant is declared, never sniffed.
-        allow_missing_labels: Read an image with no label file as a background image instead
-            of raising. ``False`` (the default) treats the absence as the broken export it
-            usually is; an empty label file means "no objects" either way.
-        cache_images: Decode all images once at construction and retain their RGB
-            tensors (:meth:`cache_images`, without its progress report) — ``uint8`` for
-            an 8-bit source, ``uint16`` for a 16-bit PNG, at twice the bytes.
-            Opt-in because the cache occupies the uncompressed
-            dataset size; forked loader workers share those read-only pages.
+        oriented: Read nine-field rows as quadrilaterals and fit rotated boxes, instead of five-field ``cls cx cy w h``
+            rows. The variant is declared, never sniffed.
+        allow_missing_labels: Read an image with no label file as a background image instead of raising. ``False`` (the
+            default) treats the absence as the broken export it usually is; an empty label file means "no objects"
+            either way.
+        cache_images: Decode all images once at construction and retain their RGB tensors (:meth:`cache_images`,
+            without its progress report) — ``uint8`` for an 8-bit source, ``uint16`` for a 16-bit PNG, at twice the
+            bytes. Opt-in because the cache occupies the uncompressed dataset size; forked loader workers share those
+            read-only pages.
 
     Attributes:
         names: The class names, in index order.
-        keypoint_flip_pairs: Always ``None``. Declared so both readers answer the
-            question A64 makes the *dataset's* to answer, rather than leaving the caller
-            to ask only the reader it expects to have points. The answer here is not a
-            placeholder: the YOLO label row carries no keypoint fields to name sides
-            with, which is the same reason ``keypoint_targets=True`` is refused on a
-            YOLO root.
+        keypoint_flip_pairs: Always ``None``. Declared so both readers answer the question A64 makes the *dataset's* to
+            answer, rather than leaving the caller to ask only the reader it expects to have points. The answer here
+            is not a placeholder: the YOLO label row carries no keypoint fields to name sides with, which is the same
+            reason ``keypoint_targets=True`` is refused on a YOLO root.
 
     Examples:
         ```pycon
@@ -349,20 +327,18 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     def cache_images(self, *, progress: bool = False) -> None:
         """Decode every listed image once and keep it for every later draw.
 
-        ``cache_images=True`` at construction calls this; a reader built without the flag
-        can call it later to the same effect. A second call is a no-op, and the cache is
-        installed only once every file has decoded, so a failure part-way leaves the
-        reader uncached rather than half-filled.
+        ``cache_images=True`` at construction calls this; a reader built without the flag can call it later to the same
+        effect. A second call is a no-op, and the cache is installed only once every file has decoded, so a failure
+        part-way leaves the reader uncached rather than half-filled.
 
-        Entries are keyed by each listed path as the directory listing spells it, with no
-        symlink resolution, so two directory entries aliasing one file — a symlink beside
-        its target — are cached once each. The cost of an alias is memory only.
+        Entries are keyed by each listed path as the directory listing spells it, with no symlink resolution, so two
+        directory entries aliasing one file — a symlink beside its target — are cached once each. The cost of an alias
+        is memory only.
 
         Args:
-            progress: Draw a progress bar over the decode and, once it finishes, report
-                the image count and the bytes the cache retains as a ``UserWarning``. A YOLO
-                tree states no image sizes, so there is nothing to estimate from before
-                decoding. ``False`` (the default) keeps a library caller quiet;
+            progress: Draw a progress bar over the decode and, once it finishes, report the image count and the bytes
+                the cache retains as a ``UserWarning``. A YOLO tree states no image sizes, so there is nothing to
+                estimate from before decoding. ``False`` (the default) keeps a library caller quiet;
                 :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule` turns it on.
 
         Examples:
@@ -410,10 +386,9 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     ) -> YoloDetectionDataset:
         """Build a split's dataset from a dataset root alone.
 
-        The root's ``data.yaml`` is authoritative: it supplies the class names, and its own
-        split entry supplies the image directory when it resolves. Where the two directories
-        come from is :func:`resolve_split_dirs`, shared with the pre-run check so a validated
-        root is the tree this reader then opens.
+        The root's ``data.yaml`` is authoritative: it supplies the class names, and its own split entry supplies the
+        image directory when it resolves. Where the two directories come from is :func:`resolve_split_dirs`, shared
+        with the pre-run check so a validated root is the tree this reader then opens.
 
         Args:
             data_root: Directory holding ``data.yaml`` and the split trees.
@@ -421,15 +396,15 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             transforms: Optional per-image geometric transform.
             oriented: Read the oriented nine-field rows (see the class docstring).
             allow_missing_labels: Read an image with no label file as a background image.
-            cache_images: Decode and retain every split image as an RGB tensor, ``uint8``
-                for an 8-bit source and ``uint16`` for a 16-bit PNG.
+            cache_images: Decode and retain every split image as an RGB tensor, ``uint8`` for an 8-bit source and
+                ``uint16`` for a 16-bit PNG.
 
         Returns:
             The dataset for that split.
 
         Raises:
-            ValueError: If the ``data.yaml`` is malformed, or the images directory's final
-                component is not ``images`` so no labels directory can be derived from it.
+            ValueError: If the ``data.yaml`` is malformed, or the images directory's final component is not ``images``
+                so no labels directory can be derived from it.
             OSError: If ``data.yaml`` or the images directory is missing.
 
         Examples:
@@ -462,12 +437,11 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             index: Zero-based index into the sorted image listing.
 
         Returns:
-            A CHW float32 image in ``[0, 1]`` and its targets in pixel coordinates, after the
-            optional ``transforms``.
+            A CHW float32 image in ``[0, 1]`` and its targets in pixel coordinates, after the optional ``transforms``.
 
         Raises:
-            FileNotFoundError: If the image has no label file and ``allow_missing_labels`` is
-                ``False``; the message names both the image and the path it looked for.
+            FileNotFoundError: If the image has no label file and ``allow_missing_labels`` is ``False``; the message
+                names both the image and the path it looked for.
             ValueError: If any label row is malformed; the message names the file and line.
         """
         image_path = self._images[index]
@@ -485,9 +459,9 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             path: Path to the image file.
 
         Returns:
-            A ``(3, H, W)`` float32 tensor scaled into ``[0, 1]`` by the decoded depth's own
-            maximum (:func:`~lucid_yolo.data._image.to_unit_float`): ``code / 255`` for an
-            8-bit source, ``code / 65535`` for a 16-bit PNG.
+            A ``(3, H, W)`` float32 tensor scaled into ``[0, 1]`` by the decoded depth's own maximum
+            (:func:`~lucid_yolo.data._image.to_unit_float`): ``code / 255`` for an 8-bit source, ``code / 65535`` for a
+            16-bit PNG.
 
         Raises:
             OSError: If the file is missing or cannot be decoded; the path is named.
@@ -499,9 +473,9 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     def _decode_image(path: Path) -> Tensor:
         """Decode ``path`` into the RGB tensor the cache retains, at the source's own depth.
 
-        An 8-bit source decodes to ``uint8``; a 16-bit PNG decodes to ``uint16``, two bytes
-        per channel. Scaling waits for :meth:`_load_image`, which divides either depth by its
-        own maximum, so a cached and an uncached draw of the same file are equal.
+        An 8-bit source decodes to ``uint8``; a 16-bit PNG decodes to ``uint16``, two bytes per channel. Scaling waits
+        for :meth:`_load_image`, which divides either depth by its own maximum, so a cached and an uncached draw of the
+        same file are equal.
         """
         return decode_rgb(path)
 
@@ -514,8 +488,8 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             width: Decoded image width, the ``x`` denormalizing scale.
 
         Returns:
-            The image's targets; :meth:`~lucid_yolo.data.targets.Targets.empty` for an empty
-            label file, and for a missing one under ``allow_missing_labels``.
+            The image's targets; :meth:`~lucid_yolo.data.targets.Targets.empty` for an empty label file, and for a
+            missing one under ``allow_missing_labels``.
 
         Raises:
             FileNotFoundError: If the label file is missing and absences are not allowed.
@@ -541,10 +515,9 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
 def load_yolo_targets(label_file: Path, *, height: int, width: int, num_classes: int, oriented: bool) -> Targets:
     """Parse one label file into pixel-space :class:`~lucid_yolo.data.targets.Targets`.
 
-    Blank lines are skipped; every other line must be a well-formed row of the declared
-    variant. ``oriented`` and ``num_classes`` have no defaults on purpose: the variant is a
-    property of the dataset the caller opened, and the class count is what bounds a row's
-    class index into a real name.
+    Blank lines are skipped; every other line must be a well-formed row of the declared variant. ``oriented`` and
+    ``num_classes`` have no defaults on purpose: the variant is a property of the dataset the caller opened, and the
+    class count is what bounds a row's class index into a real name.
 
     Args:
         label_file: Path to the image's ``.txt`` label file.
@@ -554,13 +527,13 @@ def load_yolo_targets(label_file: Path, *, height: int, width: int, num_classes:
         oriented: Read nine-field quadrilateral rows instead of five-field boxes.
 
     Returns:
-        The image's targets: ``boxes``/``labels`` on the detection reading, plus ``rboxes``
-        paired 1:1 with them on the oriented one. Empty targets for a file with no rows.
+        The image's targets: ``boxes``/``labels`` on the detection reading, plus ``rboxes`` paired 1:1 with them on the
+        oriented one. Empty targets for a file with no rows.
 
     Raises:
-        ValueError: If any row has the wrong field count for the variant, a non-integer or
-            out-of-range class index, a non-numeric coordinate, or a coordinate outside
-            ``[0, 1]``. The message names the file and the 1-based line number.
+        ValueError: If any row has the wrong field count for the variant, a non-integer or out-of-range class index, a
+            non-numeric coordinate, or a coordinate outside ``[0, 1]``. The message names the file and the 1-based
+            line number.
         OSError: If the file cannot be read.
 
     Examples:
@@ -589,17 +562,14 @@ def load_yolo_targets(label_file: Path, *, height: int, width: int, num_classes:
 def resolve_split_dirs(data_root: Path, split: str, config: YoloDataConfig) -> tuple[Path, Path]:
     """Return the ``(images_dir, labels_dir)`` a split is actually read from.
 
-    The dataset's own ``data.yaml`` entry outranks the naming convention: the published
-    export writes ``val: ../valid/images`` for a directory no
-    :data:`~lucid_yolo.data.layout.YOLO_CANDIDATES` row names (A58). A split the file does
-    not mention falls back to that table
-    (:func:`~lucid_yolo.data.layout.resolve_yolo_split`), which is a naming rule with a
-    deterministic fallback and cannot fail.
+    The dataset's own ``data.yaml`` entry outranks the naming convention: the published export writes
+    ``val: ../valid/images`` for a directory no :data:`~lucid_yolo.data.layout.YOLO_CANDIDATES` row names (A58). A
+    split the file does not mention falls back to that table (:func:`~lucid_yolo.data.layout.resolve_yolo_split`),
+    which is a naming rule with a deterministic fallback and cannot fail.
 
-    It is a function rather than three lines inside
-    :meth:`YoloDetectionDataset.from_root` because ``lucid-data check`` validates a root
-    *before* a run reads it (WP-099c), and a pre-run check resolving splits its own way
-    would validate a different tree than the one that gets trained on.
+    It is a function rather than three lines inside :meth:`YoloDetectionDataset.from_root` because ``lucid-data check``
+    validates a root *before* a run reads it (WP-099c), and a pre-run check resolving splits its own way would
+    validate a different tree than the one that gets trained on.
 
     Args:
         data_root: Directory holding ``data.yaml`` and the split trees.
@@ -610,10 +580,10 @@ def resolve_split_dirs(data_root: Path, split: str, config: YoloDataConfig) -> t
         The split's images directory and the labels directory beside it.
 
     Raises:
-        FileNotFoundError: If the file names the split but its entry resolves to no
-            directory; the message lists every path tried.
-        ValueError: If the resolved images directory has no ``images`` component, leaving
-            no labels directory to derive from it.
+        FileNotFoundError: If the file names the split but its entry resolves to no directory; the message lists every
+            path tried.
+        ValueError: If the resolved images directory has no ``images`` component, leaving no labels directory to derive
+            from it.
 
     Examples:
         ```pycon
@@ -638,19 +608,17 @@ def resolve_split_dirs(data_root: Path, split: str, config: YoloDataConfig) -> t
 def scan_yolo_label_file(label_file: Path, *, num_classes: int, oriented: bool) -> tuple[int, frozenset[int]]:
     """Parse one label file for its object count and class ids, without its image.
 
-    The same grammar :func:`load_yolo_targets` reads, stopping before the denormalization:
-    a validator (``lucid-data check``, WP-099c) wants to know that every row parses and what
-    classes the file names, and decoding the image to obtain a pixel scale it then discards
-    would make checking a split as expensive as an epoch of it. Every rejection is therefore
-    the reader's own, named by file and 1-based line.
+    The same grammar :func:`load_yolo_targets` reads, stopping before the denormalization: a validator
+    (``lucid-data check``, WP-099c) wants to know that every row parses and what classes the file names, and decoding
+    the image to obtain a pixel scale it then discards would make checking a split as expensive as an epoch of it.
+    Every rejection is therefore the reader's own, named by file and 1-based line.
 
     Args:
         label_file: Path to an image's ``.txt`` label file.
-        num_classes: Number of classes the dataset declares; a row's class index must be
-            below it, which is what makes a file written against another class list fail
-            here rather than train.
-        oriented: Read the nine-field oriented rows instead of five-field boxes. Declared,
-            never sniffed, exactly as on the reader (see the module docstring).
+        num_classes: Number of classes the dataset declares; a row's class index must be below it, which is what makes
+            a file written against another class list fail here rather than train.
+        oriented: Read the nine-field oriented rows instead of five-field boxes. Declared, never sniffed, exactly as on
+            the reader (see the module docstring).
 
     Returns:
         The number of object rows (blank lines excluded) and the distinct class ids they name.
@@ -679,9 +647,8 @@ def scan_yolo_label_file(label_file: Path, *, num_classes: int, oriented: bool) 
 def _parse_names(raw: object, source: str) -> tuple[str, ...]:
     """Parse the ``names`` value into class names in index order.
 
-    A list is taken in order. A mapping is accepted only when its keys are exactly the
-    integers ``0..K-1``, which makes the ordering the file's own statement rather than this
-    reader's guess at it.
+    A list is taken in order. A mapping is accepted only when its keys are exactly the integers ``0..K-1``, which makes
+    the ordering the file's own statement rather than this reader's guess at it.
 
     Args:
         raw: The ``names`` value as loaded.
@@ -748,9 +715,8 @@ def _split_candidates(root: Path, entry: str) -> list[Path]:
         entry: The split entry exactly as written.
 
     Returns:
-        An absolute candidate for an absolute entry; otherwise the literal reading against
-        ``root``, followed by the same entry with its leading ``..`` components dropped when
-        that says something different.
+        An absolute candidate for an absolute entry; otherwise the literal reading against ``root``, followed by the
+        same entry with its leading ``..`` components dropped when that says something different.
 
     Examples:
         ```pycon
@@ -796,11 +762,10 @@ def _leading_parents(written: Path) -> int:
 def _labels_dir_for(images_dir: Path) -> Path:
     """Return the labels directory beside an images directory.
 
-    The last component spelled ``images`` becomes ``labels``, which is what both published
-    spellings agree on: ``<split>/images`` pairs with ``<split>/labels`` and ``images/<split>``
-    with ``labels/<split>``. Rewriting the *last* such component rather than the first keeps a
-    root that happens to live under a directory called ``images`` from being rewritten at its
-    root instead of at its split.
+    The last component spelled ``images`` becomes ``labels``, which is what both published spellings agree on:
+    ``<split>/images`` pairs with ``<split>/labels`` and ``images/<split>`` with ``labels/<split>``. Rewriting the
+    *last* such component rather than the first keeps a root that happens to live under a directory called ``images``
+    from being rewritten at its root instead of at its split.
 
     Args:
         images_dir: The split's images directory.
@@ -895,8 +860,8 @@ def _parse_row(line: str, source: str, number: int, *, num_classes: int, oriente
 def _parse_class(raw: str, source: str, number: int, num_classes: int) -> int:
     """Parse a class field into an index into the dataset's ``names``.
 
-    A token that is not an integer and an integer naming no class are different mistakes: the
-    first is a malformed file, the second a file written against a different class list.
+    A token that is not an integer and an integer naming no class are different mistakes: the first is a malformed
+    file, the second a file written against a different class list.
 
     Args:
         raw: The class field exactly as written.
@@ -938,8 +903,8 @@ def _parse_normalized(fields: Sequence[str], source: str, number: int) -> tuple[
         The coordinates as floats, in file order.
 
     Raises:
-        ValueError: If a field is not a number, or lies outside ``[0, 1]`` — which means it
-            was never normalized, not that it is slightly off.
+        ValueError: If a field is not a number, or lies outside ``[0, 1]`` — which means it was never normalized, not
+            that it is slightly off.
 
     Examples:
         ```pycon
@@ -996,10 +961,9 @@ def _detection_boxes(rows: Sequence[_Row], *, height: int, width: int) -> Tensor
 def _oriented_targets(rows: Sequence[_Row], labels: Tensor, *, height: int, width: int) -> Targets:
     """Denormalize quadrilateral rows and fit them to rotated boxes and their envelopes.
 
-    Both modalities come from the *same* ring, which is what makes ``boxes[i]`` and
-    ``rboxes[i]`` one object rather than two lists that happen to be ordered alike — the
-    instance-axis invariant :mod:`lucid_yolo.data.dota` states and every rotated transform
-    relies on. ``polygons`` is left empty, as on the other two oriented readings: the quad is
+    Both modalities come from the *same* ring, which is what makes ``boxes[i]`` and ``rboxes[i]`` one object rather than
+    two lists that happen to be ordered alike — the instance-axis invariant :mod:`lucid_yolo.data.dota` states and
+    every rotated transform relies on. ``polygons`` is left empty, as on the other two oriented readings: the quad is
     already carried by ``rboxes`` up to the rectangle fit.
 
     Args:

@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-008 target container and transform helpers (blueprint section 5.9).
 
-Covers construction-time validation, deep-copy independence, aligned filtering
-across every modality, concatenation semantics, the empty identity, and the two
-pure geometry helpers against hand-computed cases.
+Covers construction-time validation, deep-copy independence, aligned filtering across every modality, concatenation
+semantics, the empty identity, and the two pure geometry helpers against hand-computed cases.
 """
 
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import pytest
 import torch
@@ -60,33 +60,67 @@ def _rboxes(m: int) -> torch.Tensor:
     return torch.cat([base, base, base + 2.0, base + 1.0, base * 0.0], dim=1)
 
 
+def _zero_posed(n_points: int, n: int = 1) -> Targets:
+    """Return ``n`` instances, each carrying ``n_points`` all-zero keypoints with zero visibility.
+
+    Examples:
+        >>> _zero_posed(3, n=2).keypoints.shape
+        torch.Size([2, 3, 2])
+        >>> _zero_posed(3, n=2).keypoint_vis.shape
+        torch.Size([2, 3])
+    """
+    return Targets(
+        boxes=_boxes(n),
+        labels=_labels(n),
+        keypoints=torch.zeros((n, n_points, 2)),
+        keypoint_vis=torch.zeros((n, n_points), dtype=torch.int64),
+    )
+
+
 class TestTargetsValidation:
     """Construction-time shape and dtype invariants."""
 
-    def test_boxes_labels_length_mismatch_raises(self) -> None:
-        """A labels count that differs from the box count is rejected."""
-        with pytest.raises(ValueError, match="length mismatch"):
-            Targets(boxes=_boxes(2), labels=_labels(3))
+    @pytest.mark.parametrize(
+        ("kwargs", "error", "match"),
+        [
+            pytest.param(
+                {"boxes": _boxes(2), "labels": _labels(3)}, ValueError, "length mismatch", id="labels-length-mismatch"
+            ),
+            pytest.param(
+                {"boxes": _boxes(2), "labels": _labels(2), "polygons": [torch.zeros((3, 2))]},
+                ValueError,
+                "polygons count",
+                id="polygon-count-not-zero-or-n",
+            ),
+            pytest.param(
+                {"boxes": torch.zeros((1, 4), dtype=torch.float64), "labels": _labels(1)},
+                TypeError,
+                "boxes must be float32",
+                id="boxes-wrong-dtype",
+            ),
+            pytest.param(
+                {"boxes": _boxes(1), "labels": torch.zeros(1, dtype=torch.int32)},
+                TypeError,
+                "labels must be int64",
+                id="labels-wrong-dtype",
+            ),
+            pytest.param(
+                {"boxes": _boxes(1), "labels": _labels(1), "rboxes": torch.zeros((1, 4))},
+                ValueError,
+                r"rboxes must be \(M, 5\)",
+                id="rboxes-wrong-shape",
+            ),
+        ],
+    )
+    def test_malformed_construction_raises(self, kwargs: dict[str, Any], error: type[Exception], match: str) -> None:
+        """Mismatched lengths, a polygon count other than 0 or N, wrong dtypes and a non-5-column rbox are rejected.
 
-    def test_polygon_count_not_zero_or_n_raises(self) -> None:
-        """A polygon count that is neither 0 nor N is rejected."""
-        with pytest.raises(ValueError, match="polygons count"):
-            Targets(boxes=_boxes(2), labels=_labels(2), polygons=[torch.zeros((3, 2))])
-
-    def test_boxes_wrong_dtype_raises(self) -> None:
-        """Non-float32 boxes are rejected with a clear dtype error."""
-        with pytest.raises(TypeError, match="boxes must be float32"):
-            Targets(boxes=torch.zeros((1, 4), dtype=torch.float64), labels=_labels(1))
-
-    def test_labels_wrong_dtype_raises(self) -> None:
-        """Non-int64 labels are rejected with a clear dtype error."""
-        with pytest.raises(TypeError, match="labels must be int64"):
-            Targets(boxes=_boxes(1), labels=torch.zeros(1, dtype=torch.int32))
-
-    def test_rboxes_wrong_shape_raises(self) -> None:
-        """Rotated boxes without the 5 long-edge columns are rejected."""
-        with pytest.raises(ValueError, match=r"rboxes must be \(M, 5\)"):
-            Targets(boxes=_boxes(1), labels=_labels(1), rboxes=torch.zeros((1, 4)))
+        Each case breaks exactly one documented invariant of the container, and the message must name it: a labels
+        count that differs from the box count, a polygon count that is neither 0 nor N, non-float32 boxes, non-int64
+        labels and rotated boxes without the 5 long-edge columns.
+        """
+        with pytest.raises(error, match=match):
+            Targets(**kwargs)
 
     def test_valid_construction_succeeds(self) -> None:
         """A well-formed set with every modality constructs without error."""
@@ -109,59 +143,60 @@ class TestKeypoints:
         assert torch.equal(targets.keypoints, keypoints)
         assert torch.equal(targets.keypoint_vis, keypoint_vis)
 
-    def test_wrong_last_dimension_raises(self) -> None:
-        """Keypoints without xy columns are rejected."""
-        with pytest.raises(ValueError, match=r"keypoints must be \(N, K, 2\)"):
-            Targets(
-                boxes=_boxes(1),
-                labels=_labels(1),
-                keypoints=torch.zeros((1, 2, 3)),
-                keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
-            )
+    @pytest.mark.parametrize(
+        ("kwargs", "error", "match"),
+        [
+            pytest.param(
+                {"keypoints": torch.zeros((1, 2, 3)), "keypoint_vis": torch.zeros((1, 2), dtype=torch.int64)},
+                ValueError,
+                r"keypoints must be \(N, K, 2\)",
+                id="no-xy-columns",
+            ),
+            pytest.param(
+                {
+                    "keypoints": torch.zeros((1, 2, 2), dtype=torch.float64),
+                    "keypoint_vis": torch.zeros((1, 2), dtype=torch.int64),
+                },
+                TypeError,
+                "keypoints must be float32",
+                id="keypoints-wrong-dtype",
+            ),
+            pytest.param(
+                {"keypoints": torch.zeros((1, 2, 2)), "keypoint_vis": torch.zeros((1, 2), dtype=torch.int32)},
+                TypeError,
+                "keypoint_vis must be int64",
+                id="visibility-wrong-dtype",
+            ),
+            pytest.param(
+                {"keypoints": torch.zeros((1, 2, 2)), "keypoint_vis": torch.zeros((1, 1), dtype=torch.int64)},
+                ValueError,
+                r"keypoint_vis must be \(N, K\)",
+                id="visibility-shape-mismatch",
+            ),
+            pytest.param(
+                {"keypoints": torch.zeros((1, 2, 2))},
+                ValueError,
+                r"keypoint_vis must be \(N, K\)",
+                id="keypoints-with-default-empty-visibility",
+            ),
+            pytest.param(
+                {"keypoint_vis": torch.zeros((1, 2), dtype=torch.int64)},
+                ValueError,
+                "keypoint_vis count must be 0",
+                id="visibility-without-keypoints",
+            ),
+        ],
+    )
+    def test_malformed_keypoint_channels_raise(
+        self, kwargs: dict[str, Any], error: type[Exception], match: str
+    ) -> None:
+        """Keypoints without xy columns, wrong dtypes, and keypoint/visibility pairs that disagree are rejected.
 
-    def test_wrong_keypoint_dtype_raises(self) -> None:
-        """Non-float32 coordinate tensors are rejected."""
-        with pytest.raises(TypeError, match="keypoints must be float32"):
-            Targets(
-                boxes=_boxes(1),
-                labels=_labels(1),
-                keypoints=torch.zeros((1, 2, 2), dtype=torch.float64),
-                keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
-            )
-
-    def test_wrong_visibility_dtype_raises(self) -> None:
-        """Non-int64 visibility tensors are rejected."""
-        with pytest.raises(TypeError, match="keypoint_vis must be int64"):
-            Targets(
-                boxes=_boxes(1),
-                labels=_labels(1),
-                keypoints=torch.zeros((1, 2, 2)),
-                keypoint_vis=torch.zeros((1, 2), dtype=torch.int32),
-            )
-
-    def test_mismatched_visibility_shape_raises(self) -> None:
-        """Visibility must have one scalar per instance/keypoint coordinate pair."""
-        with pytest.raises(ValueError, match=r"keypoint_vis must be \(N, K\)"):
-            Targets(
-                boxes=_boxes(1),
-                labels=_labels(1),
-                keypoints=torch.zeros((1, 2, 2)),
-                keypoint_vis=torch.zeros((1, 1), dtype=torch.int64),
-            )
-
-    def test_nonempty_keypoints_with_empty_visibility_raises(self) -> None:
-        """Present keypoints cannot be paired with the default empty visibility tensor."""
-        with pytest.raises(ValueError, match=r"keypoint_vis must be \(N, K\)"):
-            Targets(boxes=_boxes(1), labels=_labels(1), keypoints=torch.zeros((1, 2, 2)))
-
-    def test_empty_keypoints_with_nonempty_visibility_raises(self) -> None:
-        """Absent keypoints cannot be paired with visibility rows."""
-        with pytest.raises(ValueError, match="keypoint_vis count must be 0"):
-            Targets(
-                boxes=_boxes(1),
-                labels=_labels(1),
-                keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
-            )
+        Visibility must hold one int64 scalar per instance/keypoint coordinate pair; present keypoints cannot be paired
+        with the default empty visibility tensor, and absent keypoints cannot be paired with visibility rows.
+        """
+        with pytest.raises(error, match=match):
+            Targets(boxes=_boxes(1), labels=_labels(1), **kwargs)
 
     def test_clone_independent(self) -> None:
         """Mutating cloned keypoint tensors leaves their source tensors unchanged."""
@@ -209,32 +244,14 @@ class TestKeypoints:
 
     def test_concat_mixed_keypoint_presence_raises(self) -> None:
         """Concatenating annotated and keypoint-absent targets is rejected."""
-        with_keypoints = Targets(
-            boxes=_boxes(1),
-            labels=_labels(1),
-            keypoints=torch.zeros((1, 2, 2)),
-            keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
-        )
         without_keypoints = Targets(boxes=_boxes(1), labels=_labels(1))
         with pytest.raises(ValueError, match="mixed keypoint presence"):
-            Targets.concat([with_keypoints, without_keypoints])
+            Targets.concat([_zero_posed(2), without_keypoints])
 
     def test_concat_mismatched_keypoint_count_raises(self) -> None:
         """Targets with different K values cannot describe one concatenated keypoint batch."""
-        two_points = Targets(
-            boxes=_boxes(1),
-            labels=_labels(1),
-            keypoints=torch.zeros((1, 2, 2)),
-            keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
-        )
-        three_points = Targets(
-            boxes=_boxes(1),
-            labels=_labels(1),
-            keypoints=torch.zeros((1, 3, 2)),
-            keypoint_vis=torch.zeros((1, 3), dtype=torch.int64),
-        )
         with pytest.raises(ValueError, match="keypoint counts"):
-            Targets.concat([two_points, three_points])
+            Targets.concat([_zero_posed(2), _zero_posed(3)])
 
     def test_empty_has_keypoint_shapes(self) -> None:
         """The empty identity carries canonical zero-instance keypoint tensors."""
@@ -247,15 +264,13 @@ class TestSharedKeypointCount:
     """The one ``K`` read both batch-level joins share: ``Targets.concat`` and the packed transport."""
 
     def test_skips_items_without_point_sets(self) -> None:
-        """An empty or box-only item's point axis of ``0`` never outvotes the batch's ``K``."""
-        posed = Targets(
-            boxes=_boxes(2),
-            labels=_labels(2),
-            keypoints=torch.zeros((2, 4, 2)),
-            keypoint_vis=torch.zeros((2, 4), dtype=torch.int64),
-        )
+        """An empty or box-only item's point axis of ``0`` never outvotes the batch's ``K``.
+
+        Only the middle item carries points (``K = 4``); the leading empty and trailing box-only items must be ignored
+        rather than forcing the batch to ``K = 0``.
+        """
         box_only = Targets(boxes=_boxes(1), labels=_labels(1))
-        assert Targets._shared_keypoint_count([Targets.empty(), posed, box_only]) == 4
+        assert Targets._shared_keypoint_count([Targets.empty(), _zero_posed(4, n=2), box_only]) == 4
 
     @pytest.mark.parametrize(
         "items",
@@ -270,27 +285,19 @@ class TestSharedKeypointCount:
 
     def test_refuses_differing_counts_naming_both(self) -> None:
         """Two point-carrying items with different ``K`` are refused, the first item's count first."""
-        two_points = Targets(
-            boxes=_boxes(1),
-            labels=_labels(1),
-            keypoints=torch.zeros((1, 2, 2)),
-            keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
-        )
-        three_points = Targets(
-            boxes=_boxes(1),
-            labels=_labels(1),
-            keypoints=torch.zeros((1, 3, 2)),
-            keypoint_vis=torch.zeros((1, 3), dtype=torch.int64),
-        )
         with pytest.raises(ValueError, match="differing keypoint counts: 2 and 3"):
-            Targets._shared_keypoint_count([two_points, Targets.empty(), three_points])
+            Targets._shared_keypoint_count([_zero_posed(2), Targets.empty(), _zero_posed(3)])
 
 
 class TestClone:
     """Deep-copy independence."""
 
     def test_clone_independent(self) -> None:
-        """Mutating a clone's tensors leaves the original unchanged."""
+        """Mutating a clone's tensors leaves the original unchanged.
+
+        Boxes, labels, a polygon ring and the rotated boxes are each modified in place on the clone, so a shared
+        buffer in any modality shows up as a changed original.
+        """
         original = Targets(
             boxes=_boxes(2), labels=_labels(2), polygons=[torch.zeros((3, 2)), torch.zeros((3, 2))], rboxes=_rboxes(1)
         )
@@ -404,11 +411,11 @@ class TestEmpty:
 class TestFromQuads:
     """One quadrilateral per instance becomes its envelope box and its rotated fit."""
 
-    def test_box_is_envelope_and_rbox_is_fit_of_same_quad(self) -> None:
+    def test_tilted_quad_gives_envelope_box_and_fitted_rbox(self) -> None:
         """A tilted rectangle yields its axis-aligned envelope and its 45-degree long-edge box.
 
-        Both modalities come from the one ring, which is the instance-axis invariant every
-        oriented reader relies on; a tilted quad is the case where the two visibly differ.
+        Both modalities come from the one ring, which is the instance-axis invariant every oriented reader relies on;
+        a tilted quad is the case where the two visibly differ.
         """
         targets = Targets.from_quads([_TILTED_QUAD], torch.tensor([3]))
 
@@ -420,9 +427,8 @@ class TestFromQuads:
     def test_matches_separate_envelope_and_fit_bit_for_bit(self) -> None:
         """The result equals the two calls the three oriented readers used to make by hand.
 
-        The constructor replaced three copies of ``boxes_from_polygons`` plus
-        ``polygons_to_rboxes`` in the COCO, YOLO and DOTA readers; any difference here would
-        move every oriented target those readers produce.
+        The constructor replaced three copies of ``boxes_from_polygons`` plus ``polygons_to_rboxes`` in the COCO, YOLO
+        and DOTA readers; any difference here would move every oriented target those readers produce.
         """
         quads = [_TILTED_QUAD, _FLAT_QUAD]
 
@@ -434,9 +440,8 @@ class TestFromQuads:
     def test_optional_channels_carried_on_shared_axis(self) -> None:
         """Difficult flags and keypoints given alongside the quads arrive unchanged.
 
-        The COCO reader passes R18's ``difficult`` flag and, in keypoint mode, the point
-        channels; dropping either here would silently lose the evaluation's ignore rule or
-        the pose supervision.
+        The COCO reader passes R18's ``difficult`` flag and, in keypoint mode, the point channels; dropping either
+        here would silently lose the evaluation's ignore rule or the pose supervision.
         """
         difficult = torch.tensor([True, False])
         keypoints = torch.ones((2, 3, 2), dtype=torch.float32)
@@ -463,7 +468,10 @@ class TestApplyAffineToPoints:
     """Homogeneous point warping."""
 
     def test_rotation_plus_translation_hand_computed(self) -> None:
-        """A +90 deg rotation then (2, 3) translation matches the hand-computed result."""
+        """A +90 deg rotation then (2, 3) translation matches the hand-computed result.
+
+        The unit points (1, 0) and (0, 1) rotate onto (0, 1) and (-1, 0) and then shift to (2, 4) and (1, 3).
+        """
         theta = math.pi / 2.0
         matrix = torch.tensor(
             [
@@ -503,7 +511,11 @@ class TestBoxesFromPolygons:
 
 
 def test_compose_conforms_to_protocol_and_chains() -> None:
-    """Compose satisfies GeometricTransform and threads the pair through in order."""
+    """Compose satisfies GeometricTransform and threads the pair through in order.
+
+    Two shifting transforms are chained, so both the image (+1 each) and the box coordinates (+1 each) must reflect
+    two applications.
+    """
 
     def shift(image: torch.Tensor, targets: Targets) -> tuple[torch.Tensor, Targets]:
         moved = targets.clone()

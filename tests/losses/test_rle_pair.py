@@ -33,6 +33,16 @@ def _inputs(count: int, dtype: torch.dtype = torch.float64, device: str = "cpu")
     return predicted, sigma, annotated, visible
 
 
+def _assert_bitwise_equal(actual: tuple[torch.Tensor, ...], expected: tuple[torch.Tensor, ...]) -> None:
+    """Assert two tuples of branch losses match element for element, bit for bit.
+
+    Examples:
+        >>> _assert_bitwise_equal((torch.ones(1), torch.zeros(1)), (torch.ones(1), torch.zeros(1)))
+    """
+    for a, b in zip(actual, expected, strict=True):
+        assert torch.equal(a, b)
+
+
 @pytest.mark.parametrize("counts", [(0, 0), (0, 2), (3, 0), (1, 4), (5, 2)])
 def test_pair_keeps_separate_visible_means_and_gradients(counts: tuple[int, int]) -> None:
     """Asymmetric labelled counts catch splitting by instances or one combined mean."""
@@ -77,6 +87,10 @@ class _AlternateLinear(nn.Linear):
 
 class _AlternateParameter(nn.Parameter):
     """A parameter subclass whose gradient behaviour the certificate cannot vouch for."""
+
+
+class _AlternateTensor(torch.Tensor):
+    """A tensor subclass whose overrides lie outside the row-independent built-in tensor certificate."""
 
 
 def _first_linear(loss: RLELoss) -> nn.Linear:
@@ -140,8 +154,8 @@ def test_pair_certificate_refuses_replaced_class_method(owner: type[nn.Module], 
 def test_pair_certificate_refuses_global_hook(register: str) -> None:
     """Even an observer outside this module tree preserves the two-call boundary.
 
-    Each of the four process-wide hook registries observes every module call, so a
-    hook in any of them must keep the loss on its original public calls.
+    Each of the four process-wide hook registries observes every module call, so a hook in any of them must keep the
+    loss on its original public calls.
     """
     loss = RLELoss()
     with getattr(nn.modules.module, register)(lambda *args: None):
@@ -157,24 +171,7 @@ def test_pair_mixed_sigma_dtypes_keep_native_log_precision() -> None:
     expected = loss(*left), loss(*right)
     with patch("torch.cat", side_effect=AssertionError("mixed precision concatenated")):
         actual = loss._forward_pair(left, right)
-    for a, b in zip(actual, expected, strict=True):
-        assert torch.equal(a, b)
-
-
-def test_pair_tensor_subclass_keeps_native_calls() -> None:
-    """An input override is outside the row-independent built-in tensor certificate."""
-
-    class AlternateTensor(torch.Tensor):
-        pass
-
-    loss = RLELoss().double()
-    left, right = _inputs(1), _inputs(2)
-    left = left[0].as_subclass(AlternateTensor), *left[1:]
-    expected = loss(*left), loss(*right)
-    with patch("torch.cat", side_effect=AssertionError("tensor subclass concatenated")):
-        actual = loss._forward_pair(left, right)
-    for a, b in zip(actual, expected, strict=True):
-        assert torch.equal(a, b)
+    _assert_bitwise_equal(actual, expected)
 
 
 _POSITIONS = ("predicted", "sigma", "annotated", "visibility")
@@ -184,8 +181,8 @@ _POSITIONS = ("predicted", "sigma", "annotated", "visibility")
 def test_pair_dtype_mismatch_at_any_input_keeps_native_calls(position: str) -> None:
     """A branch whose input dtype differs from the other branch's is never concatenated with it.
 
-    Every one of the four inputs is checked, visibility included: its dtype never reaches
-    the concatenation, so only the guard itself keeps the branches apart.
+    Every one of the four inputs is checked, visibility included: its dtype never reaches the concatenation, so only the
+    guard itself keeps the branches apart.
     """
     loss = RLELoss().double()
     left, right = _inputs(1), _inputs(2)
@@ -196,37 +193,35 @@ def test_pair_dtype_mismatch_at_any_input_keeps_native_calls(position: str) -> N
     expected = loss(*left), loss(*right)
     with patch("torch.cat", side_effect=AssertionError("mixed dtypes concatenated")):
         actual = loss._forward_pair(left, right)
-    for a, b in zip(actual, expected, strict=True):
-        assert torch.equal(a, b)
+    _assert_bitwise_equal(actual, expected)
 
 
 @pytest.mark.parametrize("side", ["left", "right"])
 @pytest.mark.parametrize("position", _POSITIONS)
 def test_pair_tensor_subclass_at_any_input_keeps_native_calls(position: str, side: str) -> None:
-    """A tensor subclass in any of the eight input slots keeps both branches on their own calls."""
+    """A tensor subclass in any of the eight input slots keeps both branches on their own calls.
 
-    class AlternateTensor(torch.Tensor):
-        pass
-
+    An input override is outside the row-independent built-in tensor certificate, whichever of the four inputs of
+    whichever branch carries it.
+    """
     loss = RLELoss().double()
     branches = {"left": _inputs(1), "right": _inputs(2)}
     changed = list(branches[side])
     index = _POSITIONS.index(position)
-    changed[index] = changed[index].as_subclass(AlternateTensor)
+    changed[index] = changed[index].as_subclass(_AlternateTensor)
     branches[side] = tuple(changed)
     expected = loss(*branches["left"]), loss(*branches["right"])
     with patch("torch.cat", side_effect=AssertionError("tensor subclass concatenated")):
         actual = loss._forward_pair(branches["left"], branches["right"])
-    for a, b in zip(actual, expected, strict=True):
-        assert torch.equal(a, b)
+    _assert_bitwise_equal(actual, expected)
 
 
 @requires_cuda
 def test_pair_device_mismatch_keeps_native_calls() -> None:
     """Branches on different devices are never concatenated; each is scored by its own call.
 
-    The CPU branch then meets a CUDA-resident loss and the native call refuses it, which
-    is the observable proof that the pair stepped aside instead of moving or merging data.
+    The CPU branch then meets a CUDA-resident loss and the native call refuses it, which is the observable proof that
+    the pair stepped aside instead of moving or merging data.
     """
     loss = RLELoss().double().to("cuda")
     left, right = _inputs(1, device="cuda"), _inputs(2)

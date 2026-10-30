@@ -1,32 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
 """Verify a provisioned COCO-format root actually holds every annotated image.
 
-This is the packaged dataset preflight the shipped downloader exposes via
-``lucid-data download --verify`` / ``--verify_only``. For each requested split it
-parses the annotation JSON and confirms that every ``file_name`` the annotations
-enumerate is present on disk (a single :func:`os.scandir` per split directory and
-a set difference, so it stays fast on the 118,287-image train split). It reports
-per-split totals — expected, present, missing count, and a short sample of the
-missing names — plus the annotation file's own existence, and drives a non-zero
-exit when anything is missing.
+This is the packaged dataset preflight the shipped downloader exposes via ``lucid-data download --verify`` /
+``--verify_only``. For each requested split it parses the annotation JSON and confirms that every ``file_name`` the
+annotations enumerate is present on disk (a single :func:`os.scandir` per split directory and a set difference, so it
+stays fast on the 118,287-image train split). It reports per-split totals — expected, present, missing count, and a
+short sample of the missing names — plus the annotation file's own existence, and drives a non-zero exit when anything
+is missing.
 
-Each split's images directory and annotation file come from
-:func:`~lucid_yolo.data.layout.resolve_split`, the resolver the reader and the layout probe
-use: COCO 2017's own ``val2017`` + ``instances_val2017.json`` when that pair exists, any other
-spelling the layout table accepts (the plain ``val/`` + ``instances_val.json`` a tiles build
-writes, among them) when it does, and the COCO 2017 pair again when nothing matches — so a
-missing download is still reported under the names the downloader writes.
+Each split's images directory and annotation file come from :func:`~lucid_yolo.data.layout.resolve_split`, the
+resolver the reader and the layout probe use: COCO 2017's own ``val2017`` + ``instances_val2017.json`` when that pair
+exists, any other spelling the layout table accepts (the plain ``val/`` + ``instances_val.json`` a tiles build writes,
+among them) when it does, and the COCO 2017 pair again when nothing matches — so a missing download is still reported
+under the names the downloader writes.
 
 Relationship to :mod:`lucid_yolo.data.check`:
-    :mod:`lucid_yolo.data.check` is the ``lucid-data check`` gate and validates
-    the layout by **counts** — fixed per-split image totals (118,287 / 5,000) and
-    annotation-vs-disk count *parity*. This module performs the complementary
-    **per-file existence** check instead: it names exactly which annotated images
-    are missing rather than only noticing that a count is off. The two checks are
-    deliberately kept separate — their logic differs materially (counts vs.
-    per-file presence), and unlike ``scripts/check_data.py`` (which is not shipped
-    in the wheel) this module ships inside ``lucid_yolo`` so pip-installed users
-    get a preflight without the developer tooling.
+    :mod:`lucid_yolo.data.check` is the ``lucid-data check`` gate and validates the layout by **counts** — fixed
+    per-split image totals (118,287 / 5,000) and annotation-vs-disk count *parity*. This module performs the
+    complementary **per-file existence** check instead: it names exactly which annotated images are missing rather than
+    only noticing that a count is off. The two checks are deliberately kept separate — their logic differs materially
+    (counts vs. per-file presence), and unlike ``scripts/check_data.py`` (which is not shipped in the wheel) this
+    module ships inside ``lucid_yolo`` so pip-installed users get a preflight without the developer tooling.
 
 Examples:
     Verify an existing root before training::
@@ -70,8 +64,8 @@ class SplitVerification:
     Attributes:
         name: Split directory name (e.g. ``"val2017"``).
         annotation_present: Whether the split's annotation JSON exists and parsed.
-        expected: Number of images the annotations enumerate (``0`` when the
-            annotation file is missing or failed to parse).
+        expected: Number of images the annotations enumerate (``0`` when the annotation file is missing or failed to
+            parse).
         present: How many of those enumerated images are actually on disk.
         missing: A capped, sorted sample of the missing file names.
         missing_count: Total number of enumerated images missing from disk.
@@ -115,10 +109,9 @@ def _load_image_names(annotation_file: Path) -> tuple[list[str], str | None]:
         annotation_file: Path to the split's ``instances_*.json``.
 
     Returns:
-        A ``(names, error)`` pair: ``names`` is the declared image file names (an
-        empty list on failure) and ``error`` is a message naming the file when it is
-        missing, cannot be parsed, or carries a top level, ``images`` section or
-        ``images`` entry of the wrong JSON type, else ``None``.
+        A ``(names, error)`` pair: ``names`` is the declared image file names (an empty list on failure) and ``error``
+        is a message naming the file when it is missing, cannot be parsed, or carries a top level, ``images`` section
+        or ``images`` entry of the wrong JSON type, else ``None``.
     """
     if not annotation_file.is_file():
         return [], f"annotation file missing: {annotation_file}"
@@ -148,8 +141,7 @@ def _present_names(images_dir: Path) -> set[str]:
         images_dir: The split's image directory.
 
     Returns:
-        The names of regular files in the directory, or an empty set when the
-        directory does not exist.
+        The names of regular files in the directory, or an empty set when the directory does not exist.
     """
     if not images_dir.is_dir():
         return set()
@@ -173,8 +165,7 @@ def verify_split(
         sample: Maximum number of missing file names to keep in the report.
 
     Returns:
-        A :class:`SplitVerification` capturing the counts, a missing sample, and
-        any problems found.
+        A :class:`SplitVerification` capturing the counts, a missing sample, and any problems found.
 
     Examples:
         ```pycon
@@ -218,8 +209,7 @@ def verify_coco_root(
     Args:
         data_root: Directory holding the split directories and their annotation files,
             in any spelling :func:`~lucid_yolo.data.layout.resolve_split` resolves.
-        splits: Short split names to verify (``"train"`` / ``"val"``); duplicates
-            are collapsed and order is preserved.
+        splits: Short split names to verify (``"train"`` / ``"val"``); duplicates are collapsed and order is preserved.
         sample: Maximum number of missing file names kept per split report.
 
     Returns:

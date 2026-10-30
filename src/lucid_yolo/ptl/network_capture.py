@@ -1,13 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Opt-in replay of fixed network stages' CUDA forward and backward work.
 
-The network has a fixed image signature while its ground-truth count changes per
-batch. Detection and oriented detection record backbone, neck and head; pose records
-backbone, neck and each prediction stem separately; segmentation records backbone and neck.
-All four leave assignment, losses, schedules, optimizer and EMA in their existing loop.
-PyTorch's graphed-callable API owns the
-autograd bridge; no network arithmetic is rewritten. The recording is transient,
-bounded to one input signature and discarded at the fit boundary.
+The network has a fixed image signature while its ground-truth count changes per batch. Detection and oriented
+detection record backbone, neck and head; pose records backbone, neck and each prediction stem separately;
+segmentation records backbone and neck. All four leave assignment, losses, schedules, optimizer and EMA in their
+existing loop. PyTorch's graphed-callable API owns the autograd bridge; no network arithmetic is rewritten. The
+recording is transient, bounded to one input signature and discarded at the fit boundary.
 
 Examples:
     Copying the transient holder starts with no recording, even without CUDA:
@@ -52,8 +50,8 @@ _Members = tuple[tuple[nn.Module, ...], tuple[Tensor, ...], tuple[Tensor, ...]]
 #: First verified BF16 replay runtime, bound here so a patch of this module reaches the gate below.
 _BF16_REPLAY_SUPPORTED = BF16_REPLAY_SUPPORTED
 
-#: Method names through which a module's call reaches its arithmetic; the same name set on
-#: an instance shadows the class method a recording replays or a certificate fingerprints.
+#: Method names through which a module's call reaches its arithmetic; the same name set on an instance shadows the
+#: class method a recording replays or a certificate fingerprints.
 _DISPATCH = ("forward", "forward_branch", "_keypoints", "_base_predictions")
 _NATIVE_ENUMERATION = {
     name: getattr(nn.Module, name)
@@ -139,13 +137,11 @@ class _OrientedNetwork(nn.Module):
 class _FeatureNetwork(nn.Module):
     """Expose backbone and neck without fixing which optional head gradients exist.
 
-    A pose or segmentation batch may have no assigned positives. Its optional
-    branches (pose point stems; segmentation coefficient, prototype and semantic
-    predictions) then keep ``grad=None``; including them in one fixed backward
-    would materialize zero gradients and advance optimizer state that the native
-    loop skips. The shared features still feed the dense classification objective,
-    while those branches keep independent backward nodes outside the recording and
-    variable supervision stays native.
+    A pose or segmentation batch may have no assigned positives. Its optional branches (pose point stems;
+    segmentation coefficient, prototype and semantic predictions) then keep ``grad=None``; including them in one
+    fixed backward would materialize zero gradients and advance optimizer state that the native loop skips. The
+    shared features still feed the dense classification objective, while those branches keep independent backward
+    nodes outside the recording and variable supervision stays native.
     """
 
     def __init__(self, backbone: nn.Module, neck: nn.Module) -> None:
@@ -196,22 +192,19 @@ def _module_breach(
 ) -> str | None:
     """Name the first way a module's call runs code its class methods do not show, if any.
 
-    A recording replays what the class methods computed when it was made, and the pose
-    head certificate trusts the class methods it fingerprinted. A module hook, an
-    instance attribute shadowing a dispatch method or a compiled call breaks both, so
-    the recorder and the certificate share this one predicate.
+    A recording replays what the class methods computed when it was made, and the pose head certificate trusts the
+    class methods it fingerprinted. A module hook, an instance attribute shadowing a dispatch method or a
+    compiled call breaks both, so the recorder and the certificate share this one predicate.
 
     Args:
         modules: The modules whose calls must stay what their class methods define.
         dispatch: Method names through which a call reaches its arithmetic.
-        exclude: A module whose instance dispatch attributes do not count: the recorder's
-            own root, whose ``forward`` the graphed callable replaces. Its hooks and
-            compiled call still count.
+        exclude: A module whose instance dispatch attributes do not count: the recorder's own root, whose ``forward``
+            the graphed callable replaces. Its hooks and compiled call still count.
 
     Returns:
-        The breach as the predicate of a sentence about one module ("carries a forward or
-        backward hook"), checked in the order hooks, dispatch overrides, compiled calls;
-        ``None`` when no module breaches.
+        The breach as the predicate of a sentence about one module ("carries a forward or backward hook"),
+        checked in the order hooks, dispatch overrides, compiled calls; ``None`` when no module breaches.
     """
     members = tuple(modules)
     if any(module_hook_breach(module) for module in members):
@@ -229,9 +222,9 @@ def _module_breach(
 def _members(owner: nn.Module) -> _Members:
     """Enumerate current modules and both tensor registries in one traversal.
 
-    The direct registries retain ``named_parameters`` and ``named_buffers`` preorder
-    and identity deduplication. This is shared work within one check, never a cached
-    topology: replacement, aliases and registration order are read on every call.
+    The direct registries retain ``named_parameters`` and ``named_buffers`` preorder and identity deduplication.
+    This is shared work within one check, never a cached topology: replacement, aliases and registration order
+    are read on every call.
     """
     if any(
         getattr(type(owner), name) is not method or name in vars(owner) for name, method in _NATIVE_ENUMERATION.items()
@@ -283,13 +276,12 @@ def _module_signature(modules: tuple[nn.Module, ...]) -> tuple[object, ...]:
 class _ModuleMetadata:
     """Reuse scalar metadata only while every binding and class forward is unchanged.
 
-    Stored objects stay alive. Identity comparisons never call tensor equality, and
-    unchanged dictionary identities alone certify nothing: keys, their order and every
-    value are reread. The public training mode is read too: a descriptor can change it
-    without rebinding an instance scalar. Hooks, live registration and tensor storage remain independent
-    checks. A miss computes the original signature, including equal-value replacements.
-    Recording pairs post-warmup bindings with a fresh scalar snapshot while the owner
-    keeps its original drift stamp; warmup side effects must still retire the graph.
+    Stored objects stay alive. Identity comparisons never call tensor equality, and unchanged dictionary identities
+    alone certify nothing: keys, their order and every value are reread. The public training mode is read too: a
+    descriptor can change it without rebinding an instance scalar. Hooks, live registration and tensor storage remain
+    independent checks. A miss computes the original signature, including equal-value replacements. Recording pairs
+    post-warmup bindings with a fresh scalar snapshot while the owner keeps its original drift stamp; warmup side
+    effects must still retire the graph.
     """
 
     def __init__(self, modules: tuple[nn.Module, ...], signature: tuple[object, ...]) -> None:
@@ -374,9 +366,9 @@ def _network_signature(
 def _caller_stacklevel() -> int:
     """Name the first frame outside the replay stack in a warning that a pose stem holder raises.
 
-    A stem holder is reached through the head's dispatch and the module call machinery,
-    whose depth no fixed ``stacklevel`` can follow. Counting starts at the frame that calls
-    :func:`warnings.warn`, which is the caller of this function.
+    A stem holder is reached through the head's dispatch and the module call machinery, whose depth no fixed
+    ``stacklevel`` can follow. Counting starts at the frame that calls :func:`warnings.warn`, which is the caller of
+    this function.
     """
     internal = {
         __file__,
@@ -394,10 +386,9 @@ def _caller_stacklevel() -> int:
 class _NetworkCapture:
     """Own one fit's recording without registering another copy of the model's parameters.
 
-    The holder is an ordinary Python object, so Lightning checkpoints keep the original
-    parameter names. Pickle and deepcopy discard its recording too. An input-size change
-    takes the eager route; a change to model storage, modes, hooks or precision retires
-    the recording for the rest of the fit instead of replaying stale work. Anomaly
+    The holder is an ordinary Python object, so Lightning checkpoints keep the original parameter names. Pickle and
+    deepcopy discard its recording too. An input-size change takes the eager route; a change to model storage,
+    modes, hooks or precision retires the recording for the rest of the fit instead of replaying stale work. Anomaly
     detection stays eager so its backward NaN checks remain observable.
     """
 
@@ -409,11 +400,10 @@ class _NetworkCapture:
     def clear(self) -> None:
         """Reset the holder, then drain the recorded device before the recordings are released.
 
-        The reset comes first, so a failing drain still leaves an empty holder; the stem holders
-        and this holder's recording stay alive in local references until the drain has finished.
-        Every stem holder is cleared even when an earlier one fails, and the first failure is
-        raised once all are. Without a recording nothing is drained, so a CPU run and
-        :meth:`__setstate__` never touch the CUDA runtime.
+        The reset comes first, so a failing drain still leaves an empty holder; the stem holders and this holder's
+        recording stay alive in local references until the drain has finished. Every stem holder is cleared
+        even when an earlier one fails, and the first failure is raised once all are. Without a recording nothing is
+        drained, so a CPU run and :meth:`__setstate__` never touch the CUDA runtime.
         """
         stems = tuple(getattr(self, "_stems", {}).values())
         previous, device = getattr(self, "_network", None), getattr(self, "_device", None)
@@ -459,8 +449,8 @@ class _NetworkCapture:
     def retired(self) -> bool:
         """Report whether this fit's recording was retired, so every later call takes the eager route.
 
-        Callers read it to skip their own replay checks once no cause they could find would
-        change the route; :meth:`clear` at the next fit resets it.
+        Callers read it to skip their own replay checks once no cause they could find would change the route;
+        :meth:`clear` at the next fit resets it.
 
         Examples:
             ```pycon
@@ -481,21 +471,19 @@ class _NetworkCapture:
     def retire(self, reason: str, *, stacklevel: int = 3) -> None:
         """Retire a recording whose static execution contract no longer holds.
 
-        Only the first cause of a fit is reported: the holder stays eager afterwards, so
-        later causes change nothing a user could act on. A pose stem holder retires only
-        its own stem, so its warning names that stem and says the shared features and the
-        other stems keep replaying; each stem reports its own first cause.
+        Only the first cause of a fit is reported: the holder stays eager afterwards, so later causes change nothing
+        a user could act on. A pose stem holder retires only its own stem, so its warning names that stem and says
+        the shared features and the other stems keep replaying; each stem reports its own first cause.
 
         Args:
-            reason: Which part of the recording contract broke, completing the warning
-                that starts ``capture_network=True stays eager:``, or, for a stem holder,
+            reason: Which part of the recording contract broke, completing the warning that starts
+                ``capture_network=True stays eager:``, or, for a stem holder,
                 ``capture_network=True keeps pose stem <name> eager ...:``.
-            stacklevel: The frame the warning names, counted as :func:`warnings.warn`
-                counts from this method. The default names the caller of whoever called
-                ``retire``; :meth:`_run` passes 4 so a retirement it decides still names
-                the code that called :meth:`run`, :meth:`run_features` or :meth:`run_oriented`.
-                A stem holder ignores it and names the first frame outside the head and
-                this module, the training code that called the head.
+            stacklevel: The frame the warning names, counted as :func:`warnings.warn` counts from this method.
+                The default names the caller of whoever called ``retire``; :meth:`_run` passes 4 so a retirement
+                it decides still names the code that called :meth:`run`, :meth:`run_features` or :meth:`run_oriented`.
+                A stem holder ignores it and names the first frame outside the head and this module, the training
+                code that called the head.
         """
         if self._disabled:
             return
@@ -557,9 +545,9 @@ class _NetworkCapture:
     def check_stem_owners(self, head: nn.Module) -> None:
         """Retire all recordings before changed head ownership can retain obsolete pools.
 
-        The owner checks this before shared-feature replay, so replacing an otherwise
-        identical stem keeps the complete forward native and the holder count bounded.
-        Fit cleanup and serialization reset this transient identity signature.
+        The owner checks this before shared-feature replay, so replacing an otherwise identical stem keeps
+        the complete forward native and the holder count bounded. Fit cleanup and serialization reset this transient
+        identity signature.
         """
         if self._disabled:
             return
@@ -573,12 +561,11 @@ class _NetworkCapture:
     def stem(self, stage: nn.Module, feature: Tensor) -> Tensor:
         """Record each pose stem independently so unused point outputs keep absent gradients.
 
-        The parent owns these holders: fit boundaries and skipped backwards reset them
-        together with the shared-feature recording. Each stem retains its own input
-        signature, state guards and autograd node, with no fixed joint backward that
-        would advance unused point-stem optimizer state. An eval-mode stem never starts a
-        recording; a recorded stem switched to eval reaches the drift check and retires,
-        as a mode change of a recorded feature stage does.
+        The parent owns these holders: fit boundaries and skipped backwards reset them together with the
+        shared-feature recording. Each stem retains its own input signature, state guards and autograd node,
+        with no fixed joint backward that would advance unused point-stem optimizer state. An eval-mode stem never
+        starts a recording; a recorded stem switched to eval reaches the drift check and retires, as a mode change
+        of a recorded feature stage does.
         """
         if self._disabled or not feature.is_cuda or not torch.is_grad_enabled():
             return cast("Tensor", stage(feature))
@@ -597,8 +584,8 @@ class _NetworkCapture:
     def coefficients(branch: _DetectionBranch, features: _Features) -> Tensor | None:
         """Keep the shared prediction-runner protocol's unused mask path native.
 
-        Pose builds no coefficient stems. This adapter composes the existing private
-        runner seam without extending the recording into an optional mask objective.
+        Pose builds no coefficient stems. This adapter composes the existing private runner seam
+        without extending the recording into an optional mask objective.
         """
         return branch._coefficients(features)
 
@@ -617,12 +604,12 @@ class _NetworkCapture:
         Args:
             images: The training batch; its shape, strides, dtype and device key the recording.
             stages: The caller's stage modules, whose identities the recording keeps.
-            eager: Produces the value returned whenever this call does not replay. It is a
-                fallback value, not necessarily the native result: :meth:`run` passes the
-                native forward, and so does :meth:`run_oriented`, while :meth:`run_features`
-                returns ``None`` so its caller makes the full native call itself.
-            build: Composes the stages into the module checked for eligibility until a
-                recording exists, and captured by the first one.
+            eager: Produces the value returned whenever this call does not replay. It is a fallback value,
+                not necessarily the native result: :meth:`run` passes the native forward, and so does
+                :meth:`run_oriented`, while :meth:`run_features` returns ``None`` so its caller makes
+                the full native call itself.
+            build: Composes the stages into the module checked for eligibility until a recording exists,
+                and captured by the first one.
             rebuild: Turns the replayed output tensors back into the caller's value.
             allow_input_grad: Permit differentiable feature inputs for an independent stem.
 
@@ -650,8 +637,8 @@ class _NetworkCapture:
             return eager(images)
         signature = tuple(images.shape), images.stride(), images.dtype, images.device, images.requires_grad, precision
         if (self._input is not None and signature != self._input) or self._pending_backward:
-            # A second forward before the previous replay's backward would overwrite the
-            # static activations that backward still has to read, so it runs eagerly.
+            # A second forward before the previous replay's backward would overwrite the static activations
+            # that backward still has to read, so it runs eagerly.
             return eager(images)
         with replay_autocast():
             if self._network is None:
@@ -671,9 +658,9 @@ class _NetworkCapture:
     def _await_backward(self, outputs: tuple[Tensor, ...]) -> None:
         """Hold later forwards eager until this replay's backward has read the static buffers.
 
-        The replay's outputs share the graphed function's backward node; its post-hook runs
-        once that backward has consumed the static activations, and releases the hold. An
-        output without a backward node (a fully frozen network) leaves nothing to guard.
+        The replay's outputs share the graphed function's backward node; its post-hook runs once that backward
+        has consumed the static activations, and releases the hold. An output without a backward node
+        (a fully frozen network) leaves nothing to guard.
         """
         node = outputs[0].grad_fn
         if node is None:
@@ -684,19 +671,17 @@ class _NetworkCapture:
     def _copy_out_live_gradients(self) -> None:
         """Move live parameter gradients out of the storage the next replayed backward overwrites.
 
-        A parameter whose ``.grad`` was adopted from the static gradient buffers still
-        aliases them, so the next replayed backward would overwrite it and then accumulate
-        onto itself. Any ``.grad`` alive before a replay (gradient accumulation, an in-place
-        ``zero_grad``, a callback keeping gradients) is copied out first. Lightning clears
-        gradients after the training step's forward. The shared helper can omit copies
-        only inside a certified native closure that clears those same parameters before
-        backward; accumulated or observed gradients retain their copies.
+        A parameter whose ``.grad`` was adopted from the static gradient buffers still aliases them, so the next
+        replayed backward would overwrite it and then accumulate onto itself. Any ``.grad`` alive before a replay
+        (gradient accumulation, an in-place ``zero_grad``, a callback keeping gradients) is copied out first.
+        Lightning clears gradients after the training step's forward. The shared helper can omit copies only inside
+        a certified native closure that clears those same parameters before backward; accumulated or observed
+        gradients retain their copies.
 
-        The copy runs at forward time, before the replay. The hold in :meth:`_await_backward`
-        keeps any other replay from running between this forward and its backward, so no
-        gradient can alias the static buffers again before that backward writes them. The
-        same copy made from a pre-hook inside the replayed backward left every accumulated
-        gradient wrong on CUDA (WP-206).
+        The copy runs at forward time, before the replay. The hold in :meth:`_await_backward` keeps any other replay
+        from running between this forward and its backward, so no gradient can alias the static buffers again
+        before that backward writes them. The same copy made from a pre-hook inside the replayed backward left every
+        accumulated gradient wrong on CUDA (WP-206).
         """
         network = self._network
         if network is None:
@@ -711,8 +696,8 @@ class _NetworkCapture:
     def start_batch(self) -> None:
         """Drop a hold whose backward never ran, so the next training batch may replay again.
 
-        A ``training_step`` returning ``None`` skips the backward, so the post-hook that
-        normally releases the hold never fires; a new batch makes that replay unreachable.
+        A ``training_step`` returning ``None`` skips the backward, so the post-hook that normally releases the hold
+        never fires; a new batch makes that replay unreachable.
         """
         self._pending_backward = False
         for holder in self._stems.values():

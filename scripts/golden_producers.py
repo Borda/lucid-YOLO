@@ -1,29 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 """Golden-metric producers for the WP-005 golden harness.
 
-A *producer* is a zero-argument function returning ``dict[str, float]`` whose
-result the golden harness (``scripts/check_goldens.py``) recomputes and compares
-against a frozen ``goldens/*.json`` file. Every metric here is deterministic so
-that an unchanged codebase reproduces byte-identical values on every run.
+A *producer* is a zero-argument function returning ``dict[str, float]`` whose result the golden harness
+(``scripts/check_goldens.py``) recomputes and compares against a frozen ``goldens/*.json`` file. Every metric here is
+deterministic so that an unchanged codebase reproduces byte-identical values on every run.
 
-Four real producers live here. :func:`fixture_checksums` derives its metrics from
-the seeded WP-007 synthetic fixtures. Because those fixtures live under
-``tests/fixtures/`` (not an importable package), they are loaded by file path via
-``importlib.util`` — the same trick ``scripts/_tests/test_audit_licenses.py`` uses.
-:func:`data_pipeline_metrics` (WP-015) draws a fixed set of samples through the
-Phase-1 augmentation pipeline (mosaic/affine/letterbox/mixup/copy-paste/photometric)
-over those fixtures with a fixed seed and records platform-stable batch metrics:
-exact integer counts (drawn samples, total instances, polygon rings, image shape)
-plus tolerance-pinned float aggregates (image mean/std sums, bbox area/coord sums),
-which drift only within libm/``interpolate`` rounding across OS and architecture.
-:func:`optim_toy` (WP-033) runs a fully seeded toy training task and reports how
-many optimization steps :class:`~lucid_yolo.optim.MuSGD` and momentum-SGD each need
-to reach a fixed loss threshold — a directional convergence claim mirroring R1
-Table 4 at toy scale. :func:`assignment_cases` (WP-029) freezes the Phase-3 label
--assignment behavior: it runs the Task-Aligned, Small-Target-Aware, and one-to-one
-assigners on hand-placed synthetic scenes (no RNG) and records integer candidate
-and positive counts — every value produced by running an assigner, never
-hand-written.
+Four real producers live here. :func:`fixture_checksums` derives its metrics from the seeded WP-007 synthetic
+fixtures. Because those fixtures live under ``tests/fixtures/`` (not an importable package), they are loaded by
+file path via ``importlib.util`` — the same trick ``scripts/_tests/test_audit_licenses.py`` uses.
+:func:`data_pipeline_metrics` (WP-015) draws a fixed set of samples through the Phase-1 augmentation pipeline
+(mosaic/affine/letterbox/mixup/copy-paste/photometric) over those fixtures with a fixed seed and records
+platform-stable batch metrics: exact integer counts (drawn samples, total instances, polygon rings, image shape)
+plus tolerance-pinned float aggregates (image mean/std sums, bbox area/coord sums), which drift only within
+libm/``interpolate`` rounding across OS and architecture. :func:`optim_toy` (WP-033) runs a fully seeded toy
+training task and reports how many optimization steps :class:`~lucid_yolo.optim.MuSGD` and momentum-SGD each need
+to reach a fixed loss threshold — a directional convergence claim mirroring R1 Table 4 at toy scale.
+:func:`assignment_cases` (WP-029) freezes the Phase-3 label
+-assignment behavior: it runs the Task-Aligned, Small-Target-Aware, and one-to-one assigners on hand-placed
+synthetic scenes (no RNG) and records integer candidate and positive counts — every value produced by running an
+assigner, never hand-written.
 
 Examples:
     ```pycon
@@ -110,13 +105,11 @@ def _load_synthetic() -> ModuleType:
 def _dataset_metrics(prefix: str, dataset_dir: Path) -> dict[str, float]:
     """Compute structural fixture metrics that are stable across platforms.
 
-    Counts (images, annotations, categories, polygon points) are integers and
-    compare exactly. Geometry aggregates (bbox area / coordinate sums) are
-    float-derived: the generator's trigonometry goes through libm, whose last-bit
-    rounding differs across OS/architecture, so byte-hashes of the annotation
-    JSON diverge between platforms (observed: macOS arm64 vs ubuntu x86_64 CI).
-    Aggregates drift only in the ~1e-3 range and are pinned with a small golden
-    tolerance instead of a hash.
+    Counts (images, annotations, categories, polygon points) are integers and compare exactly. Geometry aggregates
+    (bbox area / coordinate sums) are float-derived: the generator's trigonometry goes through libm, whose last-bit
+    rounding differs across OS/architecture, so byte-hashes of the annotation JSON diverge between platforms
+    (observed: macOS arm64 vs ubuntu x86_64 CI). Aggregates drift only in the ~1e-3 range and are pinned with a
+    small golden tolerance instead of a hash.
 
     Args:
         prefix: Metric-name prefix identifying the fixture set (``detseg``/``obb``).
@@ -156,13 +149,11 @@ def _dataset_metrics(prefix: str, dataset_dir: Path) -> dict[str, float]:
 def fixture_checksums() -> dict[str, float]:
     """Deterministic checksum metrics over the WP-007 synthetic fixtures.
 
-    Generates both seeded fixture sets (detection/segmentation and oriented-box)
-    into a throwaway temporary directory, then reports each set's structural
-    metrics: exact counts (images, annotations, categories, polygon points) and
-    tolerance-pinned geometry aggregates (bbox area / coordinate sums). The seeds
-    are fixed (A26): counts are identical on every platform, aggregates drift
-    only within libm rounding across OS/architecture (see
-    :func:`_dataset_metrics`).
+    Generates both seeded fixture sets (detection/segmentation and oriented-box) into a throwaway temporary
+    directory, then reports each set's structural metrics: exact counts (images, annotations, categories, polygon
+    points) and tolerance-pinned geometry aggregates (bbox area / coordinate sums). The seeds are fixed (A26):
+    counts are identical on every platform, aggregates drift only within libm rounding across OS/architecture
+    (see :func:`_dataset_metrics`).
 
     Returns:
         A mapping of twelve metrics, six per fixture set prefix
@@ -208,12 +199,11 @@ _PIPELINE_SAMPLE_INDICES = tuple(range(8))
 def _pipeline_metrics(pipeline: _TrainPipeline) -> dict[str, float]:
     """Draw the fixed sample set through ``pipeline`` and aggregate stable metrics.
 
-    Walks :data:`_PIPELINE_SAMPLE_INDICES` in order (the seeded generator advances
-    with each draw, so the order is load-bearing) and accumulates: exact integer
-    counts (drawn samples, total instances, polygon rings, the shared image shape)
-    and float aggregates (image mean/std sums, bounding-box area/coordinate sums).
-    The counts compare exactly across platforms; the float aggregates drift only
-    within ``interpolate``/libm rounding and are pinned with a golden tolerance.
+    Walks :data:`_PIPELINE_SAMPLE_INDICES` in order (the seeded generator advances with each draw, so the order is
+    load-bearing) and accumulates: exact integer counts (drawn samples, total instances, polygon rings, the shared
+    image shape) and float aggregates (image mean/std sums, bounding-box area/coordinate sums). The counts compare
+    exactly across platforms; the float aggregates drift only within ``interpolate``/libm rounding and are pinned
+    with a golden tolerance.
 
     Args:
         pipeline: The train-time augmentation pipeline to draw from.
@@ -258,15 +248,12 @@ def _pipeline_metrics(pipeline: _TrainPipeline) -> dict[str, float]:
 def data_pipeline_metrics() -> dict[str, float]:
     """Platform-stable augmented-batch metrics over the WP-015 train pipeline.
 
-    Regenerates the seeded WP-007 detection/segmentation fixtures into a throwaway
-    directory, builds the Phase-1 augmentation pipeline
-    (:class:`~lucid_yolo.ptl.datamodule._TrainPipeline`: mosaic, affine, letterbox,
-    mixup, copy-paste, HSV jitter, flip) over them with a fixed seed and the
-    ``"n"`` strength policy, and draws :data:`_PIPELINE_SAMPLE_INDICES` in order.
-    Every value is produced by *running* the pipeline — never hand-written — so the
-    golden re-derives from live augmentation behavior. Counts are exact across
-    platforms; image-statistic and bounding-box aggregates drift only within
-    ``interpolate``/libm rounding and carry a small golden tolerance.
+    Regenerates the seeded WP-007 detection/segmentation fixtures into a throwaway directory, builds the Phase-1
+    augmentation pipeline (:class:`~lucid_yolo.ptl.datamodule._TrainPipeline`: mosaic, affine, letterbox, mixup,
+    copy-paste, HSV jitter, flip) over them with a fixed seed and the ``"n"`` strength policy, and draws
+    :data:`_PIPELINE_SAMPLE_INDICES` in order. Every value is produced by *running* the pipeline — never hand-written
+    — so the golden re-derives from live augmentation behavior. Counts are exact across platforms; image-statistic
+    and bounding-box aggregates drift only within ``interpolate``/libm rounding and carry a small golden tolerance.
 
     Returns:
         The mapping from :func:`_pipeline_metrics` for the fixed draw.
@@ -319,10 +306,9 @@ _TOY_INIT_SEED = 303
 def _toy_batch() -> tuple[Tensor, Tensor]:
     """Build the seeded toy regression batch: inputs and their linear-map targets.
 
-    Seeds torch immediately before each stochastic draw (the input batch, then
-    the ground-truth linear map) so the batch is byte-identical on every call,
-    independent of any ambient RNG state — this is what makes :func:`optim_toy`
-    reproducible.
+    Seeds torch immediately before each stochastic draw (the input batch, then the ground-truth linear map) so the
+    batch is byte-identical on every call, independent of any ambient RNG state — this is what makes
+    :func:`optim_toy` reproducible.
 
     Returns:
         An ``(inputs, targets)`` pair. ``inputs`` has shape
@@ -351,10 +337,9 @@ def _toy_batch() -> tuple[Tensor, Tensor]:
 def _build_toy_model() -> nn.Sequential:
     """Construct the micro-CNN with fixed, reproducible weight initialization.
 
-    Seeds torch immediately before construction so both optimizer runs start from
-    byte-identical parameters. The network is two ``3x3`` convolutions (each
-    followed by ReLU) and a linear head — a few thousand parameters whose matrix
-    weights exercise the Muon branch of :class:`~lucid_yolo.optim.MuSGD`.
+    Seeds torch immediately before construction so both optimizer runs start from byte-identical parameters. The
+    network is two ``3x3`` convolutions (each followed by ReLU) and a linear head — a few thousand parameters whose
+    matrix weights exercise the Muon branch of :class:`~lucid_yolo.optim.MuSGD`.
 
     Returns:
         A freshly initialized :class:`torch.nn.Sequential` mapping an image batch
@@ -383,10 +368,9 @@ def _build_toy_model() -> nn.Sequential:
 def _steps_to_threshold(model: nn.Module, optimizer: Optimizer, inputs: Tensor, targets: Tensor) -> tuple[int, float]:
     """Train ``model`` with ``optimizer`` until the MSE loss first reaches the threshold.
 
-    Evaluates the mean-squared-error loss on the fixed batch before every
-    optimizer step and stops as soon as it drops to :data:`_TOY_LOSS_THRESHOLD`,
-    capping at :data:`_TOY_MAX_STEPS`. The returned step count is the number of
-    optimizer steps taken before the threshold was met.
+    Evaluates the mean-squared-error loss on the fixed batch before every optimizer step and stops as soon as it
+    drops to :data:`_TOY_LOSS_THRESHOLD`, capping at :data:`_TOY_MAX_STEPS`. The returned step count is the
+    number of optimizer steps taken before the threshold was met.
 
     Args:
         model: The network to train in place.
@@ -429,13 +413,11 @@ def _steps_to_threshold(model: nn.Module, optimizer: Optimizer, inputs: Tensor, 
 def optim_toy() -> dict[str, float]:
     """Directional convergence metrics: MuSGD reaches a loss threshold in fewer steps than SGD.
 
-    Trains two byte-identical copies of the micro-CNN (:func:`_build_toy_model`)
-    on the same fixed regression task (:func:`_toy_batch`) — one with
-    :class:`~lucid_yolo.optim.MuSGD`, one with :class:`torch.optim.SGD` at the same
-    learning rate and momentum — and reports how many optimizer steps each needs
-    to drive the MSE loss to :data:`_TOY_LOSS_THRESHOLD`. This mirrors R1 Table
-    4's MuSGD-beats-SGD result at toy scale. Every stochastic draw is seeded
-    (:func:`_toy_batch` and :func:`_build_toy_model` re-seed internally), so two
+    Trains two byte-identical copies of the micro-CNN (:func:`_build_toy_model`) on the same fixed regression task
+    (:func:`_toy_batch`) — one with :class:`~lucid_yolo.optim.MuSGD`, one with :class:`torch.optim.SGD` at the same
+    learning rate and momentum — and reports how many optimizer steps each needs to drive the MSE loss to
+    :data:`_TOY_LOSS_THRESHOLD`. This mirrors R1 Table 4's MuSGD-beats-SGD result at toy scale.
+    Every stochastic draw is seeded (:func:`_toy_batch` and :func:`_build_toy_model` re-seed internally), so two
     in-process calls return identical dicts regardless of ambient RNG state.
 
     Returns:
@@ -479,29 +461,26 @@ _SCENE_SCORE = 0.9
 _S_MIN = 8.0
 _S_REF = 16.0
 
-#: Tiny-target scene (scenario i): a 4x4 stride-8 grid (anchor centres at 4, 12,
-#: 20, 28) and a 6x6 ground truth centred at (8, 8) — no anchor centre lies inside
-#: it, so vanilla TAL yields zero candidates while STAL's 16x16 surrogate admits
-#: four. ``topk`` exceeds the candidate count so every candidate becomes positive.
+#: Tiny-target scene (scenario i): a 4x4 stride-8 grid (anchor centres at 4, 12, 20, 28) and a 6x6 ground truth
+#: centred at (8, 8) — no anchor centre lies inside it, so vanilla TAL yields zero candidates while STAL's 16x16
+#: surrogate admits four. ``topk`` exceeds the candidate count so every candidate becomes positive.
 _TINY_FEATURE_SIZES = [(4, 4)]
 _TINY_STRIDES = [8]
 _TINY_GT = torch.tensor([[[5.0, 5.0, 11.0, 11.0]]])
 _TINY_TOPK = 4
 
-#: Per-dimension scene (scenario ii): an 8x8 stride-8 grid (64-pixel input) and a
-#: ground truth centred at (24, 24). The 6-wide/20-tall variant inflates only its
-#: width (6 -> 16) and the 20-wide/6-tall variant only its height, so the surrogate
-#: clamp is exercised independently on each axis.
+#: Per-dimension scene (scenario ii): an 8x8 stride-8 grid (64-pixel input) and a ground truth centred at (24, 24).
+#: The 6-wide/20-tall variant inflates only its width (6 -> 16) and the 20-wide/6-tall variant only its height, so
+#: the surrogate clamp is exercised independently on each axis.
 _PERDIM_FEATURE_SIZES = [(8, 8)]
 _PERDIM_STRIDES = [8]
 _PERDIM_GT_6X20 = torch.tensor([[[21.0, 14.0, 27.0, 34.0]]])
 _PERDIM_GT_20X6 = torch.tensor([[[14.0, 21.0, 34.0, 27.0]]])
 _PERDIM_TOPK = 4
 
-#: Multi-ground-truth scene (scenario iii): a stride-8/16/32 grid at a 128-pixel
-#: input holding three well-separated 24x24 ground truths (all above ``s_min``, so
-#: no surrogate inflation). The one-to-one assigner collapses each to a single
-#: positive; the one-to-many assigner keeps ``topk`` per ground truth.
+#: Multi-ground-truth scene (scenario iii): a stride-8/16/32 grid at a 128-pixel input holding three well-separated
+#: 24x24 ground truths (all above ``s_min``, so no surrogate inflation). The one-to-one assigner collapses each to
+#: a single positive; the one-to-many assigner keeps ``topk`` per ground truth.
 _MULTI_FEATURE_SIZES = [(16, 16), (8, 8), (4, 4)]
 _MULTI_STRIDES = [8, 16, 32]
 _MULTI_GTS = torch.tensor([[[12.0, 12.0, 36.0, 36.0], [52.0, 52.0, 76.0, 76.0], [92.0, 92.0, 116.0, 116.0]]])
@@ -514,13 +493,11 @@ _O2O_TOPK = 7
 def _uniform_scene(anchor_points: Tensor, gt_boxes: Tensor, num_classes: int) -> Tensor:
     """Predicted boxes that make alignment IoU-driven: each anchor predicts its ground truth.
 
-    Every anchor whose centre lies inside a ground-truth box is given that box as
-    its prediction (IoU 1 with the ground truth it is a candidate for); anchors
-    inside no box keep a zero prediction and stay background. With uniform class
-    scores this leaves the alignment metric ``t = s * u**6`` flat across a ground
-    truth's candidates, so top-k keeps exactly ``min(topk, candidate_count)`` of
-    them regardless of tie ordering — the property that keeps the counts
-    deterministic across platforms.
+    Every anchor whose centre lies inside a ground-truth box is given that box as its prediction (IoU 1 with the
+    ground truth it is a candidate for); anchors inside no box keep a zero prediction and stay background. With
+    uniform class scores this leaves the alignment metric ``t = s * u**6`` flat across a ground truth's candidates,
+    so top-k keeps exactly ``min(topk, candidate_count)`` of them regardless of tie ordering — the property that
+    keeps the counts deterministic across platforms.
 
     Args:
         anchor_points: ``(A, 2)`` anchor centres in input pixels.
@@ -614,9 +591,8 @@ def _max_positives_per_gt(result: object, num_gt: int) -> int:
 def _candidates_inside(anchor_points: Tensor, boxes: Tensor) -> int:
     """Count anchor centres that fall inside any of the given boxes.
 
-    Mirrors the assigners' centre-inside candidate test. Passing the original
-    ground truth reproduces the vanilla-TAL candidate set; passing
-    :func:`~lucid_yolo.assign.surrogate_boxes` output reproduces the STAL set.
+    Mirrors the assigners' centre-inside candidate test. Passing the original ground truth reproduces the
+    vanilla-TAL candidate set; passing :func:`~lucid_yolo.assign.surrogate_boxes` output reproduces the STAL set.
 
     Args:
         anchor_points: ``(A, 2)`` anchor centres in input pixels.
@@ -753,42 +729,34 @@ _DET_VARIANTS = ("n", "s", "m", "l", "x")
 _DET_NUM_CLASSES = 80
 _DET_IMG_SIZE = 640
 
-#: Decimal places the per-variant GFLOP values are rounded to before freezing;
-#: fvcore's MAC trace is deterministic, so this only trims float noise below the
-#: golden's band. That band is a small absolute constant rather than a fraction of
-#: each value: a MAC trace is a count, so it reproduces exactly, and sizing the band
-#: as a percentage made the largest models the least guarded -- the oriented ``x``
-#: row admitted 2.63 GFLOPs of drift, more than the whole ``n`` detector costs.
-#: Measured across all forty stored metrics before the change, every one reproduced
+#: Decimal places the per-variant GFLOP values are rounded to before freezing; fvcore's MAC trace is
+#: deterministic, so this only trims float noise below the golden's band. That band is a small absolute constant rather
+#: than a fraction of each value: a MAC trace is a count, so it reproduces exactly, and sizing the band as a percentage
+#: made the largest models the least guarded -- the oriented ``x`` row admitted 2.63 GFLOPs of drift, more than
+#: the whole ``n`` detector costs. Measured across all forty stored metrics before the change, every one reproduced
 #: with a delta of exactly zero.
-#: The band itself lives in each golden's own ``tolerances`` block (they are hand-held,
-#: not written by ``freeze-goldens``) and is ``0.001`` GFLOPs for every variant of every
-#: task. Not zero, though the trace reproduces exactly: the stored values are rounded
-#: here, so a band just above that quantum keeps a re-freeze on another machine from
-#: tripping on formatting alone, while staying far below any real architectural change --
-#: a single convolution channel at the shallowest stride moves GFLOPs by orders more.
+#: The band itself lives in each golden's own ``tolerances`` block (they are hand-held, not written by
+#: ``freeze-goldens``) and is ``0.001`` GFLOPs for every variant of every task. Not zero, though the trace reproduces
+#: exactly: the stored values are rounded here, so a band just above that quantum keeps a re-freeze on another machine
+#: from tripping on formatting alone, while staying far below any real architectural change -- a single convolution
+#: channel at the shallowest stride moves GFLOPs by orders more.
 _DET_GFLOP_DECIMALS = 4
 
 
 def det_params_flops() -> dict[str, float]:
     """Frozen per-variant parameter and GFLOP metrics for the detector (WP-023).
 
-    Builds each of the five scale variants
-    (:func:`~lucid_yolo.models.build.build_detector`) with 80 classes and records,
-    per variant, the exact parameter count of the full model
-    (:func:`~lucid_yolo.models.build.count_params`) and the conventional GFLOPs of
-    the deployed NMS-free inference model
-    (:func:`~lucid_yolo.models.build.count_flops` on
-    :meth:`~lucid_yolo.models.build.Detector.deploy`) at a 640-pixel input. Params
-    are the full checkpoint (both dual-head branches); GFLOPs exclude the
-    training-only one-to-many branch — the R6/YOLOv10 reporting convention that
-    lands all five scales within R1 Table 7 tolerance (see
-    :mod:`lucid_yolo.models.build`).
+    Builds each of the five scale variants (:func:`~lucid_yolo.models.build.build_detector`) with 80 classes and
+    records, per variant, the exact parameter count of the full model
+    (:func:`~lucid_yolo.models.build.count_params`) and the conventional GFLOPs of the deployed NMS-free inference
+    model (:func:`~lucid_yolo.models.build.count_flops` on :meth:`~lucid_yolo.models.build.Detector.deploy`) at a
+    640-pixel input. Params are the full checkpoint (both dual-head branches); GFLOPs exclude the training-only
+    one-to-many branch — the R6/YOLOv10 reporting convention that lands all five scales within R1 Table 7 tolerance
+    (see :mod:`lucid_yolo.models.build`).
 
-    Every value is produced by building and measuring the live modules — never
-    hand-written — so the golden re-derives from the actual architecture. Param
-    counts are exact integers (byte-stable across platforms); GFLOPs come from
-    fvcore's deterministic MAC trace and are pinned with a small golden tolerance.
+    Every value is produced by building and measuring the live modules — never hand-written — so the golden
+    re-derives from the actual architecture. Param counts are exact integers (byte-stable across platforms); GFLOPs
+    come from fvcore's deterministic MAC trace and are pinned with a small golden tolerance.
 
     Returns:
         A mapping of ten metrics: ``<variant>_params`` (exact) and
@@ -818,25 +786,20 @@ def det_params_flops() -> dict[str, float]:
 def seg_params_flops() -> dict[str, float]:
     """Frozen per-variant parameter and GFLOP metrics for the segmentation model (WP-052b).
 
-    The segmentation counterpart of :func:`det_params_flops`, measured under the
-    identical convention so the two goldens stay comparable: parameters of the
-    full model (:func:`~lucid_yolo.models.build.count_params` on
-    :func:`~lucid_yolo.models.build.build_segmenter`) and conventional GFLOPs of
-    the deployed inference model
-    (:meth:`~lucid_yolo.models.build.Segmenter.deploy`) at a 640-pixel input. The
-    deployed view carries neither the one-to-many detection branch nor the
-    training-only auxiliary semantic branch (A17), so its FLOPs are what an
-    inference deployment actually costs, while the parameter count is the whole
-    checkpoint.
+    The segmentation counterpart of :func:`det_params_flops`, measured under the identical convention so the two
+    goldens stay comparable: parameters of the full model (:func:`~lucid_yolo.models.build.count_params` on
+    :func:`~lucid_yolo.models.build.build_segmenter`) and conventional GFLOPs of the deployed inference model
+    (:meth:`~lucid_yolo.models.build.Segmenter.deploy`) at a 640-pixel input. The deployed view carries neither the
+    one-to-many detection branch nor the training-only auxiliary semantic branch (A17), so its FLOPs are what an
+    inference deployment actually costs, while the parameter count is the whole checkpoint.
 
-    R1 Table S9 states neither its FLOP convention nor whether its Params column
-    denotes the full or the deployed model — it reports one Params/FLOPs pair per
-    scale shared by the E2E and non-E2E rows. This convention is the one that
-    lands R1 Table 7 within tolerance for detection (WP-023) and it holds for
-    Table S9 too, which is corroboration rather than assumption.
+    R1 Table S9 states neither its FLOP convention nor whether its Params column denotes the full or the deployed
+    model — it reports one Params/FLOPs pair per scale shared by the E2E and non-E2E rows. This convention is the
+    one that lands R1 Table 7 within tolerance for detection (WP-023) and it holds for Table S9 too, which is
+    corroboration rather than assumption.
 
-    Every value is produced by building and measuring the live modules — never
-    hand-written — so the golden re-derives from the actual architecture.
+    Every value is produced by building and measuring the live modules — never hand-written — so the golden
+    re-derives from the actual architecture.
 
     Returns:
         A mapping of ten metrics: ``<variant>_params`` (exact) and
@@ -861,11 +824,9 @@ def seg_params_flops() -> dict[str, float]:
     return metrics
 
 
-#: DOTA-v1.0 class count and input side the R1 Table S11 OBB rows are measured at.
-#: Both differ from the detection and segmentation goldens above — the table is
-#: reported at 1024 pixels over 15 categories, not at 640 over COCO's 80 — so
-#: neither constant may be inherited from :data:`_DET_IMG_SIZE` or
-#: :data:`_DET_NUM_CLASSES`.
+#: DOTA-v1.0 class count and input side the R1 Table S11 OBB rows are measured at. Both differ from the detection
+#: and segmentation goldens above — the table is reported at 1024 pixels over 15 categories, not at 640 over
+#: COCO's 80 — so neither constant may be inherited from :data:`_DET_IMG_SIZE` or :data:`_DET_NUM_CLASSES`.
 _OBB_NUM_CLASSES = 15
 _OBB_IMG_SIZE = 1024
 
@@ -873,18 +834,15 @@ _OBB_IMG_SIZE = 1024
 def obb_params_flops() -> dict[str, float]:
     """Frozen per-variant parameter and GFLOP metrics for the OBB model (WP-062).
 
-    The oriented counterpart of :func:`det_params_flops`, measured under the same
-    A29 convention — parameters of the full model, conventional GFLOPs of the
-    deployed NMS-free inference model — but at **R1 Table S11's** protocol rather
-    than Table 7's: a 1024-pixel input and DOTA-v1.0's 15 categories. The deployed
-    view carries only the one-to-one branch, so the one-to-many angle stems are
-    excluded from the FLOP tally along with the rest of that branch, while the
-    parameter count is the whole checkpoint.
+    The oriented counterpart of :func:`det_params_flops`, measured under the same A29 convention — parameters of the
+    full model, conventional GFLOPs of the deployed NMS-free inference model — but at **R1 Table S11's** protocol
+    rather than Table 7's: a 1024-pixel input and DOTA-v1.0's 15 categories. The deployed view carries only the
+    one-to-one branch, so the one-to-many angle stems are excluded from the FLOP tally along with the rest of that
+    branch, while the parameter count is the whole checkpoint.
 
-    Every value is produced by building and measuring the live modules — never
-    hand-written — so the golden re-derives from the actual architecture. Param
-    counts are exact integers; GFLOPs come from fvcore's deterministic MAC trace
-    and are pinned with a small golden tolerance.
+    Every value is produced by building and measuring the live modules — never hand-written — so the golden
+    re-derives from the actual architecture. Param counts are exact integers; GFLOPs come from fvcore's
+    deterministic MAC trace and are pinned with a small golden tolerance.
 
     Returns:
         A mapping of ten metrics: ``<variant>_params`` (exact) and
@@ -909,45 +867,36 @@ def obb_params_flops() -> dict[str, float]:
     return metrics
 
 
-#: Point count ``K`` the keypoint golden is measured at. 17 is COCO's human-pose
-#: schema (R12), taken here as one concrete instantiation of a task that is generic
-#: in ``K`` — the head, the loss, and the decode know nothing about what a point
-#: means. It is a measurement choice, not an architectural claim.
+#: Point count ``K`` the keypoint golden is measured at. 17 is COCO's human-pose schema (R12), taken here as one
+#: concrete instantiation of a task that is generic in ``K`` — the head, the loss, and the decode know nothing
+#: about what a point means. It is a measurement choice, not an architectural claim.
 #:
-#: The shipped nano checkpoint in ``docs/model_cards/keypoints.md`` is measured at
-#: ``num_classes=1`` (COCO's ``person`` category alone), so its parameter and GFLOP
-#: figures are deliberately **not** these: this golden inherits detection's 80-class
-#: protocol instead (see :func:`kp_params_flops`).
+#: The shipped nano checkpoint in ``docs/model_cards/keypoints.md`` is measured at ``num_classes=1`` (COCO's
+#: ``person`` category alone), so its parameter and GFLOP figures are deliberately **not** these: this golden
+#: inherits detection's 80-class protocol instead (see :func:`kp_params_flops`).
 _KP_NUM_KEYPOINTS = 17
 
 
 def kp_params_flops() -> dict[str, float]:
     """Frozen per-variant parameter and GFLOP metrics for the keypoint model (WP-139).
 
-    The keypoint counterpart of :func:`det_params_flops`, measured under the same
-    A29 convention — parameters of the full model
-    (:func:`~lucid_yolo.models.build.count_params` on
-    :func:`~lucid_yolo.models.build.build_keypoint_detector`), conventional GFLOPs
-    of the deployed NMS-free inference model
-    (:meth:`~lucid_yolo.models.build.KeypointDetector.deploy`). The deployed view
-    carries only the one-to-one branch, so the one-to-many point stems are excluded
-    from the FLOP tally along with the rest of that branch, while the parameter
-    count is the whole checkpoint.
+    The keypoint counterpart of :func:`det_params_flops`, measured under the same A29 convention — parameters of the
+    full model (:func:`~lucid_yolo.models.build.count_params` on
+    :func:`~lucid_yolo.models.build.build_keypoint_detector`), conventional GFLOPs of the deployed NMS-free
+    inference model (:meth:`~lucid_yolo.models.build.KeypointDetector.deploy`). The deployed view carries only the
+    one-to-one branch, so the one-to-many point stems are excluded from the FLOP tally along with the rest of that
+    branch, while the parameter count is the whole checkpoint.
 
-    **This golden holds nothing published.** R1 Table S10 does publish a size
-    table for every pose scale, and this model does not meet it — 13.0% under on
-    params and 26.5% under on FLOPs at ``n`` (A77, measured 2026-09-17; the
-    docstring said no such table existed until then). Until WP-180 selects a
-    stem width against that table and ships its gate, the golden is a pure
-    regression lock, and it deliberately inherits **detection's** protocol
-    (640-pixel input, 80 classes) rather than Table S10's, so
-    ``params_flops_kp.json`` minus ``params_flops_det.json`` is exactly what the
-    point stem costs.
+    **This golden holds nothing published.** R1 Table S10 does publish a size table for every pose scale, and this
+    model does not meet it — 13.0% under on params and 26.5% under on FLOPs at ``n`` (A77, measured 2026-09-17; the
+    docstring said no such table existed until then). Until WP-180 selects a stem width against that table and ships
+    its gate, the golden is a pure regression lock, and it deliberately inherits **detection's** protocol (640-pixel
+    input, 80 classes) rather than Table S10's, so ``params_flops_kp.json`` minus ``params_flops_det.json`` is
+    exactly what the point stem costs.
 
-    Every value is produced by building and measuring the live modules — never
-    hand-written — so the golden re-derives from the actual architecture. Param
-    counts are exact integers; GFLOPs come from fvcore's deterministic MAC trace
-    and are pinned with a small golden tolerance.
+    Every value is produced by building and measuring the live modules — never hand-written — so the golden
+    re-derives from the actual architecture. Param counts are exact integers; GFLOPs come from fvcore's
+    deterministic MAC trace and are pinned with a small golden tolerance.
 
     Returns:
         A mapping of ten metrics: ``<variant>_params`` (exact) and
@@ -983,10 +932,9 @@ _AUG_DECIMALS = 4
 def _aug_scene() -> tuple[Tensor, Targets]:
     """Build the fixed image and targets every :func:`aug_invariants` metric runs on.
 
-    The image is analytic rather than drawn: a separable ramp plus one bright block,
-    so it carries structure a warp can move without any RNG entering the producer.
-    Targets carry boxes, polygons, keypoints and one rotated box, so a single scene
-    exercises every modality the transforms transport.
+    The image is analytic rather than drawn: a separable ramp plus one bright block, so it carries structure a warp
+    can move without any RNG entering the producer. Targets carry boxes, polygons, keypoints and one rotated box, so
+    a single scene exercises every modality the transforms transport.
 
     Returns:
         The ``(3, 32, 32)`` image and its targets.
@@ -1019,9 +967,8 @@ def _aug_scene() -> tuple[Tensor, Targets]:
 def _aug_rotated_scene() -> tuple[Tensor, Targets]:
     """Build the rotated-modality variant of :func:`_aug_scene`.
 
-    Rotated boxes cannot share a target set with polygons (WP-056), so the oriented
-    metrics run on their own scene rather than on a modality-stripped copy of the
-    main one.
+    Rotated boxes cannot share a target set with polygons (WP-056), so the oriented metrics run on their own scene
+    rather than on a modality-stripped copy of the main one.
 
     Returns:
         The ``(3, 32, 32)`` image and targets carrying one rotated box.
@@ -1073,17 +1020,15 @@ def _polygon_area(rings: list[Tensor]) -> float:
 def aug_invariants() -> dict[str, float]:
     """Scalar aggregates over every transform, run from *stated* parameters (WP-149).
 
-    The golden half of the augmentation regression guard. Exact tensor geometry
-    lives in ``tests/data/test_aug_frozen.py`` as pytest literals, where the diff
-    shows the numbers next to the case that produced them; what belongs here is the
-    scalar aggregate a literal would express badly -- a surviving instance count, a
-    total polygon area, a pad-fill fraction, an image mean.
+    The golden half of the augmentation regression guard. Exact tensor geometry lives in
+    ``tests/data/test_aug_frozen.py`` as pytest literals, where the diff shows the numbers next to the case that
+    produced them; what belongs here is the scalar aggregate a literal would express badly -- a surviving instance
+    count, a total polygon area, a pad-fill fraction, an image mean.
 
-    Every value is produced by calling a transform's ``apply`` with parameters
-    written into this function, never by sampling: an upstream engine will not draw
-    the same numbers from the same seed, so a seed-keyed value would break at the
-    swap for reasons unrelated to correctness. Nothing here touches a generator, so
-    the producer is deterministic without one.
+    Every value is produced by calling a transform's ``apply`` with parameters written into this function, never by
+    sampling: an upstream engine will not draw the same numbers from the same seed, so a seed-keyed value would
+    break at the swap for reasons unrelated to correctness. Nothing here touches a generator, so the producer is
+    deterministic without one.
 
     Returns:
         A mapping of fifteen metrics: integer counts pinned exactly, float

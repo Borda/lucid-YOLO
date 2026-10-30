@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Replay the existing detection assignment and loss with masked target capacity.
 
-Only dispatch changes. Each added ground-truth row has a false mask, a zero box
-and a zero label. It selects no anchor, contributes zero to integer counts and
-maxima, and leaves every real row's anchor ranking unchanged. One fit owns one
-recording; a larger target count replaces it rather than retaining another pool.
-Label validation stays outside capture and reads the current, unpadded inputs.
+Only dispatch changes. Each added ground-truth row has a false mask, a zero box and a zero label. It selects no anchor,
+contributes zero to integer counts and maxima, and leaves every real row's anchor ranking unchanged. One fit owns one
+recording; a larger target count replaces it rather than retaining another pool. Label validation stays outside capture
+and reads the current, unpadded inputs.
 """
 
 from __future__ import annotations
@@ -91,9 +90,8 @@ def _functions(source: DualBranchLoss) -> tuple[object, ...]:
         for name in fields
         for function in (getattr(obj, name),)
     )
-    # The surrogate filter reaches its parent through ``super()`` and the recorded
-    # stages call module helpers by global name, both resolved at call time, so a
-    # replacement of either is invisible through the instance attributes above.
+    # The surrogate filter reaches its parent through ``super()`` and the recorded stages call module helpers by global
+    # name, both resolved at call time, so a replacement of either is invisible through the instance attributes above.
     delegated = tuple(
         getattr(function, "__func__", function)
         for assigner in objects[1:3]
@@ -125,10 +123,9 @@ _EXPECTED = _functions(DualBranchLoss())
 def _native_kernels(source: DualBranchLoss) -> bool:
     """Tell whether the device passes a fused recording may launch are the ones their module defined.
 
-    The passes load on the first eligible CUDA launch, after :data:`_EXPECTED` was taken, so
-    their baseline is the binding their own module recorded rather than an import-time
-    reading here. A loss requesting no fusion never loads them, and a host without them has
-    nothing to certify.
+    The passes load on the first eligible CUDA launch, after :data:`_EXPECTED` was taken, so their baseline is the
+    binding their own module recorded rather than an import-time reading here. A loss requesting no fusion never loads
+    them, and a host without them has nothing to certify.
     """
     if not any(assigner.fused_assignment for assigner in (source.o2m_assigner, source.o2o_assigner)):
         return True
@@ -141,10 +138,9 @@ def _native_kernels(source: DualBranchLoss) -> bool:
 def _native_loss(source: DualBranchLoss) -> bool:
     """Tell whether the built-in loss objects and the implementations they call are unchanged.
 
-    Only identity is judged: exact component types, the callables :func:`_functions`
-    reads and, for a fused request, the device passes :func:`_native_kernels` checks.
-    Scalar settings are not, so a caller whose loss runs outside any recording can
-    rely on this without inheriting the workspace limits :func:`_source_signature` adds.
+    Only identity is judged: exact component types, the callables :func:`_functions` reads and, for a fused request,
+    the device passes :func:`_native_kernels` checks. Scalar settings are not, so a caller whose loss runs outside any
+    recording can rely on this without inheriting the workspace limits :func:`_source_signature` adds.
     """
     if type(source) is not DualBranchLoss:
         return False
@@ -170,8 +166,8 @@ def _source_signature(source: DualBranchLoss) -> tuple[object, ...] | None:
         return None
     if any(type(value) not in (int, float) for value in settings):
         return None
-    # Padding must keep zero-overlap IoUs finite in float32. A constructor-valid
-    # positive Python epsilon can underflow (or flush) to zero on the device.
+    # Padding must keep zero-overlap IoUs finite in float32. A constructor-valid positive Python epsilon can underflow
+    # (or flush) to zero on the device.
     if any(
         not math.isfinite(assigner.eps)
         or assigner.eps < torch.finfo(torch.float32).tiny
@@ -268,9 +264,8 @@ def _eligible(inputs: tuple[Tensor, ...]) -> bool:
 class _LossCapture:
     """Own one transient loss recording and its geometrically grown target workspace.
 
-    Shape changes outside the target count stay eager. Changed source settings or
-    precision retire the recording. An outstanding backward keeps later forwards
-    eager, because their writes must not replace its saved intermediates.
+    Shape changes outside the target count stay eager. Changed source settings or precision retire the recording. An
+    outstanding backward keeps later forwards eager, because their writes must not replace its saved intermediates.
 
     Examples:
         ```pycon
@@ -287,9 +282,9 @@ class _LossCapture:
     def clear(self) -> None:
         """Reset the holder, then drain the recorded device before the recording is released.
 
-        The reset comes first, so a failing drain still leaves an empty holder; the recording stays
-        alive in a local reference until the drain has finished. Without a recording nothing is
-        drained, so a CPU run and :meth:`__setstate__` never touch the CUDA runtime.
+        The reset comes first, so a failing drain still leaves an empty holder; the recording stays alive in a local
+        reference until the drain has finished. Without a recording nothing is drained, so a CPU run and
+        :meth:`__setstate__` never touch the CUDA runtime.
         """
         previous, device = getattr(self, "_objective", None), getattr(self, "_device", None)
         self._objective: _LossObjective | None = None
@@ -320,8 +315,8 @@ class _LossCapture:
     def retire(self, reason: str) -> None:
         """Clear a stale recording and report its first cause once per fit.
 
-        A holder already retired stays as it is: it is eager for the rest of the fit, so a
-        later cause changes nothing a user could act on, and :meth:`clear` would re-enable it.
+        A holder already retired stays as it is: it is eager for the rest of the fit, so a later cause changes nothing
+        a user could act on, and :meth:`clear` would re-enable it.
         """
         if self._disabled:
             return
@@ -370,11 +365,10 @@ class _LossCapture:
             _check_labels(labels, mask, ml.shape[-1])
             if ol.shape[-1] != ml.shape[-1]:
                 _check_labels(labels, mask, ol.shape[-1])
-        # Masked rows are neutral only for finite arithmetic: NaN * 0 is NaN.
-        # Preserve the native empty-target and non-finite propagation behavior.
-        # Only predictions and target boxes meet the padded rows in arithmetic:
-        # anchor points enter comparisons only, and strides and alpha are not
-        # padded, so their non-finite values match on both routes.
+        # Masked rows are neutral only for finite arithmetic: NaN * 0 is NaN. Preserve the native empty-target and
+        # non-finite propagation behavior. Only predictions and target boxes meet the padded rows in arithmetic: anchor
+        # points enter comparisons only, and strides and alpha are not padded, so their non-finite values match on both
+        # routes.
         if boxes.shape[1] == 0 or not bool(
             torch.stack(tuple(value.isfinite().all() for value in (ml, mb, ol, ob, boxes))).all()
         ):
@@ -443,9 +437,8 @@ class _LossCapture:
             return cast("tuple[Tensor, ...]", self._objective(*arguments))
         objective = _LossObjective(source)
         samples = tuple(value.detach().clone().requires_grad_(value.requires_grad) for value in arguments)
-        # An automatic cycle collection can destroy an old CUDA graph while this
-        # recording is open. Drain unreachable cycles before capture and keep
-        # collection disabled only until its first replay has completed.
+        # An automatic cycle collection can destroy an old CUDA graph while this recording is open. Drain unreachable
+        # cycles before capture and keep collection disabled only until its first replay has completed.
         gc.collect()
         collection_enabled = gc.isenabled()
         gc.disable()

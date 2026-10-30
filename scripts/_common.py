@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Helpers shared by the top-level scripts: the repository root and a file digest.
 
-Import as ``scripts._common``, with the repository root on ``sys.path`` first -- the
-scripts are loaded both as ``python scripts/x.py`` (where their own directory leads
-``sys.path``) and as the ``scripts`` namespace package (``check_goldens`` imports
-``scripts.golden_producers`` that way), and only the second form resolves a plain
+Import as ``scripts._common``, with the repository root on ``sys.path`` first -- the scripts are loaded both as
+``python scripts/x.py`` (where their own directory leads ``sys.path``) and as the ``scripts`` namespace package
+(``check_goldens`` imports ``scripts.golden_producers`` that way), and only the second form resolves a plain
 ``_common``. The lint checkers have their own, ``scripts/lint/_common.py``.
 """
 

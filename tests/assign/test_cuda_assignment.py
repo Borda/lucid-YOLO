@@ -4,15 +4,12 @@
 from __future__ import annotations
 
 import math
-import os
-import subprocess
-import sys
 from dataclasses import fields
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
 import torch
+from isolated_interpreter_helpers import run_isolated
 from markers import requires_fused_cuda
 from torch import Tensor
 
@@ -83,6 +80,36 @@ def _inputs(device: str = "cpu", count: int = 7, anchors: int = 129, dtype: torc
         labels[0, -1] = -1
         mask[0, -1] = False
     return scores, pred, points, gt, labels, mask
+
+
+def _skewed_boxes(gt: Tensor, angle: float = 0.37) -> Tensor:
+    """Turn each axis-aligned box into a rotated ``(cx, cy, w, h, angle)`` box with one shared angle.
+
+    Examples:
+        >>> _skewed_boxes(torch.tensor([[[0.0, 0.0, 4.0, 2.0]]])).tolist()[0][0][:4]
+        [2.0, 1.0, 4.0, 2.0]
+    """
+    theta = torch.full((*gt.shape[:2], 1), angle, device=gt.device)
+    return torch.cat(((gt[..., :2] + gt[..., 2:]) / 2, gt[..., 2:] - gt[..., :2], theta), -1)
+
+
+@pytest.fixture
+def launched(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    """Record the result of every ``_cuda._run`` call, to prove a captured graph holds fused kernels.
+
+    A fallen-back native pass returns ``None`` under capture, so a list of non-``None`` results is the only direct
+    evidence that the captured kernels are the fused ones, not a silent fallback.
+    """
+    results: list[object] = []
+    original_run = _cuda._run
+
+    def _spy(*args, **kwargs):
+        result = original_run(*args, **kwargs)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(_cuda, "_run", _spy)
+    return results
 
 
 class _Marked(Tensor):
@@ -190,8 +217,11 @@ def test_replaced_recorded_helper_invalidates_source(monkeypatch: pytest.MonkeyP
     assert _source_signature(DualBranchLoss()) is None
 
 
-def test_new_pipeline_implementation_is_certified(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Dropping the implementation method from the certificate makes this regression fail."""
+def test_replaced_assign_impl_invalidates_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The implementation method belongs to the certificate: replacing it refuses the recording.
+
+    Dropping the implementation method from the certificate makes this regression fail.
+    """
     source = DualBranchLoss()
     assert _source_signature(source) is not None
     monkeypatch.setattr(source.o2m_assigner, "_assign_impl", lambda *args, **kwargs: None)
@@ -238,19 +268,7 @@ def test_cuda_assignments_match_native_fields(assigner, dtype: torch.dtype, rota
     native, fused = assigner(topk=3), assigner(topk=3, fused_assignment=True)
     for count in (7, 1, 0, 9, 2):
         inputs = _inputs("cuda", count=count, dtype=dtype)
-        gt = inputs[3]
-        boxes = (
-            torch.cat(
-                (
-                    (gt[..., :2] + gt[..., 2:]) / 2,
-                    gt[..., 2:] - gt[..., :2],
-                    torch.full((*gt.shape[:2], 1), 0.37, device="cuda"),
-                ),
-                -1,
-            )
-            if rotated
-            else None
-        )
+        boxes = _skewed_boxes(inputs[3]) if rotated else None
         expected = native(*inputs, boxes)
         actual = fused(*inputs, boxes)
         _same(actual, expected)
@@ -267,8 +285,8 @@ def test_cuda_assignments_match_native_fields(assigner, dtype: torch.dtype, rota
 def test_seeded_tie_sweep_matches_native_assignment_bits(seed: int, batch: int, count: int, rotated: bool) -> None:
     """Tied metrics, boundary anchors and padded rows keep native owners across reduction widths.
 
-    Ground-truth counts straddle the 64-wide power-of-two row padding and the 512 capacity; the
-    anchor count fits no launch tile. Rotated boxes cycle quarter turns of both signs and a skew.
+    Ground-truth counts straddle the 64-wide power-of-two row padding and the 512 capacity; the anchor count fits no
+    launch tile. Rotated boxes cycle quarter turns of both signs and a skew.
     """
     values = _sweep_inputs(seed, batch, count, "cuda")
     boxes = _right_angle_boxes(values[3]) if rotated else None
@@ -373,8 +391,8 @@ def test_unsupported_public_inputs_skip_metric_launch_and_keep_native_bits(
 ) -> None:
     """An input the fused kernels cannot read exactly is assigned natively, with no metric launch.
 
-    Each row degrades one public input of an otherwise launchable call: a Tensor subclass, 32-bit
-    labels, half-precision or non-contiguous predicted boxes, or an empty target set.
+    Each row degrades one public input of an otherwise launchable call: a Tensor subclass, 32-bit labels,
+    half-precision or non-contiguous predicted boxes, or an empty target set.
     """
     values = degrade(_inputs("cuda"))
     expected = TaskAlignedAssigner(3)(*values)
@@ -431,8 +449,8 @@ def test_unsupported_runtime_keeps_public_native_route(monkeypatch: pytest.Monke
 def test_metric_guards_decline_without_launching(grad_mode: bool, degrade) -> None:
     """Autograd-tracked boxes and 32-bit labels are refused by the metric entry before any launch.
 
-    The assigner itself runs without autograd, so the grad-mode guard is reachable only by calling
-    the metric entry directly.
+    The assigner itself runs without autograd, so the grad-mode guard is reachable only by calling the metric entry
+    directly.
     """
     scores, pred, _points, gt, labels, _mask = _inputs("cuda")
     candidates = torch.ones((2, 7, 129), dtype=torch.bool, device="cuda")
@@ -446,26 +464,16 @@ def test_metric_guards_decline_without_launching(grad_mode: bool, degrade) -> No
 
 
 @requires_fused_cuda
-def test_graph_replays_new_values_after_eager_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_graph_replays_new_values_after_eager_readiness(launched: list[object]) -> None:
     """A real recording reuses compiled code while reading the current scores and targets."""
     inputs = _inputs("cuda", count=3)
     source = TaskAlignedAssigner(3, fused_assignment=True)
     expected_source = TaskAlignedAssigner(3)
     source(*inputs)
-    launched: list[object] = []
-    original_run = _cuda._run
-
-    def _spy(*args, **kwargs):
-        result = original_run(*args, **kwargs)
-        launched.append(result)
-        return result
-
-    monkeypatch.setattr(_cuda, "_run", _spy)
+    launched.clear()  # keep only the launches made during capture
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
         actual = source._assign(*inputs, check_labels=False)
-    # A fallen-back native pass returns None under capture; this is the only direct
-    # evidence that the captured kernels are the fused ones, not a silent fallback.
     assert launched and all(result is not None for result in launched)
     inputs[0].mul_(0.5)
     inputs[3].add_(1.0)
@@ -501,10 +509,10 @@ def test_metric_and_rotated_edges_match_native_at_public_scale(dtype: torch.dtyp
     _bits(inside, expected_inside)
 
 
-def test_compiler_never_reads_scope_state(monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(_cuda, "_ENABLED", new=Mock(get=Mock(side_effect=AssertionError("traced context"))))
+@patch.object(torch.compiler, "is_compiling", new=lambda: True)
+def test_compiler_never_reads_scope_state() -> None:
     """Compiler tracing rejects the optional route before accessing context-local state."""
-    monkeypatch.setattr(torch.compiler, "is_compiling", lambda: True)
-    monkeypatch.setattr(_cuda, "_ENABLED", Mock(get=Mock(side_effect=AssertionError("traced context"))))
     assert not _cuda._requested()
 
 
@@ -553,7 +561,6 @@ def test_side_stream_outputs_keep_current_stream_order() -> None:
 
 def test_missing_optional_compiler_keeps_import_and_public_constructor() -> None:
     """A fresh interpreter without Triton still imports, constructs and assigns on CPU."""
-    source = Path(__file__).resolve().parents[2] / "src"
     code = """
 import sys
 sys.modules["triton"] = None
@@ -576,20 +583,11 @@ assert model.loss.o2m_assigner.fused_assignment and model.loss.o2o_assigner.fuse
 assert not _cuda._STATE.verified
 print("OPTIONAL_COMPILER_ABSENT_NATIVE_PASS")
 """
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        env={**os.environ, "PYTHONPATH": str(source), "CUDA_VISIBLE_DEVICES": "", "OMP_NUM_THREADS": "1"},
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "OPTIONAL_COMPILER_ABSENT_NATIVE_PASS" in result.stdout
+    assert "OPTIONAL_COMPILER_ABSENT_NATIVE_PASS" in run_isolated(code)
 
 
 @pytest.mark.parametrize("shape,strides", [((1, 3, 1), (0, 2**30, 1)), ((1,), (2**31,))])
-def test_wide_metadata_declines_the_32_bit_kernel_abi(shape, strides) -> None:
+def test_wide_metadata_declines_32_bit_kernel_abi(shape, strides) -> None:
     """A metadata-only tensor proves both offset overflow and unused-wide-stride rejection."""
     assert _cuda._indexable(torch.empty((3,), device="meta"))
     assert not _cuda._indexable(torch.empty_strided(shape, strides, device="meta"))
@@ -609,12 +607,11 @@ def test_wide_singleton_stride_declines_before_launch() -> None:
 
 
 @pytest.mark.parametrize("family", ["metric", "inside", "conflicts"])
-def test_oversized_y_grid_declines_before_a_verified_launcher(monkeypatch: pytest.MonkeyPatch, family: str) -> None:
+@patch.object(_cuda, "_run")
+@patch.object(_cuda, "_supported", new=lambda *args: True)
+def test_oversized_y_grid_declines_before_verified_launcher(launch: Mock, family: str) -> None:
     """The host shape gate prevents invalid configurations rather than swallowing launch errors."""
-    monkeypatch.setattr(_cuda, "_supported", lambda *args: True)
-    sentinel = object()
-    launch = Mock(return_value=sentinel)
-    monkeypatch.setattr(_cuda, "_run", launch)
+    sentinel = launch.return_value
 
     def call(anchors: int):
         scores = torch.empty((2, anchors, 3), device="meta")
@@ -683,18 +680,10 @@ def test_subnormal_iou_division_keeps_native_bits(eps: float) -> None:
 
 
 @requires_fused_cuda
-def test_graph_replays_unaligned_views_after_aligned_warmup(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_graph_replays_unaligned_views_after_aligned_warmup(launched: list[object]) -> None:
     """New pointer alignment preserves current values inside a real CUDA recording."""
     values = _inputs("cuda", count=7)
-    gt = values[3]
-    boxes = torch.cat(
-        (
-            (gt[..., :2] + gt[..., 2:]) / 2,
-            gt[..., 2:] - gt[..., :2],
-            torch.full((*gt.shape[:2], 1), 0.37, device="cuda"),
-        ),
-        -1,
-    )
+    boxes = _skewed_boxes(values[3])
     source = TaskAlignedAssigner(3, fused_assignment=True)
     source(*values, boxes)
     ready = set(_cuda._STATE.ready)
@@ -705,15 +694,7 @@ def test_graph_replays_unaligned_views_after_aligned_warmup(monkeypatch: pytest.
         view.copy_(value)
         assert view.storage_offset() == 1 and view.data_ptr() % 16 != 0
         shifted.append(view)
-    launched: list[object] = []
-    original_run = _cuda._run
-
-    def _spy(*args, **kwargs):
-        result = original_run(*args, **kwargs)
-        launched.append(result)
-        return result
-
-    monkeypatch.setattr(_cuda, "_run", _spy)
+    launched.clear()  # keep only the launches made during capture
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
         actual = source._assign(*shifted, check_labels=False)

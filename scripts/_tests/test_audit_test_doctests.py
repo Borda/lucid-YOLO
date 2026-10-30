@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Functional-core tests: doctest-coverage audit script (WP-129, split off WP-117).
 
-Covers ``scripts/lint/audit_test_doctests.py``'s public contract in isolation, on
-synthetic files under ``tmp_path`` rather than against the live ``tests/`` tree --
-the live tree is exercised instead by the pre-commit hook itself
-(``.pre-commit-config.yaml``'s ``test-doctest-audit``) each time a test file
-changes. This file is the functional-core check pytest owns; the hook is the
-lint gate that runs it.
+Covers ``scripts/lint/audit_test_doctests.py``'s public contract in isolation, on synthetic files under ``tmp_path``
+rather than against the live ``tests/`` tree -- the live tree is exercised instead by the pre-commit hook itself
+(``.pre-commit-config.yaml``'s ``test-doctest-audit``) each time a test file changes. This file is the functional-core
+check pytest owns; the hook is the lint gate that runs it.
 """
 
 from __future__ import annotations
@@ -78,9 +76,8 @@ class TestSkippedExamples:
     def test_unreasoned_skip_not_count_as_coverage(self, tmp_path: Path) -> None:
         """A docstring whose only Example is `# doctest: +SKIP` fails, naming the skip.
 
-        This is the whole defect: the directive satisfies collection, the presence
-        scan and the reader, while running nothing -- so the number the audit
-        reported was never the number it measured.
+        This is the whole defect: the directive satisfies collection, the presence scan and the reader, while running
+        nothing -- so the number the audit reported was never the number it measured.
         """
         (tmp_path / "test_sample.py").write_text(
             "def _helper():\n    '''One line.\n\n    >>> _helper()  # doctest: +SKIP\n    '''\n",
@@ -94,9 +91,8 @@ class TestSkippedExamples:
     def test_skip_with_stated_reason_counts(self, tmp_path: Path) -> None:
         """A reason before the directive passes -- the escape hatch is deliberate, not free.
 
-        The reason must precede ``# doctest: +SKIP``: ``doctest`` reads a directive
-        comment to end of line and rejects prose after the option list, so a reason
-        written after it would break the very collection it annotates.
+        The reason must precede ``# doctest: +SKIP``: ``doctest`` reads a directive comment to end of line and rejects
+        prose after the option list, so a reason written after it would break the very collection it annotates.
         """
         (tmp_path / "test_sample.py").write_text(
             "def _helper():\n    '''One line.\n\n    >>> _helper()  # needs a GPU  # doctest: +SKIP\n    '''\n",
@@ -135,9 +131,8 @@ class TestSourceTreeScan:
     def test_private_source_function_not_required_to_carry_one(self, tmp_path: Path) -> None:
         """In `src/` the requirement is about the public surface, not every function.
 
-        A private helper's contract is stated by the public function that calls it;
-        requiring an Example on each of the 82 private module-level functions in
-        `src/` would be a different decision from the one the Makefile records.
+        A private helper's contract is stated by the public function that calls it; requiring an Example on each of the
+        82 private module-level functions in `src/` would be a different decision from the one the Makefile records.
         """
         (tmp_path / "module.py").write_text("def _private():\n    'No example.'\n", encoding="utf-8")
 

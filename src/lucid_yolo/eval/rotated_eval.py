@@ -1,49 +1,40 @@
 # SPDX-License-Identifier: Apache-2.0
 """Rotated evaluation of an oriented checkpoint, per tile and per whole image (WP-095, WP-107).
 
-The oriented counterpart of :mod:`lucid_yolo.eval.detect_eval`. It takes an ``obb``
-checkpoint, runs it over a split of the tiled layout ``lucid-data build-tiles`` writes,
-decodes the NMS-free
-one-to-one branch into rotated boxes and scores them with the WP-063 accumulator
-(:func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map`), which brings A46's exact
-101-point recall grid, A47's 300-detection cap and A48's difficult rule with it.
+The oriented counterpart of :mod:`lucid_yolo.eval.detect_eval`. It takes an ``obb`` checkpoint, runs it over a split
+of the tiled layout ``lucid-data build-tiles`` writes, decodes the NMS-free one-to-one branch into rotated boxes
+and scores them with the WP-063 accumulator (:func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map`), which
+brings A46's exact 101-point recall grid, A47's 300-detection cap and A48's difficult rule with it.
 
-**Two figures, never one.** The per-tile number is the acceptance figure the tier run
-gates on, and the regression instrument for it; it is computed over 1024 px crops, where
-an object crossing a tile boundary is counted once in each tile that saw it, and it is
-comparable to nothing published. The whole-image number is the one R1 Tables 10-11 can be
-read beside: :mod:`lucid_yolo.eval.tile_merge` maps each tile's detections back into
-source-image coordinates through the A53 window provenance and resolves the seam
-duplicates by core ownership — the rule and its argument from the NMS-free constraint
-live in that module. Both are printed, both are written to the report, and each is
-labelled, because a report that does not say which figure it quotes is how the two got
-confused in the first place (0.3.0 shipped the per-tile one).
+**Two figures, never one.** The per-tile number is the acceptance figure the tier run gates on, and the regression
+instrument for it; it is computed over 1024 px crops, where an object crossing a tile boundary is counted once in
+each tile that saw it, and it is comparable to nothing published. The whole-image number is the one R1 Tables 10-11
+can be read beside: :mod:`lucid_yolo.eval.tile_merge` maps each tile's detections back into source-image coordinates
+through the A53 window provenance and resolves the seam duplicates by core ownership — the rule and its argument
+from the NMS-free constraint live in that module. Both are printed, both are written to the report, and each is
+labelled, because a report that does not say which figure it quotes is how the two got confused in the first place
+(0.3.0 shipped the per-tile one).
 
-The whole-image figure is unavailable — and said to be, rather than silently omitted —
-when the split's annotations carry no window provenance, which is any layout not written
-by ``lucid-data build-tiles``.
+The whole-image figure is unavailable — and said to be, rather than silently omitted — when the split's annotations
+carry no window provenance, which is any layout not written by ``lucid-data build-tiles``.
 
 Coordinate frame:
-    Scoring runs in **letterbox** coordinates, with the ground truth letterboxed by the
-    same transform as the image rather than the predictions being mapped back. A
-    letterbox is a uniform scale plus a translation, matching is per image, and rotated
-    IoU is invariant under both — so this is an equality, not the approximation the
-    epoch-level ``val/rotated_mAP`` proxy makes. The one thing it does *not* preserve is
-    any absolute-pixel reading of a box, which the per-tile report does not make. The
-    whole-image path does need one, so it takes the other route: detections go back
-    through the exact letterbox inverse into tile pixels and are then translated by the
-    window origin, and its ground truth is read from the annotations in tile pixels
-    rather than through the loader's transform.
+    Scoring runs in **letterbox** coordinates, with the ground truth letterboxed by the same transform as the image
+    rather than the predictions being mapped back. A letterbox is a uniform scale plus a translation, matching is
+    per image, and rotated IoU is invariant under both — so this is an equality, not the approximation the epoch-level
+    ``val/rotated_mAP`` proxy makes. The one thing it does *not* preserve is any absolute-pixel reading of a box,
+    which the per-tile report does not make. The whole-image path does need one, so it takes the other route:
+    detections go back through the exact letterbox inverse into tile pixels and are then translated by the window
+    origin, and its ground truth is read from the annotations in tile pixels rather than through the
+    loader's transform.
 
-The epoch metric already exists (WP-088 logs ``val/rotated_mAP`` and
-``val/rotated_mAP50`` from the validation loop) and is deliberately not what this is:
-that one runs on the training recipe's own loader, on whatever split the run configured,
-and reports at epoch granularity. This takes a finished checkpoint, an explicit split,
-and the EMA weights a release is actually evaluated on.
+The epoch metric already exists (WP-088 logs ``val/rotated_mAP`` and ``val/rotated_mAP50`` from the validation
+loop) and is deliberately not what this is: that one runs on the training recipe's own loader, on whatever split
+the run configured, and reports at epoch granularity. This takes a finished checkpoint, an explicit split, and the
+EMA weights a release is actually evaluated on.
 
-``lucid-eval`` reaches this path when the checkpoint's own ``task`` is ``"obb"``
-(WP-096) — the caller names no task, for the same reason the detection path decides
-masks from the checkpoint rather than from a flag.
+``lucid-eval`` reaches this path when the checkpoint's own ``task`` is ``"obb"`` (WP-096) — the caller names no task,
+for the same reason the detection path decides masks from the checkpoint rather than from a flag.
 
 Usage::
 
@@ -106,12 +97,10 @@ def build_datamodule(
         batch_size: Images per forward pass.
         variant: Scale letter, which selects the augmentation policy the val loader
             does not use.
-        num_workers: Loader worker count, forwarded to the val loader as its own
-            ``val_num_workers`` so the count named here is the count it runs: ``0``
-            reads in-process on every host, and a positive count is used as stated.
-            ``None`` hands the choice to the datamodule's automatic, image-size- and
-            shared-memory-aware policy. The default ``0`` is this helper's low-startup
-            route.
+        num_workers: Loader worker count, forwarded to the val loader as its own ``val_num_workers`` so the count
+            named here is the count it runs: ``0`` reads in-process on every host, and a positive count is used as
+            stated. ``None`` hands the choice to the datamodule's automatic, image-size- and shared-memory-aware
+            policy. The default ``0`` is this helper's low-startup route.
 
     Returns:
         A datamodule set up for the oriented val split.
@@ -135,9 +124,8 @@ def build_datamodule(
         train_ann_file=ann_file,
         val_images_dir=images_dir,
         val_ann_file=ann_file,
-        # Named for the val loader too: left unset, an explicit 0 counts as inherited
-        # from num_workers and the datamodule's shared-memory floor raises it to one
-        # worker wherever /dev/shm exists.
+        # Named for the val loader too: left unset, an explicit 0 counts as inherited from num_workers and the
+        # datamodule's shared-memory floor raises it to one worker wherever /dev/shm exists.
         val_num_workers=num_workers,
         rotated_targets=True,
     )
@@ -155,12 +143,10 @@ class SplitScoring:
         source_predictions: Per-tile predictions in **source-image** pixels, ready for
             :func:`~lucid_yolo.eval.tile_merge.merge_whole_images`. Empty when the split
             carries no window provenance and no whole-image figure is available.
-        workers: The val loader's resolved ``num_workers``, or ``None`` when nothing
-            recorded one — an instance built directly rather than by
-            :func:`score_split`. ``None`` rather than ``0``, which would read as an
-            in-process run. Recorded because a complete run (WP-192) leaves the count
-            to the datamodule's shared-memory- and image-size-aware policy, which picks
-            a host-dependent one.
+        workers: The val loader's resolved ``num_workers``, or ``None`` when nothing recorded one — an instance built
+            directly rather than by :func:`score_split`. ``None`` rather than ``0``, which would read as an
+            in-process run. Recorded because a complete run (WP-192) leaves the count to the datamodule's
+            shared-memory- and image-size-aware policy, which picks a host-dependent one.
 
     Examples:
         ```pycon
@@ -189,28 +175,22 @@ def score_split(
 ) -> SplitScoring:
     """Run the one-to-one branch over the split, scoring per tile and mapping to source.
 
-    The forward pass is walked once. Each batch's detections are scored per tile in the
-    letterbox frame they arrive in, and — when ``windows`` is supplied — additionally
-    mapped back into source-image pixels for the merge, which needs each tile's own
-    pre-letterbox size and its window origin. The two readings come from the same
-    detections, so a difference between the reported figures is the merge and nothing
-    else.
+    The forward pass is walked once. Each batch's detections are scored per tile in the letterbox frame they arrive
+    in, and — when ``windows`` is supplied — additionally mapped back into source-image pixels for the merge, which
+    needs each tile's own pre-letterbox size and its window origin. The two readings come from the same detections,
+    so a difference between the reported figures is the merge and nothing else.
 
-    **The window a tile's detections are translated by is checked, not assumed.**
-    ``windows[position]`` pairs a detection with a window by loader position, and a
-    wrong pairing is silent by construction: mismatched origins move detections and
-    ground truth by different amounts, so the whole-image number simply drops and
-    nothing says why. Two things make the pairing checkable rather than argued, and
-    :func:`_require_matching_tile` states which failure each one catches. The window's
-    own :attr:`~lucid_yolo.eval.tile_merge.TileWindow.tile_id` is compared against the
-    val dataset's :attr:`~lucid_yolo.data.coco.CocoDetectionDataset.image_ids` at that
-    position, which asserts the identity outright — including for tiles whose
-    annotation sets are identical, where nothing read off the instances could. And
-    ``expected_ground_truth`` — the same split's per-tile ground truth read from the
-    annotation file, in index order — is compared against the target the loader
-    actually yielded, which is the only reading that can see the loader's own order.
-    A reader publishing no ids (the YOLO one numbers nothing) keeps the second check
-    and skips the first.
+    **The window a tile's detections are translated by is checked, not assumed.** ``windows[position]`` pairs a
+    detection with a window by loader position, and a wrong pairing is silent by construction: mismatched origins
+    move detections and ground truth by different amounts, so the whole-image number simply drops and nothing says
+    why. Two things make the pairing checkable rather than argued, and :func:`_require_matching_tile` states which
+    failure each one catches. The window's own :attr:`~lucid_yolo.eval.tile_merge.TileWindow.tile_id` is compared
+    against the val dataset's :attr:`~lucid_yolo.data.coco.CocoDetectionDataset.image_ids` at that position, which
+    asserts the identity outright — including for tiles whose annotation sets are identical, where nothing read
+    off the instances could. And ``expected_ground_truth`` — the same split's per-tile ground truth read from the
+    annotation file, in index order — is compared against the target the loader actually yielded, which is the
+    only reading that can see the loader's own order. A reader publishing no ids (the YOLO one numbers nothing) keeps
+    the second check and skips the first.
 
     Args:
         module: The eval-mode oriented module.
@@ -230,11 +210,9 @@ def score_split(
         The :class:`SplitScoring`.
 
     Raises:
-        ValueError: If the module's task is not ``"obb"`` — a detection checkpoint has
-            no angle stem, so there is no oriented number to report — if the val
-            dataset's image ids are not the ones ``windows`` records, or if the loader
-            does not yield the tiles ``expected_ground_truth`` describes, in its order
-            and in full.
+        ValueError: If the module's task is not ``"obb"`` — a detection checkpoint has no angle stem, so there is no
+            oriented number to report — if the val dataset's image ids are not the ones ``windows`` records, or if
+            the loader does not yield the tiles ``expected_ground_truth`` describes, in its order and in full.
 
     Examples:
         ```pycon
@@ -294,16 +272,13 @@ def score_split(
 def _dataset_image_ids(loader: DataLoader[object]) -> tuple[int, ...] | None:
     """Read the val dataset's own COCO image ids, when the reader publishes any.
 
-    Taken off the loader's ``dataset`` rather than asked of the datamodule, because the
-    dataset is already reachable there and the datamodule has no business growing an
-    accessor for one consumer's check.
+    Taken off the loader's ``dataset`` rather than asked of the datamodule, because the dataset is already
+    reachable there and the datamodule has no business growing an accessor for one consumer's check.
 
-    ``None`` is a supported answer, not a degraded one:
-    :class:`~lucid_yolo.data.yolo.YoloDetectionDataset` has no ids to publish — the
-    format numbers nothing, pairing an image to its labels by file stem — and neither
-    does a wrapper such as :class:`~torch.utils.data.Subset`. Those readers keep the
-    annotation-set check below and lose only the id comparison, which is the honest
-    outcome: an identity nobody recorded cannot be asserted.
+    ``None`` is a supported answer, not a degraded one: :class:`~lucid_yolo.data.yolo.YoloDetectionDataset` has no
+    ids to publish — the format numbers nothing, pairing an image to its labels by file stem — and neither does a
+    wrapper such as :class:`~torch.utils.data.Subset`. Those readers keep the annotation-set check below and lose
+    only the id comparison, which is the honest outcome: an identity nobody recorded cannot be asserted.
 
     Args:
         loader: The val dataloader the pass iterates.
@@ -337,32 +312,27 @@ def _require_matching_tile(
     Two comparisons, checking two different couplings, neither of which subsumes the
     other.
 
-    **The tile's own COCO image id**, when the reader publishes one. The index carries
-    each tile's id on its :class:`~lucid_yolo.eval.tile_merge.TileWindow` and the dataset
-    publishes the id of every one of its positions, so the pairing the merge relies on is
-    *asserted* rather than inferred from whatever annotations happen to sit at a position.
-    This is what closes the case annotations cannot speak to: two tiles carrying
-    byte-identical annotation sets — three of any four empty ones do — are
-    indistinguishable by their instances and distinct by id, so a window index paired to
-    the wrong tiles is refused here even when every annotation set matches.
+    **The tile's own COCO image id**, when the reader publishes one. The index carries each tile's id on its
+    :class:`~lucid_yolo.eval.tile_merge.TileWindow` and the dataset publishes the id of every one of its positions,
+    so the pairing the merge relies on is *asserted* rather than inferred from whatever annotations happen to sit
+    at a position. This is what closes the case annotations cannot speak to: two tiles carrying byte-identical
+    annotation sets — three of any four empty ones do — are indistinguishable by their instances and distinct by id,
+    so a window index paired to the wrong tiles is refused here even when every annotation set matches.
 
     **The tile's annotation set**, always. The loader parses it through
     :class:`~lucid_yolo.data.coco.CocoDetectionDataset` and the index through
-    :func:`~lucid_yolo.eval.tile_merge.load_tile_index`, both skipping ``iscrowd``
-    instances, both fitting the box from the four-point ring, both labelling by sorted
-    category id, so the instance count, the labels in file order and the difficult flags
-    agree exactly for the same tile. This is the *only* reading that comes from the
-    yielded batch, and therefore the only one that can see the loader's own iteration
-    order: the ids above compare two orderings read off disk, both of which sit still
-    while a sampler permutes what arrives. A reordered loader is caught here or not at
-    all. Coordinates are deliberately not compared: the loader's are letterboxed and the
+    :func:`~lucid_yolo.eval.tile_merge.load_tile_index`, both skipping ``iscrowd`` instances, both fitting the box
+    from the four-point ring, both labelling by sorted category id, so the instance count, the labels in file
+    order and the difficult flags agree exactly for the same tile. This is the *only* reading that comes from the
+    yielded batch, and therefore the only one that can see the loader's own iteration order: the ids above compare
+    two orderings read off disk, both of which sit still while a sampler permutes what arrives. A reordered loader
+    is caught here or not at all. Coordinates are deliberately not compared: the loader's are letterboxed and the
     index's are tile-local, and the merge is what maps between them.
 
-    One case survives both, and is stated rather than argued away: a sampler that
-    permutes two tiles whose annotation sets are identical. The yielded batch carries no
-    id — :class:`~lucid_yolo.data.targets.Targets` holds geometry and nothing else — so
-    no check at this layer can see it, and the ordinary unshuffled val loader this path
-    runs does not do it.
+    One case survives both, and is stated rather than argued away: a sampler that permutes two tiles whose
+    annotation sets are identical. The yielded batch carries no id — :class:`~lucid_yolo.data.targets.Targets` holds
+    geometry and nothing else — so no check at this layer can see it, and the ordinary unshuffled val loader this
+    path runs does not do it.
 
     Args:
         target: The loader's :class:`~lucid_yolo.data.targets.Targets` for this position.
@@ -374,9 +344,8 @@ def _require_matching_tile(
             publishes none (:func:`_dataset_image_ids`), which skips the id comparison.
 
     Raises:
-        ValueError: If the position is past the end of the index, if the index's tile id
-            there is not the dataset's, or if its labels or difficult flags differ from
-            the index's.
+        ValueError: If the position is past the end of the index, if the index's tile id there is not the dataset's,
+            or if its labels or difficult flags differ from the index's.
 
     Examples:
         ```pycon
@@ -533,18 +502,16 @@ def _to_source(
 def _keeps_low_startup_route(*, batches: int, workers: int) -> bool:
     """Decide whether a complete run sets the policy's worker pool aside for the low-startup route.
 
-    A complete run (``limit == 0``) asks the datamodule's automatic policy for a worker
-    count, then keeps it only when the loader has more batches than workers. With no more
-    batches than workers, no worker would receive a second batch and every worker beyond
-    the batch count would receive none, so a complete but tiny custom split keeps the
-    previous route rather than start such a pool. That is a deliberately conservative structural
-    bound, not a measured crossover: parallel decode can repay a pool's startup with
-    fewer batches than workers, and only the one-batch case was measured to lose. It
-    holds for any nonzero count, a single worker included; a count of zero is already
-    in-process and has no pool to set aside.
+    A complete run (``limit == 0``) asks the datamodule's automatic policy for a worker count, then keeps it only
+    when the loader has more batches than workers. With no more batches than workers, no worker would receive a
+    second batch and every worker beyond the batch count would receive none, so a complete but tiny custom split
+    keeps the previous route rather than start such a pool. That is a deliberately conservative structural bound,
+    not a measured crossover: parallel decode can repay a pool's startup with fewer batches than workers, and only
+    the one-batch case was measured to lose. It holds for any nonzero count, a single worker included; a count of
+    zero is already in-process and has no pool to set aside.
 
-    Kept apart from :func:`run` so the decision is pinned on the two counts the probe
-    loader already holds, without a model or tiles on disk.
+    Kept apart from :func:`run` so the decision is pinned on the two counts the probe loader already holds, without a
+    model or tiles on disk.
 
     Args:
         batches: Batches the policy's val loader yields over the split.
@@ -612,8 +579,8 @@ def run(
     device = pick_device(device_name)
     _, ann_file = resolve_split(data_root, split)
     index = load_tile_index(ann_file)
-    # A complete acceptance run may be long enough to repay worker startup; a limited
-    # diagnostic prefix is not (and keeps the previous low-startup-cost path).
+    # A complete acceptance run may be long enough to repay worker startup; a limited diagnostic prefix is not (and
+    # keeps the previous low-startup-cost path).
     num_workers = None if limit == 0 else 0
     datamodule = build_datamodule(
         data_root,
@@ -664,9 +631,9 @@ def run(
         print(f"[whole-image] rotated mAP50-95={metrics['map']:.4f} mAP50={metrics['map_50']:.4f} ({images} images)")
 
     if output:
-        # The scoring pass is minutes of work and the report is its only durable form, so
-        # the directory is created rather than required: a run that computed the number
-        # and then raised on a missing parent has lost exactly what it was asked for.
+        # The scoring pass is minutes of work and the report is its only durable form, so the directory is created
+        # rather than required: a run that computed the number and then raised on a missing parent has lost exactly
+        # what it was asked for.
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(_report(info, split, img_size, elapsed, scoring, whole_image), indent=2) + "\n")
         print(f"report -> {output}")
@@ -676,9 +643,9 @@ def run(
 def _whole_image(index: TileIndex, scoring: SplitScoring) -> tuple[dict[str, float], int]:
     """Merge the pass's per-tile detections onto source images and score them.
 
-    The cap is lifted (:func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map`'s
-    ``max_detections=None``): each tile's 300 were already applied at emission, and a
-    merged source image is many tiles, so re-capping it at 300 would report a truncation.
+    The cap is lifted (:func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map`'s ``max_detections=None``): each
+    tile's 300 were already applied at emission, and a merged source image is many tiles, so re-capping it at 300
+    would report a truncation.
 
     Args:
         index: The split's tile index.
@@ -709,13 +676,12 @@ def _report(
 ) -> dict[str, object]:
     """Build the JSON report, with each figure named rather than merely present.
 
-    ``metrics`` stays where every previous report put it — the per-tile number, which the
-    tier acceptance gate reads — and the whole-image number is its own block carrying the
-    detection cap it was scored at, because ``mar_300`` keeps A47's name whatever the cap.
-    ``info["workers"]`` records the val loader's resolved worker count: a complete run
-    (WP-192) hands the datamodule ``None`` and lets its shared-memory- and image-size-aware
-    policy choose, so the same command can pick a different count on a different host.
-    It is ``null`` when the scoring recorded no count, never a ``0`` standing in for one.
+    ``metrics`` stays where every previous report put it — the per-tile number, which the tier acceptance gate reads
+    — and the whole-image number is its own block carrying the detection cap it was scored at, because ``mar_300``
+    keeps A47's name whatever the cap. ``info["workers"]`` records the val loader's resolved worker count: a complete
+    run (WP-192) hands the datamodule ``None`` and lets its shared-memory- and image-size-aware policy choose, so
+    the same command can pick a different count on a different host. It is ``null`` when the scoring recorded no
+    count, never a ``0`` standing in for one.
 
     Args:
         info: The checkpoint loader's provenance dict.

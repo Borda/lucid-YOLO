@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Functional-core tests: the doctest-fence audit script.
 
-Covers ``scripts/lint/audit_doctest_fences.py`` on modules written under ``tmp_path``
-rather than against the live tree -- the live tree is what the ``doctest-fences``
-pre-commit hook reads on every commit that touches ``src/`` or ``scripts/``.
+Covers ``scripts/lint/audit_doctest_fences.py`` on modules written under ``tmp_path`` rather than against the live tree
+-- the live tree is what the ``doctest-fences`` pre-commit hook reads on every commit that touches ``src/`` or
+``scripts/``.
 """
 
 from __future__ import annotations

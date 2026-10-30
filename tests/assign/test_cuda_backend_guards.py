@@ -1,23 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """The optional CUDA assignment backend loads lazily and certifies the device passes it loads.
 
-Every test here runs offline: import behaviour is observed in fresh interpreters, and
-the loaded-passes certificate uses a stand-in module, so neither CUDA nor the optional
-compiler is needed.
+Every test here runs offline: import behaviour is observed in fresh interpreters, and the loaded-passes certificate
+uses a stand-in module, so neither CUDA nor the optional compiler is needed.
 """
 
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
-from pathlib import Path
 from types import MappingProxyType, ModuleType
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 import torch
+from isolated_interpreter_helpers import run_isolated
 
 from lucid_yolo.assign import _cuda
 from lucid_yolo.losses.dual_loss import DualBranchLoss
@@ -61,34 +58,14 @@ def loaded_passes(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return module
 
 
-def _isolated(code: str) -> str:
-    """Run ``code`` in a fresh CPU-only interpreter importing this checkout, returning its stdout.
-
-    Examples:
-        >>> _isolated("print('ok')")
-        'ok\\n'
-    """
-    source = Path(__file__).resolve().parents[2] / "src"
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        env={**os.environ, "PYTHONPATH": str(source), "CUDA_VISIBLE_DEVICES": "", "OMP_NUM_THREADS": "1"},
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    return result.stdout
-
-
 class TestLazyDevicePasses:
     """The device passes and their compiler load on the first admitted launch, never on import."""
 
     def test_import_and_native_calls_leave_passes_unloaded(self) -> None:
         """Importing assignment and the loss recorder, then assigning and certifying on CPU, loads no pass.
 
-        A CPU call with ``fused_assignment=True`` declines at the device gate before the
-        loader runs, and a certificate for a loss requesting no fusion has no pass to check.
+        A CPU call with ``fused_assignment=True`` declines at the device gate before the loader runs, and a certificate
+        for a loss requesting no fusion has no pass to check.
         """
         code = """
 import sys
@@ -107,14 +84,14 @@ assert _source_signature(DualBranchLoss()) is not None
 assert "lucid_yolo.assign._cuda_kernels" not in sys.modules, "device passes loaded eagerly"
 print("PASSES_UNLOADED")
 """
-        assert "PASSES_UNLOADED" in _isolated(code)
+        assert "PASSES_UNLOADED" in run_isolated(code)
 
     def test_broken_compiler_warns_once_and_stays_unavailable(self) -> None:
         """A compiler that imports but fails while the passes load warns once, then stays native.
 
-        The stand-in compiler reports an unparsable version, which raises a
-        non-``ImportError`` from the pass module; a second lookup reuses the decision. It is
-        installed after the package import, which itself reads the real import system.
+        The stand-in compiler reports an unparsable version, which raises a non-``ImportError`` from the pass module; a
+        second lookup reuses the decision. It is installed after the package import, which itself reads the real import
+        system.
         """
         code = """
 import sys
@@ -135,14 +112,13 @@ assert len(messages) == 1, [str(item.message) for item in record]
 assert "InvalidVersion" in messages[0], messages
 print("BROKEN_COMPILER_ONE_WARNING")
 """
-        assert "BROKEN_COMPILER_ONE_WARNING" in _isolated(code)
+        assert "BROKEN_COMPILER_ONE_WARNING" in run_isolated(code)
 
     @pytest.mark.parametrize("missing", ["triton", "lucid_yolo.assign._cuda_kernels"])
     def test_missing_module_stays_unavailable_without_warning(self, missing: str) -> None:
         """An absent compiler or pass module leaves the backend unavailable and raises no warning.
 
-        This is an install without the ``cuda-assignment`` extra: nothing is broken, so
-        nothing is reported.
+        This is an install without the ``cuda-assignment`` extra: nothing is broken, so nothing is reported.
         """
         code = f"""
 import sys
@@ -154,7 +130,7 @@ with warnings.catch_warnings():
     assert _cuda._kernels() is None
 print("MISSING_MODULE_SILENT")
 """
-        assert "MISSING_MODULE_SILENT" in _isolated(code)
+        assert "MISSING_MODULE_SILENT" in run_isolated(code)
 
 
 class TestLoadedPassCertificate:
@@ -181,10 +157,9 @@ class TestLoadedPassCertificate:
 
         assert _source_signature(DualBranchLoss()) is not None
 
-    def test_replaced_loader_invalidates_fused_loss(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(_cuda, "_kernels", new=Mock(wraps=_cuda._kernels))
+    def test_replaced_loader_invalidates_fused_loss(self) -> None:
         """The loader decides which passes run, so replacing it refuses the recording."""
-        monkeypatch.setattr(_cuda, "_kernels", Mock(wraps=_cuda._kernels))
-
         assert _source_signature(DualBranchLoss(fused_assignment=True)) is None
 
 
@@ -196,10 +171,9 @@ class TestFirstLaunchLatch:
         """Report an uncaptured stream, which a CPU-only build cannot answer itself."""
         monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", lambda: False)
 
-    def test_first_launch_publishes_after_fence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(torch.cuda, "synchronize")
+    def test_first_launch_publishes_after_fence(self, fence: Mock) -> None:
         """A successful first launch is fenced on its device, then marked ready and verified."""
-        fence = Mock()
-        monkeypatch.setattr(torch.cuda, "synchronize", fence)
         device = torch.device("cuda", 0)
         result = torch.tensor([3.0])
 
@@ -208,14 +182,13 @@ class TestFirstLaunchLatch:
         assert _cuda._STATE.ready == {("metric", device, 1)}
         assert _cuda._STATE.verified == {("metric", device)}
 
-    def test_out_of_memory_propagates_unlatched(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(torch.cuda, "synchronize")
+    def test_out_of_memory_propagates_unlatched(self, fence: Mock) -> None:
         """An allocation failure in the first launch reaches the caller and disables nothing.
 
-        Out-of-memory belongs to the workload: latching it would keep the family native
-        for the rest of the process after one oversized batch.
+        Out-of-memory belongs to the workload: latching it would keep the family native for the rest of the process
+        after one oversized batch.
         """
-        fence = Mock()
-        monkeypatch.setattr(torch.cuda, "synchronize", fence)
         produce = Mock(side_effect=torch.cuda.OutOfMemoryError("CUDA out of memory"))
 
         with pytest.raises(torch.cuda.OutOfMemoryError):
@@ -224,13 +197,12 @@ class TestFirstLaunchLatch:
         fence.assert_not_called()
         assert not _cuda._STATE.unavailable and not _cuda._STATE.ready and not _cuda._STATE.verified
 
-    def test_fence_error_propagates_unlatched(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(torch.cuda, "synchronize", new=Mock(side_effect=RuntimeError("device-side assert")))
+    def test_fence_error_propagates_unlatched(self) -> None:
         """A device error surfacing at the completion fence reaches the caller and publishes nothing.
 
         Such an error is sticky on the device, so a native rerun could not recover it.
         """
-        monkeypatch.setattr(torch.cuda, "synchronize", Mock(side_effect=RuntimeError("device-side assert")))
-
         with pytest.raises(RuntimeError, match="device-side assert"):
             _cuda._run("metric", (1,), torch.device("cuda", 0), lambda: torch.tensor([3.0]))
 

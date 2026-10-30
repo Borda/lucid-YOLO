@@ -1,56 +1,45 @@
 # SPDX-License-Identifier: Apache-2.0
 """Two-image mixup blend and polygon copy-paste assembly (WP-012, blueprint section 5.9).
 
-Both operations here are **assemblies**, not
-:class:`~lucid_yolo.data.transforms.GeometricTransform` implementations: like
-:class:`~lucid_yolo.data.mosaic.MosaicAssembly` consumes four ``(image, targets)``
-pairs, these consume **two** and yield one. They deliberately do not conform to
-the one-image-in / one-image-out transform protocol; they run before the
-per-image geometric transforms.
+Both operations here are **assemblies**, not :class:`~lucid_yolo.data.transforms.GeometricTransform` implementations:
+like :class:`~lucid_yolo.data.mosaic.MosaicAssembly` consumes four ``(image, targets)`` pairs, these consume **two**
+and yield one. They deliberately do not conform to the one-image-in / one-image-out transform protocol; they run before
+the per-image geometric transforms.
 
 :class:`Mixup` (R9-lineage, [R1] Table S3)
-    With probability ``p`` it convex-blends two **same-size** images,
-    ``lam * a + (1 - lam) * b``, with ``lam`` drawn from ``Beta(alpha, alpha)``,
-    and concatenates both label sets **unchanged**. Detection-lineage mixup keeps
-    every box from both images at full weight — there is no target-level label
-    smoothing by ``lam`` (that is a classification-mixup convention); the blend
-    lives in pixel space only. When not triggered, the **first** pair is returned
-    untouched.
+    With probability ``p`` it convex-blends two **same-size** images, ``lam * a + (1 - lam) * b``, with ``lam`` drawn
+    from ``Beta(alpha, alpha)``, and concatenates both label sets **unchanged**. Detection-lineage mixup keeps every
+    box from both images at full weight — there is no target-level label smoothing by ``lam`` (that is a
+    classification-mixup convention); the blend lives in pixel space only. When not triggered, the **first** pair is
+    returned untouched.
 
 :class:`CopyPaste` (R9-lineage, [R1] Table S3)
-    With probability ``p`` **per candidate instance**, polygon-carrying instances
-    of image ``b`` are pasted onto image ``a``: the source polygon is rasterised
-    to a pixel mask (even-odd point-in-polygon rule,
-    :func:`~lucid_yolo.data.rasterize.rasterize_polygon`, imported here under its
-    former private name so this module's call sites and tests are unchanged),
-    the masked pixels are copied, and the instance's box/label/polygon are appended
-    to ``a``'s targets. Instances without a polygon are never pasted — the mask is
-    mandatory — so the destination targets must themselves carry polygons (or be
-    empty) for the merged set to stay polygon-consistent.
+    With probability ``p`` **per candidate instance**, polygon-carrying instances of image ``b`` are pasted onto image
+    ``a``: the source polygon is rasterised to a pixel mask (even-odd point-in-polygon rule,
+    :func:`~lucid_yolo.data.rasterize.rasterize_polygon`, imported here under its former private name so this module's
+    call sites and tests are unchanged), the masked pixels are copied, and the instance's box/label/polygon are appended
+    to ``a``'s targets. Instances without a polygon are never pasted — the mask is mandatory — so the destination
+    targets must themselves carry polygons (or be empty) for the merged set to stay polygon-consistent.
 
-Scale-aware strengths ([R1] Table S3): the n-scale recipe is mildest (mixup ``0``,
-copy-paste ``0.1``); larger scales grow stronger (mixup up to ``0.2``, copy-paste
-up to ``0.6``). Those probabilities are supplied by the datamodule config; this
-module only implements the operations.
+Scale-aware strengths ([R1] Table S3): the n-scale recipe is mildest (mixup ``0``, copy-paste ``0.1``); larger scales
+grow stronger (mixup up to ``0.2``, copy-paste up to ``0.6``). Those probabilities are supplied by the datamodule
+config; this module only implements the operations.
 
 Rotated boxes (WP-058):
-    The two operations part company here. :class:`Mixup` moves no geometry at all —
-    it blends pixels and concatenates target sets — so rotated boxes ride through it
-    untouched and canonical, on their own instance axis, exactly as boxes and labels
-    do; nothing is clipped and nothing is dropped, so it needs no rotated machinery.
-    :class:`CopyPaste` still rejects them, and not as deferred work: its unit of
-    transfer is a rasterised **polygon mask**, and the oriented path carries no
-    polygons (WP-056), so there is no rotated instance it could paste and no ring it
-    could invent for one. Pasting into a rotated-carrying destination would silently
-    drop that destination's ``rboxes``, which is the failure the guard prevents.
+    The two operations part company here. :class:`Mixup` moves no geometry at all — it blends pixels and concatenates
+    target sets — so rotated boxes ride through it untouched and canonical, on their own instance axis, exactly as boxes
+    and labels do; nothing is clipped and nothing is dropped, so it needs no rotated machinery. :class:`CopyPaste`
+    still rejects them, and not as deferred work: its unit of transfer is a rasterised **polygon mask**, and the
+    oriented path carries no polygons (WP-056), so there is no rotated instance it could paste and no ring it could
+    invent for one. Pasting into a rotated-carrying destination would silently drop that destination's ``rboxes``,
+    which is the failure the guard prevents.
 
 Determinism:
-    Every random quantity — the trigger draw, the ``Beta`` blend factor and the
-    per-instance paste draws — comes from an optional :class:`torch.Generator`, so
-    a seeded generator gives byte-identical output. The ``Beta`` factor is built
-    from two ``Gamma`` draws, ``lam = X / (X + Y)`` with ``X, Y ~ Gamma(alpha, 1)``,
-    via :func:`torch._standard_gamma`, the one gamma sampler that accepts a
-    generator (``torch.distributions.Gamma.sample`` does not).
+    Every random quantity — the trigger draw, the ``Beta`` blend factor and the per-instance paste draws — comes from
+    an optional :class:`torch.Generator`, so a seeded generator gives byte-identical output. The ``Beta`` factor is
+    built from two ``Gamma`` draws, ``lam = X / (X + Y)`` with ``X, Y ~ Gamma(alpha, 1)``, via
+    :func:`torch._standard_gamma`, the one gamma sampler that accepts a generator
+    (``torch.distributions.Gamma.sample`` does not).
 """
 
 from __future__ import annotations
@@ -77,9 +66,9 @@ class MixupParams:
     """What one mixup call decided: blend at this factor, or pass the first pair through.
 
     Attributes:
-        lam: The convex blend factor, or ``None`` when the call does not trigger --
-            the same two-valued meaning :attr:`Mixup.last_lam` has carried since
-            WP-012, so a stated no-op is expressible rather than only a stated blend.
+        lam: The convex blend factor, or ``None`` when the call does not trigger -- the same two-valued meaning
+            :attr:`Mixup.last_lam` has carried since WP-012, so a stated no-op is expressible rather than only
+            a stated blend.
 
     Examples:
         ```pycon
@@ -97,8 +86,7 @@ class CopyPasteParams:
     """Which source instances one copy-paste call pastes, by index.
 
     Attributes:
-        selected: Indices into the source's ``polygons`` list, in paste order. Empty
-            means the call pastes nothing.
+        selected: Indices into the source's ``polygons`` list, in paste order. Empty means the call pastes nothing.
 
     Examples:
         ```pycon
@@ -114,34 +102,28 @@ class CopyPasteParams:
 class Mixup:
     """Convex pixel blend of two same-size images with concatenated targets (WP-012).
 
-    Each call draws a trigger uniform: with probability ``p`` the two images are
-    blended ``lam * a + (1 - lam) * b`` with ``lam`` from ``Beta(alpha, alpha)`` and
-    both target sets are concatenated **unchanged** (every box from both images is
-    kept at full weight — detection-lineage mixup applies no ``lam`` label
-    smoothing). With probability ``1 - p`` the **first** pair passes through
-    untouched.
+    Each call draws a trigger uniform: with probability ``p`` the two images are blended ``lam * a + (1 - lam) * b``
+    with ``lam`` from ``Beta(alpha, alpha)`` and both target sets are concatenated **unchanged** (every box from both
+    images is kept at full weight — detection-lineage mixup applies no ``lam`` label smoothing). With probability
+    ``1 - p`` the **first** pair passes through untouched.
 
-    This is an **assembly, not** a :class:`~lucid_yolo.data.transforms.GeometricTransform`:
-    it consumes two ``(image, targets)`` pairs rather than one. The two images must
-    share the same shape; concatenating the targets additionally requires
-    consistent polygon presence (a :meth:`~lucid_yolo.data.targets.Targets.concat`
-    rule).
+    This is an **assembly, not** a :class:`~lucid_yolo.data.transforms.GeometricTransform`: it consumes two
+    ``(image, targets)`` pairs rather than one. The two images must share the same shape; concatenating the targets
+    additionally requires consistent polygon presence (a :meth:`~lucid_yolo.data.targets.Targets.concat` rule).
 
-    Rotated boxes are carried through unchanged (WP-058): the blend moves no
-    geometry, so both inputs' ``rboxes`` are concatenated exactly as their boxes and
-    labels are, still canonical, with nothing clipped or dropped.
+    Rotated boxes are carried through unchanged (WP-058): the blend moves no geometry, so both inputs' ``rboxes`` are
+    concatenated exactly as their boxes and labels are, still canonical, with nothing clipped or dropped.
 
     Args:
         p: Probability of blending on a given call.
-        alpha: Shared ``Beta`` concentration; both shape parameters equal ``alpha``,
-            so the blend factor is symmetric about ``0.5`` and (for large ``alpha``)
-            concentrated there. Defaults to ``32.0``.
-        generator: Optional :class:`torch.Generator` for seeded, reproducible
-            trigger and blend-factor draws. Defaults to ``None`` (global RNG).
+        alpha: Shared ``Beta`` concentration; both shape parameters equal ``alpha``, so the blend factor is symmetric
+            about ``0.5`` and (for large ``alpha``) concentrated there. Defaults to ``32.0``.
+        generator: Optional :class:`torch.Generator` for seeded, reproducible trigger and blend-factor draws.
+            Defaults to ``None`` (global RNG).
 
     Attributes:
-        last_lam: The blend factor used on the most recent call, or ``None`` if that
-            call did not trigger (passed the first pair through) or has not run yet.
+        last_lam: The blend factor used on the most recent call, or ``None`` if that call did not trigger (passed
+            the first pair through) or has not run yet.
 
     Examples:
         ```pycon
@@ -170,19 +152,16 @@ class Mixup:
         """Blend ``items`` with probability ``p``; otherwise return the first pair.
 
         Args:
-            items: Exactly two ``(image, targets)`` pairs. The two images must share
-                shape, dtype and device; polygon presence must be consistent across
-                both (a :meth:`~lucid_yolo.data.targets.Targets.concat` requirement).
-                Rotated boxes, if any, are concatenated untouched.
+            items: Exactly two ``(image, targets)`` pairs. The two images must share shape, dtype and device;
+                polygon presence must be consistent across both (a :meth:`~lucid_yolo.data.targets.Targets.concat`
+                requirement). Rotated boxes, if any, are concatenated untouched.
 
         Returns:
-            Either the blended ``(image, targets)`` — the convex pixel blend and the
-            concatenated targets — or, when the call does not trigger, the first
-            input pair untouched.
+            Either the blended ``(image, targets)`` — the convex pixel blend and the concatenated targets — or, when
+            the call does not trigger, the first input pair untouched.
 
         Raises:
-            ValueError: If ``items`` does not hold exactly two pairs, or the two
-                images differ in shape.
+            ValueError: If ``items`` does not hold exactly two pairs, or the two images differ in shape.
 
         Examples:
             ```pycon
@@ -203,11 +182,10 @@ class Mixup:
     def sample(self) -> MixupParams:
         """Draw the trigger and, when it fires, the blend factor.
 
-        The sampling half of the seam: this is the only method that touches
-        :attr:`generator`, so a caller wanting a stated blend rather than a drawn one
-        builds :class:`MixupParams` directly (WP-147). The trigger uniform is always
-        consumed; the two gamma draws behind ``lam`` are consumed only when it fires,
-        which is the draw order ``__call__`` has always had.
+        The sampling half of the seam: this is the only method that touches :attr:`generator`, so a caller wanting a
+        stated blend rather than a drawn one builds :class:`MixupParams` directly (WP-147). The trigger uniform is
+        always consumed; the two gamma draws behind ``lam`` are consumed only when it fires, which is the draw order
+        ``__call__`` has always had.
 
         Returns:
             The sampled decision: a blend factor, or ``None`` for a pass-through.
@@ -229,18 +207,15 @@ class Mixup:
         """Blend ``items`` at ``params``' factor, or pass the first pair through.
 
         Args:
-            items: Exactly two ``(image, targets)`` pairs, as :meth:`__call__`
-                requires.
+            items: Exactly two ``(image, targets)`` pairs, as :meth:`__call__` requires.
             params: The blend factor, or ``None`` for a pass-through.
 
         Returns:
-            Either the blended ``(image, targets)`` or the first input pair
-            untouched.
+            Either the blended ``(image, targets)`` or the first input pair untouched.
 
         Raises:
-            ValueError: If the two images differ in shape, checked only when
-                ``params`` calls for a blend -- a pass-through never reads the second
-                image, which is the behaviour ``__call__`` has always had.
+            ValueError: If the two images differ in shape, checked only when ``params`` calls for a blend --
+                a pass-through never reads the second image, which is the behaviour ``__call__`` has always had.
 
         Examples:
             ```pycon
@@ -275,39 +250,33 @@ class Mixup:
 class CopyPaste:
     """Paste polygon instances from one image onto another (WP-012).
 
-    The two ``(image, targets)`` inputs are the **destination** ``a`` and the
-    **source** ``b``. For each polygon-carrying instance of ``b`` a paste draw is
-    taken; with probability ``p`` (and up to ``max_paste`` pastes) the instance's
-    polygon is rasterised to a pixel mask, those source pixels overwrite the
-    destination, and the instance's box/label/polygon are appended to ``a``'s
-    targets. Instances of ``b`` without a polygon are never pasted — the mask is
-    mandatory.
+    The two ``(image, targets)`` inputs are the **destination** ``a`` and the **source** ``b``. For each
+    polygon-carrying instance of ``b`` a paste draw is taken; with probability ``p`` (and up to ``max_paste`` pastes)
+    the instance's polygon is rasterised to a pixel mask, those source pixels overwrite the destination, and the
+    instance's box/label/polygon are appended to ``a``'s targets. Instances of ``b`` without a polygon are never
+    pasted — the mask is mandatory.
 
-    Because pasted instances always carry a polygon, the destination ``a`` must
-    itself carry polygons (one ring per box) or be empty; otherwise the merged
-    target set would mix polygon-present and polygon-absent instances, which
-    :class:`~lucid_yolo.data.targets.Targets` rejects. This matches the segmentation
-    lineage the augmentation comes from.
+    Because pasted instances always carry a polygon, the destination ``a`` must itself carry polygons (one ring per
+    box) or be empty; otherwise the merged target set would mix polygon-present and polygon-absent instances, which
+    :class:`~lucid_yolo.data.targets.Targets` rejects. This matches the segmentation lineage the augmentation
+    comes from.
 
     This is an **assembly, not** a :class:`~lucid_yolo.data.transforms.GeometricTransform`:
     it consumes two pairs rather than one. Both images must share the same shape.
 
-    Rotated boxes are **not** supported, for the reason the module docstring gives:
-    the paste unit is a polygon mask and the oriented path carries no polygons
-    (WP-056), so any input with a non-empty ``rboxes`` raises
+    Rotated boxes are **not** supported, for the reason the module docstring gives: the paste unit is a polygon
+    mask and the oriented path carries no polygons (WP-056), so any input with a non-empty ``rboxes`` raises
     :class:`NotImplementedError` rather than have its rotated modality dropped.
 
     Args:
         p: Per-candidate-instance paste probability.
-        max_paste: Optional cap on the number of instances pasted in one call.
-            ``None`` (the default) means no cap — every candidate is drawn against
-            ``p``.
-        generator: Optional :class:`torch.Generator` for seeded, reproducible paste
-            draws. Defaults to ``None`` (global RNG).
+        max_paste: Optional cap on the number of instances pasted in one call. ``None`` (the default) means no cap —
+            every candidate is drawn against ``p``.
+        generator: Optional :class:`torch.Generator` for seeded, reproducible paste draws. Defaults to ``None``
+            (global RNG).
 
     Attributes:
-        last_pasted: The number of instances pasted on the most recent call, or
-            ``None`` before the first call.
+        last_pasted: The number of instances pasted on the most recent call, or ``None`` before the first call.
 
     Examples:
         ```pycon
@@ -337,19 +306,16 @@ class CopyPaste:
         """Paste sampled source instances onto the destination image and targets.
 
         Args:
-            items: Exactly two ``(image, targets)`` pairs — destination first,
-                source second. The two images must share shape, dtype and device;
-                every ``rboxes`` must be empty. Only source instances that carry a
+            items: Exactly two ``(image, targets)`` pairs — destination first, source second. The two images must
+                share shape, dtype and device; every ``rboxes`` must be empty. Only source instances that carry a
                 polygon are paste candidates.
 
         Returns:
-            The destination image with the pasted pixels and its targets with the
-            pasted instances appended. When nothing is pasted, a copy of the
-            destination image and a clone of its targets are returned.
+            The destination image with the pasted pixels and its targets with the pasted instances appended. When
+            nothing is pasted, a copy of the destination image and a clone of its targets are returned.
 
         Raises:
-            ValueError: If ``items`` does not hold exactly two pairs, or the two
-                images differ in shape.
+            ValueError: If ``items`` does not hold exactly two pairs, or the two images differ in shape.
             NotImplementedError: If either input carries a non-empty ``rboxes``.
 
         Examples:
@@ -373,19 +339,17 @@ class CopyPaste:
     def sample(self, candidate_count: int) -> CopyPasteParams:
         """Draw each of ``candidate_count`` candidates against ``p``, up to ``max_paste``.
 
-        The sampling half of the seam: this is the only method that touches
-        :attr:`generator`, so a caller wanting a stated selection rather than a drawn
-        one builds :class:`CopyPasteParams` directly (WP-147). The draw count depends
-        on the candidate count and the cap alone -- never on pixels -- which is what
-        lets the loop split from the paste it used to interleave with.
+        The sampling half of the seam: this is the only method that touches :attr:`generator`, so a caller wanting a
+        stated selection rather than a drawn one builds :class:`CopyPasteParams` directly (WP-147). The draw count
+        depends on the candidate count and the cap alone -- never on pixels -- which is what lets the loop split from
+        the paste it used to interleave with.
 
         Args:
-            candidate_count: Number of polygon-carrying source instances, i.e.
-                ``len(targets_b.polygons)``.
+            candidate_count: Number of polygon-carrying source instances, i.e. ``len(targets_b.polygons)``.
 
         Returns:
-            The selected indices, in paste order. Nothing is stashed on the instance
-            -- ``last_pasted`` is set by :meth:`apply`.
+            The selected indices, in paste order. Nothing is stashed on the instance -- ``last_pasted`` is set by
+            :meth:`apply`.
 
         Examples:
             ```pycon
@@ -411,23 +375,21 @@ class CopyPaste:
         """Paste the instances ``params`` names onto the destination, drawing nothing.
 
         Args:
-            items: Exactly two ``(image, targets)`` pairs -- destination first,
-                source second -- as :meth:`__call__` requires.
+            items: Exactly two ``(image, targets)`` pairs -- destination first, source second -- as :meth:`__call__`
+                requires.
             params: The source instance indices to paste, in paste order.
 
         Returns:
-            The destination image with the pasted pixels and its targets with the
-            pasted instances appended. When ``params`` selects nothing, a copy of the
-            destination image and a clone of its targets are returned.
+            The destination image with the pasted pixels and its targets with the pasted instances appended. When
+            ``params`` selects nothing, a copy of the destination image and a clone of its targets are returned.
 
         Raises:
             ValueError: If the two images differ in shape.
-            NotImplementedError: If either input carries a non-empty ``rboxes``. The guard
-                is repeated here rather than left to :meth:`__call__` because ``apply`` is
-                its own entrance (WP-147): a caller building :class:`CopyPasteParams`
-                directly never passes through the wrapper, and :meth:`_merge` would drop
-                the modality instead of refusing it. :meth:`__call__` keeps its own copy so
-                that a rotated input is rejected *before* :meth:`sample` consumes a draw.
+            NotImplementedError: If either input carries a non-empty ``rboxes``. The guard is repeated here rather
+                than left to :meth:`__call__` because ``apply`` is its own entrance (WP-147): a caller building
+                :class:`CopyPasteParams` directly never passes through the wrapper, and :meth:`_merge` would drop the
+                modality instead of refusing it. :meth:`__call__` keeps its own copy so that a rotated input is
+                rejected *before* :meth:`sample` consumes a draw.
 
         Examples:
             ```pycon
@@ -460,10 +422,9 @@ class CopyPaste:
     def _paste_selected(out_image: Tensor, source: Tensor, targets_b: Targets, selected: list[int]) -> None:
         """Union the selected rings, then copy their pixels from one immutable source.
 
-        Every ring copies the same source coordinate to the same destination
-        coordinate. Repeated writes over an overlap are therefore idempotent.
-        ``apply`` owns a fresh destination clone, so these writes cannot change
-        the source another ring reads. Instance ordering stays in ``_merge``.
+        Every ring copies the same source coordinate to the same destination coordinate. Repeated writes over an
+        overlap are therefore idempotent. ``apply`` owns a fresh destination clone, so these writes cannot change the
+        source another ring reads. Instance ordering stays in ``_merge``.
         """
         if not selected:
             return
@@ -477,18 +438,16 @@ class CopyPaste:
     def _merge(targets_a: Targets, targets_b: Targets, selected: list[int]) -> Targets:
         """Append the selected source instances to ``a``'s targets, carrying every channel.
 
-        Every field on the shared instance axis is taken by the same ``index`` the boxes
-        are, so the merged set is aligned by construction. ``difficult`` is one of them
-        (A51): a rebuild that omitted it would not raise, because
-        :class:`~lucid_yolo.data.targets.Targets` refills an omitted flag column with one
-        ``False`` per instance — which is exactly what makes the loss silent, and what
-        A48's discard rule then misreads as an ordinary false positive.
+        Every field on the shared instance axis is taken by the same ``index`` the boxes are, so the merged set is
+        aligned by construction. ``difficult`` is one of them (A51): a rebuild that omitted it would not raise, because
+        :class:`~lucid_yolo.data.targets.Targets` refills an omitted flag column with one ``False`` per instance —
+        which is exactly what makes the loss silent, and what A48's discard rule then misreads as an ordinary false
+        positive.
 
-        ``rboxes`` is not carried, and that is deliberate rather than an omission: a paste
-        transfers a rasterised polygon mask, the oriented path carries no polygons
-        (WP-056), and :func:`_reject_rboxes` therefore refuses a rotated input at both
-        entrances before it can reach here. Carrying the modality would be claiming to
-        paste something the transform cannot paste.
+        ``rboxes`` is not carried, and that is deliberate rather than an omission: a paste transfers a rasterised
+        polygon mask, the oriented path carries no polygons (WP-056), and :func:`_reject_rboxes` therefore refuses a
+        rotated input at both entrances before it can reach here. Carrying the modality would be claiming to paste
+        something the transform cannot paste.
 
         Args:
             targets_a: The destination targets, kept in full and in order.
@@ -518,16 +477,14 @@ class CopyPaste:
     def _merge_keypoints(targets_a: Targets, targets_b: Targets, index: Tensor) -> tuple[Tensor, Tensor]:
         """Carry the pasted instances' points across with their boxes (WP-132).
 
-        A paste moves an instance between images without moving it *within* one — the
-        masked pixels land at the same coordinates they occupied in the source — so the
-        points need no warp, only selection by the same ``index`` the boxes take. That is
-        also why A70 never arises here: nothing is displaced, so nothing can be pushed
+        A paste moves an instance between images without moving it *within* one — the masked pixels land at the same
+        coordinates they occupied in the source — so the points need no warp, only selection by the same ``index``
+        the boxes take. That is also why A70 never arises here: nothing is displaced, so nothing can be pushed
         off-canvas.
 
-        Presence must agree, exactly as it must for polygons: a merged set that mixed
-        point-carrying and point-free instances is not representable, and
-        :class:`~lucid_yolo.data.targets.Targets` rejects it on construction rather than
-        letting the caller discover a half-annotated batch later. The rule is the one
+        Presence must agree, exactly as it must for polygons: a merged set that mixed point-carrying and point-free
+        instances is not representable, and :class:`~lucid_yolo.data.targets.Targets` rejects it on construction
+        rather than letting the caller discover a half-annotated batch later. The rule is the one
         :meth:`~lucid_yolo.data.targets.Targets.concat` already states for this container.
 
         Args:
@@ -536,9 +493,9 @@ class CopyPaste:
             index: ``(P,)`` int64 indices of the pasted source instances.
 
         Returns:
-            The merged ``(keypoints, keypoint_vis)`` pair, or the canonical empties when
-            neither side carries points — the no-op every polygon-based segmentation run
-            takes, since copy-paste needs rings and those tasks bring no landmarks.
+            The merged ``(keypoints, keypoint_vis)`` pair, or the canonical empties when neither side carries points —
+            the no-op every polygon-based segmentation run takes, since copy-paste needs rings and those tasks bring
+            no landmarks.
 
         Raises:
             ValueError: If both sides carry points but disagree on ``K``.

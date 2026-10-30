@@ -1,24 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the segmentation supervision wired into the training step (WP-087).
 
-Covers the DoD of the segmentation training path: a ``task="segment"`` module's
-``training_step`` carries live mask and auxiliary terms on top of the detection
-objective, the gradient of those terms reaches every branch they are supposed to
-train, the degenerate no-instance batch stays finite, the mask targets are
-gathered by the **assignment** rather than by positional order, and the
-``task="detect"`` path is untouched.
+Covers the DoD of the segmentation training path: a ``task="segment"`` module's ``training_step`` carries live mask
+and auxiliary terms on top of the detection objective, the gradient of those terms reaches every branch they are
+supposed to train, the degenerate no-instance batch stays finite, the mask targets are gathered by the **assignment**
+rather than by positional order, and the ``task="detect"`` path is untouched.
 
-The module is built at n-scale multipliers with a low channel cap and a 160-px
-input so the real stack runs in a couple of seconds on CPU; batches are synthetic
-tensors plus hand-built :class:`~lucid_yolo.data.targets.Targets` carrying one
-rectangular polygon ring per box. Direct ``training_step`` calls replace
-``module.log`` because Lightning's ``self.log`` requires trainer attachment — the
-recording stub doubles as the observation point for the two pre-gain terms.
+The module is built at n-scale multipliers with a low channel cap and a 160-px input so the real stack runs in a
+couple of seconds on CPU; batches are synthetic tensors plus hand-built :class:`~lucid_yolo.data.targets.Targets`
+carrying one rectangular polygon ring per box. Direct ``training_step`` calls replace ``module.log`` because
+Lightning's ``self.log`` requires trainer attachment — the recording stub doubles as the observation point for the two
+pre-gain terms.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -53,7 +50,7 @@ _BOX_GAIN, _CLS_GAIN, _L1_GAIN, _ALPHA = 7.5, 0.5, 6.0, 0.5
 
 
 def _tiny_module(task: str = "segment") -> DetectionLitModule:
-    """Build an n-scale module with a low channel cap for fast CPU tests.
+    """Build an n-scale module with a low channel cap and a recording ``log`` for fast CPU tests.
 
     Examples:
         >>> module = _tiny_module()
@@ -62,7 +59,9 @@ def _tiny_module(task: str = "segment") -> DetectionLitModule:
         >>> _tiny_module(task="detect").task
         'detect'
     """
-    return tiny_module(task, box_gain=_BOX_GAIN, cls_gain=_CLS_GAIN, l1_gain=_L1_GAIN, alpha=_ALPHA)
+    module = tiny_module(task, box_gain=_BOX_GAIN, cls_gain=_CLS_GAIN, l1_gain=_L1_GAIN, alpha=_ALPHA)
+    module.log = LogRecorder()  # type: ignore[method-assign]
+    return module
 
 
 def _synthetic_batch() -> tuple[Tensor, list[Targets]]:
@@ -106,15 +105,13 @@ def _reference_detection_loss(module: DetectionLitModule, batch: tuple[Tensor, l
 def test_segment_loss_exceeds_detection_only_loss() -> None:
     """The mask and auxiliary terms are live: sharing every detection weight, segment > detect.
 
-    Catches the WP-034 stub surviving — an inert ``_task_extra_loss`` leaves the
-    two totals equal, which no shape or finiteness check would notice.
+    Catches the WP-034 stub surviving — an inert ``_task_extra_loss`` leaves the two totals equal, which no shape or
+    finiteness check would notice.
     """
     detect = _tiny_module(task="detect")
     segment = _tiny_module(task="segment")
     segment.load_state_dict(detect.state_dict(), strict=False)
     batch = _synthetic_batch()
-    detect.log = LogRecorder()  # type: ignore[method-assign]
-    segment.log = LogRecorder()  # type: ignore[method-assign]
 
     detect_loss = detect.training_step(batch, 0)
     segment_loss = segment.training_step(batch, 0)
@@ -126,12 +123,10 @@ def test_segment_loss_exceeds_detection_only_loss() -> None:
 def test_boxes_without_polygons_rejected() -> None:
     """A detection-only annotation under ``task="segment"`` raises instead of training on nothing.
 
-    Catches the silent-subset failure: without the guard, an image whose rings were
-    dropped upstream would contribute no mask supervision and no error, and the
-    only symptom would be a segm mAP nobody could explain.
+    Catches the silent-subset failure: without the guard, an image whose rings were dropped upstream would contribute
+    no mask supervision and no error, and the only symptom would be a segm mAP nobody could explain.
     """
     module = _tiny_module()
-    module.log = LogRecorder()  # type: ignore[method-assign]
     images, targets = _synthetic_batch()
     boxes_only = [Targets(boxes=target.boxes, labels=target.labels) for target in targets]
 
@@ -142,11 +137,10 @@ def test_boxes_without_polygons_rejected() -> None:
 def test_validation_step_runs_without_training_only_semantic_branch() -> None:
     """A segment module validates in eval mode, where the auxiliary branch returns ``None`` (A17).
 
-    Catches an unguarded ``semantic_aux_loss`` call: the branch is training-only,
-    so the first validation batch of every tier run would raise on a ``None``.
+    Catches an unguarded ``semantic_aux_loss`` call: the branch is training-only, so the first validation batch of
+    every tier run would raise on a ``None``.
     """
     module = _tiny_module().eval()
-    module.log = LogRecorder()  # type: ignore[method-assign]
 
     loss = module.validation_step(_synthetic_batch(), 0)
 
@@ -156,9 +150,8 @@ def test_validation_step_runs_without_training_only_semantic_branch() -> None:
 def test_mask_targets_follow_assignment_not_positive_order() -> None:
     """Positive ``k``'s mask is scored against ``gt_index[k]``, not against instance ``k``.
 
-    The decisive test of the WP-087 pairing: with two positives whose assigned
-    instances are swapped relative to their positional order, the naive pairing
-    produces an equally finite, equally plausible loss. Only the value
+    The decisive test of the WP-087 pairing: with two positives whose assigned instances are swapped relative to their
+    positional order, the naive pairing produces an equally finite, equally plausible loss. Only the value
     distinguishes them, so it is asserted against a hand-written swap.
     """
     prototypes = torch.randn(1, 2, 8, 8)
@@ -194,9 +187,9 @@ def _looped_branch_mask_loss(
 ) -> Tensor:
     """The per-image reference the batched implementation replaced.
 
-    Kept verbatim as an oracle rather than deleted with the code: it is the form
-    whose result the Det/Seg goldens were frozen against, and it is the only thing
-    that can show the padded batched gather changed the *speed* and nothing else.
+    Kept verbatim as an oracle rather than deleted with the code: it is the form whose result the Det/Seg goldens were
+    frozen against, and it is the only thing that can show the padded batched gather changed the *speed* and nothing
+    else.
 
     Examples:
         >>> callable(_looped_branch_mask_loss)  # needs a live AssignResult from a real step
@@ -226,15 +219,14 @@ def _looped_branch_mask_loss(
 def test_batched_mask_loss_equals_per_image_loop(positives: list[int], instances: list[int]) -> None:
     """The batched gather reproduces the per-image loop's value bit for bit.
 
-    The looped form selected each image's positives with a boolean mask, whose
-    output shape depends on the data — which forces a device sync per image per
-    branch, measured at 1.2 s of stall per step at batch 32. The batched form pads
-    to the largest positive count and selects once. That is a speed change only if
-    the value is untouched, and the padding is where it could go wrong: padded rows
-    carry the ``-1`` unassigned sentinel and must contribute nothing.
+    The looped form selected each image's positives with a boolean mask, whose output shape depends on the data —
+    which forces a device sync per image per branch, measured at 1.2 s of stall per step at batch 32. The batched form
+    pads to the largest positive count and selects once. That is a speed change only if the value is untouched, and
+    the padding is where it could go wrong: padded rows carry the ``-1`` unassigned sentinel and must contribute
+    nothing.
 
-    Uneven counts are the point of the parametrization — with equal counts there is
-    no padding, so a padding leak would pass unnoticed.
+    Uneven counts are the point of the parametrization — with equal counts there is no padding, so a padding leak
+    would pass unnoticed.
     """
     channels, grid = 2, 8
     anchors = max(positives) + 3
@@ -255,8 +247,8 @@ def test_batched_mask_loss_equals_per_image_loop(positives: list[int], instances
         align_weights=torch.zeros(len(positives), anchors),
     )
 
-    # The batched form takes the densified stack its caller now builds once for both
-    # branches; the oracle keeps the ragged list the looped form consumed.
+    # The batched form takes the densified stack its caller now builds once for both branches; the oracle keeps the
+    # ragged list the looped form consumed.
     padded = torch.zeros(len(masks), max(int(image_masks.shape[0]) for image_masks in masks), grid, grid)
     for index, image_masks in enumerate(masks):
         padded[index, : image_masks.shape[0]] = image_masks
@@ -271,11 +263,10 @@ def test_batched_mask_loss_equals_per_image_loop(positives: list[int], instances
 def test_detect_total_exactly_dual_detection_loss() -> None:
     """``task="detect"`` is bit-for-bit the dual detection loss — the extra term adds exactly zero.
 
-    Catches any segmentation quantity leaking into the detection objective, which
-    would silently invalidate the frozen Det-smoke trajectory and its goldens.
+    Catches any segmentation quantity leaking into the detection objective, which would silently invalidate the frozen
+    Det-smoke trajectory and its goldens.
     """
     module = _tiny_module(task="detect")
-    module.log = LogRecorder()  # type: ignore[method-assign]
     batch = _synthetic_batch()
 
     total = module.training_step(batch, 0)
@@ -309,15 +300,13 @@ def _collated_masks(images: Tensor, targets: list[Targets]) -> list[Tensor]:
 def test_loader_rasterises_masks_step_would_have(counts: tuple[int, ...]) -> None:
     """The collate's transported masks equal what the step rasterises from the same targets.
 
-    The whole point of moving rasterisation into the loader workers is that it is
-    the *same* rasterisation — the training process just stops doing it. The
-    transport ships bool and the grid comes from the image size rather than from
-    the prototypes, so this pins both: a wrong stride would produce a plausible
-    mask stack at the wrong resolution, and a bool round-trip that lost a value
-    would train against a hole no loss curve would explain.
+    The whole point of moving rasterisation into the loader workers is that it is the *same* rasterisation — the
+    training process just stops doing it. The transport ships bool and the grid comes from the image size rather than
+    from the prototypes, so this pins both: a wrong stride would produce a plausible mask stack at the wrong
+    resolution, and a bool round-trip that lost a value would train against a hole no loss curve would explain.
 
-    The empty cases are here because they are where a per-image split goes wrong:
-    an image with no instances must consume no rows of the concatenated stack.
+    The empty cases are here because they are where a per-image split goes wrong: an image with no instances must
+    consume no rows of the concatenated stack.
     """
     targets = [_synthetic_targets(count) if count else Targets.empty() for count in counts]
     images = torch.rand(len(counts), 3, _IMG_SIZE, _IMG_SIZE)
@@ -333,12 +322,10 @@ def test_loader_rasterises_masks_step_would_have(counts: tuple[int, ...]) -> Non
 def test_loader_rasterised_masks_give_identical_loss() -> None:
     """A batch carrying the loader's masks scores exactly what the in-step fallback scores.
 
-    This is the bit-exactness claim of the move, end to end through the real
-    training step rather than through the rasteriser alone: same weights, same
-    inputs, one batch with the third element and one without.
+    This is the bit-exactness claim of the move, end to end through the real training step rather than through the
+    rasteriser alone: same weights, same inputs, one batch with the third element and one without.
     """
     module = _tiny_module()
-    module.log = LogRecorder()  # type: ignore[method-assign]
     images, targets = _synthetic_batch()
 
     from_loader = module.training_step((images, targets, _collated_masks(images, targets)), 0)
@@ -349,14 +336,12 @@ def test_loader_rasterised_masks_give_identical_loss() -> None:
 def test_masks_rasterised_for_another_grid_rejected() -> None:
     """Masks whose grid disagrees with the prototypes raise instead of supervising at the wrong scale.
 
-    The collate derives the grid from the input canvas (A15) while the step reads
-    it off the prototypes, so the two agree only as long as the prototype stride
-    is what A15 says. Nothing about a half-resolution mask stack is malformed —
-    it would broadcast, train, and quietly supervise the wrong pixels — so the
-    disagreement has to be an error rather than a shape coincidence.
+    The collate derives the grid from the input canvas (A15) while the step reads it off the prototypes, so the two
+    agree only as long as the prototype stride is what A15 says. Nothing about a half-resolution mask stack is
+    malformed — it would broadcast, train, and quietly supervise the wrong pixels — so the disagreement has to be an
+    error rather than a shape coincidence.
     """
     module = _tiny_module()
-    module.log = LogRecorder()  # type: ignore[method-assign]
     images, targets = _synthetic_batch()
     coarse = [mask[:, ::2, ::2] for mask in _collated_masks(images, targets)]
 
@@ -364,14 +349,16 @@ def test_masks_rasterised_for_another_grid_rejected() -> None:
         module.training_step((images, targets, coarse), 0)
 
 
-def _validated_module(batch: tuple[Tensor, list[Targets]] | tuple[Tensor, list[Targets], list[Tensor]]) -> LogRecorder:
-    """Run one validation batch plus the epoch end, and return the log recorder.
+def _validated_module(
+    batch: tuple[Tensor, list[Targets]] | tuple[Tensor, list[Targets], list[Tensor]], task: str = "segment"
+) -> LogRecorder:
+    """Run one validation batch plus the epoch end on a ``task`` module, and return the log recorder.
 
     Examples:
         >>> callable(_validated_module)  # needs a live LogRecorder-backed module
         True
     """
-    module = _tiny_module("segment" if len(batch) == 3 else "detect").eval()
+    module = _tiny_module(task).eval()
     recorder = LogRecorder()
     module.log = recorder  # type: ignore[method-assign]
     module.validation_step(batch, 0)
@@ -382,10 +369,9 @@ def _validated_module(batch: tuple[Tensor, list[Targets]] | tuple[Tensor, list[T
 def test_validation_logs_mask_map_beside_box_map() -> None:
     """A segmentation run reports the quality of the branch it exists for.
 
-    Without this the only epoch metric of a ``task="segment"`` run is ``val/mAP``,
-    which the mask branch cannot move: a run whose masks were degenerate and a run
-    whose masks were perfect would log the identical curve, and the first sign of
-    either would be a post-hoc ``lucid-eval`` pass hours later.
+    Without this the only epoch metric of a ``task="segment"`` run is ``val/mAP``, which the mask branch cannot move:
+    a run whose masks were degenerate and a run whose masks were perfect would log the identical curve, and the first
+    sign of either would be a post-hoc ``lucid-eval`` pass hours later.
     """
     images, targets = _synthetic_batch()
 
@@ -397,7 +383,7 @@ def test_validation_logs_mask_map_beside_box_map() -> None:
 
 def test_detection_validation_logs_no_mask_metric() -> None:
     """A detection module has no mask branch, so it must not pay for or report one."""
-    recorder = _validated_module(_synthetic_batch())
+    recorder = _validated_module(_synthetic_batch(), task="detect")
 
     assert "val/mAP" in recorder.values
     assert "val/segm_mAP" not in recorder.values
@@ -406,32 +392,23 @@ def test_detection_validation_logs_no_mask_metric() -> None:
 def test_mask_map_skipped_when_batch_carries_no_ground_truth_masks() -> None:
     """A segment module validating a two-element batch scores boxes only, rather than raising.
 
-    ``compute`` on a metric no batch ever updated raises, so the epoch end has to
-    know the difference between "no masks this epoch" and "masks scored zero".
+    ``compute`` on a metric no batch ever updated raises, so the epoch end has to know the difference between "no masks
+    this epoch" and "masks scored zero".
     """
-    recorder = _validated_module(_synthetic_batch())  # detect module, two-element batch
+    recorder = _validated_module(_synthetic_batch())
+
+    assert "val/mAP" in recorder.values
     assert "val/segm_mAP" not in recorder.values
-
-    module = _tiny_module().eval()
-    module.log = LogRecorder()  # type: ignore[method-assign]
-    module.validation_step(_synthetic_batch(), 0)
-    epoch_recorder = LogRecorder()
-    module.log = epoch_recorder  # type: ignore[method-assign]
-    module.on_validation_epoch_end()
-
-    assert "val/mAP" in epoch_recorder.values
-    assert "val/segm_mAP" not in epoch_recorder.values
 
 
 class TestMaskMetricGuardIsCollective:
     """The "did any batch carry masks" decision is reduced across ranks before it is read.
 
-    :meth:`~torchmetrics.Metric.compute` synchronises collectively, so a rank whose shard
-    held no mask targets must still enter it once any other rank has masks — skipping on
-    that rank alone would hang every other one inside the collective (audit M-05). The
-    reduction is Lightning's, so a single-process run gets the flag back unchanged and the
-    accepted behaviour is untouched; these tests stub the strategy to prove the flag is
-    routed through it rather than read directly.
+    :meth:`~torchmetrics.Metric.compute` synchronises collectively, so a rank whose shard held no mask targets must
+    still enter it once any other rank has masks — skipping on that rank alone would hang every other one inside the
+    collective (audit M-05). The reduction is Lightning's, so a single-process run gets the flag back unchanged and the
+    accepted behaviour is untouched; these tests stub the strategy to prove the flag is routed through it rather than
+    read directly.
     """
 
     @staticmethod
@@ -441,7 +418,6 @@ class TestMaskMetricGuardIsCollective:
         strategy = MagicMock()
         strategy.reduce_boolean_decision.return_value = decision
         module._trainer = MagicMock(spec=Trainer, strategy=strategy)
-        module.log = LogRecorder()  # type: ignore[method-assign]
         return module
 
     def test_computes_when_another_rank_saw_masks(self) -> None:
@@ -476,19 +452,19 @@ _TOY_GRID = 8
 _TOY_COEFFS = 4
 #: Anchor count of the toy segmentation output.
 _TOY_ANCHORS = 8
-#: Prototype logit magnitude — saturated, so every decoded pixel is an unambiguous
-#: ``True``/``False`` rather than a value near the 0.5 threshold.
+#: Prototype logit magnitude — saturated, so every decoded pixel is an unambiguous ``True``/``False`` rather than a
+#: value near the 0.5 threshold.
 _TOY_LOGIT = 8.0
+#: Anchors the toy detections were ranked from, one per detection row.
+_TOY_ANCHOR_INDICES = [5, 2, 7]
 
 
 def _toy_segment_output() -> SegmentOutput:
     """Build a segmentation output whose decoded mask names the anchor it came from.
 
-    Prototype ``k`` is positive on row ``k`` alone, and anchor ``a`` carries the
-    one-hot coefficient selecting prototype ``a % _TOY_COEFFS``. A decoded mask is
-    therefore a single lit row, and *which* row identifies the anchor whose
-    coefficients were used — the one thing a real model's near-uniform masks cannot
-    show.
+    Prototype ``k`` is positive on row ``k`` alone, and anchor ``a`` carries the one-hot coefficient selecting
+    prototype ``a % _TOY_COEFFS``. A decoded mask is therefore a single lit row, and *which* row identifies the anchor
+    whose coefficients were used — the one thing a real model's near-uniform masks cannot show.
 
     Examples:
         >>> output = _toy_segment_output()
@@ -512,92 +488,84 @@ def _toy_segment_output() -> SegmentOutput:
     return SegmentOutput(detect=detect, prototypes=prototypes, semantic=None)
 
 
+def _toy_scored_predictions(score_and_label: Tensor) -> dict[str, Tensor]:
+    """Decode the toy output's three whole-canvas detections and return what the mask metric was handed.
+
+    Args:
+        score_and_label: ``(1, 3, 2)`` tail of the detections, the score then the class label of each row.
+
+    Returns:
+        The first image's prediction dict, as ``_update_val_segm`` passed it to the metric's ``update``.
+
+    Examples:
+        >>> _toy_scored_predictions(torch.full((1, 3, 2), 0.9))["masks"].shape[0]
+        3
+    """
+    module = _tiny_module().eval()
+    canvas = _TOY_GRID * _PROTO_STRIDE
+    whole_canvas = torch.tensor([0.0, 0.0, float(canvas), float(canvas)])
+    detections = torch.cat([whole_canvas.expand(1, 3, 4), score_and_label], dim=-1)
+    with patch.object(module._val_segm, "update") as update:
+        module._update_val_segm(
+            _toy_segment_output(),
+            detections,
+            torch.tensor([_TOY_ANCHOR_INDICES]),
+            [_synthetic_targets(1)],
+            [torch.zeros(1, _TOY_GRID, _TOY_GRID)],
+            (canvas, canvas),
+        )
+    return update.call_args_list[0].args[0][0]
+
+
 def test_scored_masks_paired_with_boxes_own_anchors() -> None:
     """Detection ``j``'s mask is assembled from the coefficients of the anchor ``j`` came from.
 
-    The decisive test of the metric. A coefficient row gathered by anything other
-    than the indices its box was ranked by yields a perfectly plausible mask of the
-    wrong object, and every aggregate — the mAP included — stays finite and
-    unremarkable, so only a construction where each anchor decodes to a *visibly
-    different* mask can catch it. A real module's masks cannot: at initialisation
-    every prototype logit sits at the sigmoid's midpoint, and the whole batch
-    decodes to empty masks that compare equal however they were paired.
+    The decisive test of the metric. A coefficient row gathered by anything other than the indices its box was ranked
+    by yields a perfectly plausible mask of the wrong object, and every aggregate — the mAP included — stays finite
+    and unremarkable, so only a construction where each anchor decodes to a *visibly different* mask can catch it. A
+    real module's masks cannot: at initialisation every prototype logit sits at the sigmoid's midpoint, and the whole
+    batch decodes to empty masks that compare equal however they were paired.
     """
-    module = _tiny_module().eval()
-    captured: list[tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]] = []
-    module._val_segm.update = lambda preds, targets: captured.append((preds, targets))  # type: ignore[union-attr]
-    anchor_indices = torch.tensor([[5, 2, 7]])
-    canvas = _TOY_GRID * _PROTO_STRIDE
-    whole_canvas = torch.tensor([0.0, 0.0, float(canvas), float(canvas)])
-    detections = torch.cat([whole_canvas.expand(1, 3, 4), torch.full((1, 3, 2), 0.9)], dim=-1)
+    predictions = _toy_scored_predictions(torch.full((1, 3, 2), 0.9))
 
-    module._update_val_segm(
-        _toy_segment_output(),
-        detections,
-        anchor_indices,
-        [_synthetic_targets(1)],
-        [torch.zeros(1, _TOY_GRID, _TOY_GRID)],
-        (canvas, canvas),
-    )
-
-    lit_rows = [sorted(set(mask.nonzero()[:, 0].tolist())) for mask in captured[0][0][0]["masks"]]
-    assert lit_rows == [[index % _TOY_COEFFS] for index in anchor_indices[0].tolist()]
+    lit_rows = [sorted(set(mask.nonzero()[:, 0].tolist())) for mask in predictions["masks"]]
+    assert lit_rows == [[index % _TOY_COEFFS] for index in _TOY_ANCHOR_INDICES]
 
 
 def test_zero_scored_rows_dropped_before_decode_rather_than_after() -> None:
     """A row the score filter drops never reaches the decode, and the kept row is still its own.
 
-    WP-164 replaced a decode of every row followed by ``masks[keep]`` with a decode
-    of ``[:kept]`` alone, which removes a full copy of the mask stack per image. The
-    two are equivalent only if the dropped rows are a suffix *and* the surviving
-    rows keep their pairing with the anchors they were ranked from — a count that
-    slices one row too few or too many yields a plausible mask stack of the wrong
-    objects, exactly the failure the pairing test above exists for. This drives the
-    same toy output with two of three rows zero-scored, so a mask decoded from the
-    wrong anchor's coefficients lights a different prototype row and is visible.
+    WP-164 replaced a decode of every row followed by ``masks[keep]`` with a decode of ``[:kept]`` alone, which removes
+    a full copy of the mask stack per image. The two are equivalent only if the dropped rows are a suffix *and* the
+    surviving rows keep their pairing with the anchors they were ranked from — a count that slices one row too few or
+    too many yields a plausible mask stack of the wrong objects, exactly the failure the pairing test above exists for.
+    This drives the same toy output with two of three rows zero-scored, so a mask decoded from the wrong anchor's
+    coefficients lights a different prototype row and is visible.
     """
-    module = _tiny_module().eval()
-    captured: list[tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]] = []
-    module._val_segm.update = lambda preds, targets: captured.append((preds, targets))  # type: ignore[union-attr]
-    anchor_indices = torch.tensor([[5, 2, 7]])
-    canvas = _TOY_GRID * _PROTO_STRIDE
-    whole_canvas = torch.tensor([0.0, 0.0, float(canvas), float(canvas)])
     scores = torch.tensor([[[0.9], [0.0], [0.0]]])  # only the first row survives
-    detections = torch.cat([whole_canvas.expand(1, 3, 4), scores, torch.zeros(1, 3, 1)], dim=-1)
 
-    module._update_val_segm(
-        _toy_segment_output(),
-        detections,
-        anchor_indices,
-        [_synthetic_targets(1)],
-        [torch.zeros(1, _TOY_GRID, _TOY_GRID)],
-        (canvas, canvas),
-    )
+    predictions = _toy_scored_predictions(torch.cat([scores, torch.zeros(1, 3, 1)], dim=-1))
 
-    predictions = captured[0][0][0]
     assert predictions["masks"].shape[0] == 1  # the two zero-scored rows never decoded
     assert predictions["scores"].tolist() == [pytest.approx(0.9)]
     lit_rows = sorted(set(predictions["masks"][0].nonzero()[:, 0].tolist()))
-    assert lit_rows == [anchor_indices[0, 0].item() % _TOY_COEFFS]  # anchor 5's own mask
+    assert lit_rows == [_TOY_ANCHOR_INDICES[0] % _TOY_COEFFS]  # anchor 5's own mask
 
 
 def test_scored_masks_and_ground_truth_share_prototype_grid() -> None:
     """Predicted and ground-truth masks reach the metric on one grid, at the cap.
 
-    Two frames would make every mask IoU wrong while leaving ``val/segm_mAP``
-    finite and plausible, and decoding all 300 decoder rows would cost two thirds
-    of the mask work for rows COCO's ``maxDets`` then drops.
+    Two frames would make every mask IoU wrong while leaving ``val/segm_mAP`` finite and plausible, and decoding all
+    300 decoder rows would cost two thirds of the mask work for rows COCO's ``maxDets`` then drops.
     """
     module = _tiny_module().eval()
-    module.log = LogRecorder()  # type: ignore[method-assign]
     images, targets = _synthetic_batch()
     ground_truth_masks = _collated_masks(images, targets)
-    captured: list[tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]] = []
-    module._val_segm.update = lambda preds, targets: captured.append((preds, targets))  # type: ignore[union-attr]
 
-    module.validation_step((images, targets, ground_truth_masks), 0)
+    with patch.object(module._val_segm, "update") as update:
+        module.validation_step((images, targets, ground_truth_masks), 0)
 
-    preds, scored_truth = captured[0]
+    preds, scored_truth = update.call_args_list[0].args
     grid = (_IMG_SIZE // _PROTO_STRIDE, _IMG_SIZE // _PROTO_STRIDE)
     assert [pred["masks"].shape for pred in preds] == [(_VAL_SEGM_MAX_DET, *grid)] * _BATCH_SIZE
     assert all(

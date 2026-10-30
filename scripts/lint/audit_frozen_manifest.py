@@ -1,33 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 """Structural audit of the frozen-golden digest manifest (WP-168).
 
-``scripts/check_goldens.py`` recomputes each golden's producer and compares the result
-against **that same file's own** stored ``values`` within its own stored ``tolerances``.
-Frozen files travel that identical path, which is the design: a release's snapshot
-staying green is the statement that current code still satisfies every value the release
-pinned. What no check ever asserted is that the snapshot is still the file the release
-wrote. Edit a frozen golden's ``values`` and its ``tolerances`` together to match new
-code and the whole gate is green, because the file is being compared with itself —
-and "never modify a frozen golden" (``AGENTS.md`` §7, escalation trigger 4 in §4) was
-prose only. Two principal overrides have been granted against that rule, so the decision
-path existed while the mechanism did not.
+``scripts/check_goldens.py`` recomputes each golden's producer and compares the result against **that same file's
+own** stored ``values`` within its own stored ``tolerances``. Frozen files travel that identical path, which
+is the design: a release's snapshot staying green is the statement that current code still satisfies every value
+the release pinned. What no check ever asserted is that the snapshot is still the file the release wrote. Edit
+a frozen golden's ``values`` and its ``tolerances`` together to match new code and the whole gate is green,
+because the file is being compared with itself — and "never modify a frozen golden" (``AGENTS.md`` §7,
+escalation trigger 4 in §4) was prose only. Two principal overrides have been granted against that rule, so
+the decision path existed while the mechanism did not.
 
-This is the mechanism: ``goldens/frozen/MANIFEST.sha256`` records a SHA-256 digest per
-frozen file, and this audit reports three ways the tree and the manifest can disagree —
-a file whose bytes changed, a frozen file no row covers, and a row whose file is gone.
-:data:`~freeze_goldens.MANIFEST_NAME` is excluded from its own digest set.
+This is the mechanism: ``goldens/frozen/MANIFEST.sha256`` records a SHA-256 digest per frozen file, and this
+audit reports three ways the tree and the manifest can disagree — a file whose bytes changed, a frozen file no
+row covers, and a row whose file is gone. :data:`~freeze_goldens.MANIFEST_NAME` is excluded from its own digest set.
 
-**What this narrows rather than closes.** The manifest is committed beside the files it
-covers, so a commit that edits a frozen golden *and* re-runs ``freeze_goldens.py
---reseal`` still passes — the audit catches an inconsistent edit, not a consistent one.
-That is the intended bound: an unsanctioned edit is an edit nobody meant to declare, and
-this makes declaring it a separate, named, reviewable act (`--reseal`) instead of
-something a values-and-tolerances edit does silently. Signing the manifest is what would
-close it, and nothing in this repository has a key to sign with.
+**What this narrows rather than closes.** The manifest is committed beside the files it covers, so a commit
+that edits a frozen golden *and* re-runs ``freeze_goldens.py
+--reseal`` still passes — the audit catches an inconsistent edit, not a consistent one. That is the intended
+bound: an unsanctioned edit is an edit nobody meant to declare, and this makes declaring it a separate,
+named, reviewable act (`--reseal`) instead of something a values-and-tolerances edit does silently. Signing
+the manifest is what would close it, and nothing in this repository has a key to sign with.
 
-``scripts/freeze_goldens.py`` is the manifest's only writer: ``make freeze-goldens
-MINOR=0.N`` seals the files it copies, and ``freeze_goldens.py --reseal`` recomputes
-every row for a principal-approved move.
+``scripts/freeze_goldens.py`` is the manifest's only writer: ``make freeze-goldens MINOR=0.N`` seals the files
+it copies, and ``freeze_goldens.py --reseal`` recomputes every row for a principal-approved move.
 
 Examples:
     Command-line usage (exit status is the process return code)::
@@ -53,9 +48,9 @@ DEFAULT_FROZEN_ROOT = REPO_ROOT / "goldens" / "frozen"
 def _load_writer() -> ModuleType:
     """Load ``scripts/freeze_goldens.py``, the manifest's only writer, as a module.
 
-    Loaded by path rather than imported: ``scripts/`` is not a package. The reader and
-    the format live with the writer on purpose — a checker carrying its own copy of the
-    manifest format is a checker that can drift out of agreement with what writes it.
+    Loaded by path rather than imported: ``scripts/`` is not a package. The reader and the format live with the writer
+    on purpose — a checker carrying its own copy of the manifest format is a checker that can drift out of agreement
+    with what writes it.
 
     Examples:
         >>> _load_writer().MANIFEST_NAME
@@ -74,13 +69,11 @@ def find_violations(frozen_root: Path = DEFAULT_FROZEN_ROOT) -> list[str]:
     """Report every disagreement between the frozen tree and its manifest.
 
     Args:
-        frozen_root: Directory holding the per-minor snapshots and the manifest
-            (default: ``<repo>/goldens/frozen``).
+        frozen_root: Directory holding the per-minor snapshots and the manifest (default: ``<repo>/goldens/frozen``).
 
     Returns:
-        One string per violation: a missing manifest, a file whose digest changed, a
-        frozen file no row covers, or a row whose file is gone. Empty when the manifest
-        describes the tree exactly.
+        One string per violation: a missing manifest, a file whose digest changed, a frozen file no row covers, or a
+        row whose file is gone. Empty when the manifest describes the tree exactly.
 
     Examples:
         >>> import tempfile

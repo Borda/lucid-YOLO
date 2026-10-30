@@ -64,9 +64,9 @@ class TestUpdateReplayOwner:
     def test_copied_update_flag_steps_like_twin(self, clone: Callable[[MuSGD], MuSGD]) -> None:
         """A deep-copied or unpickled flag-on optimizer has no update replay owner yet and continues like its twin.
 
-        ``Optimizer.__getstate__`` keeps only the defaults, state and groups, so the copy starts without the
-        owner attribute; both the reload and the next step read it with a default and must give the twin's values.
-        Reading it as a plain attribute fails here on CPU, where no CUDA run is needed to reach the copy.
+        ``Optimizer.__getstate__`` keeps only the defaults, state and groups, so the copy starts without the owner
+        attribute; both the reload and the next step read it with a default and must give the twin's values. Reading
+        it as a plain attribute fails here on CPU, where no CUDA run is needed to reach the copy.
         """
         original, twin = (MuSGD(parameters(), lr=0.01, capture_updates=True) for _ in range(2))
         for optimizer in (original, twin):
@@ -87,8 +87,8 @@ class TestUpdateReplayOwner:
     def test_reload_clears_planted_recordings(self) -> None:
         """Reloading state empties the owner, whatever recording it held from before the restore.
 
-        A sentinel stands in for a recording because CUDA is the only route that makes a real one; the
-        clear must not depend on what the entries are, only on the owner being present.
+        A sentinel stands in for a recording because CUDA is the only route that makes a real one; the clear must not
+        depend on what the entries are, only on the owner being present.
         """
         optimizer = MuSGD(parameters(), lr=0.01, capture_updates=True)
         gradients(optimizer, 0)

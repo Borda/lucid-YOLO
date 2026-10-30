@@ -1,20 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the detection LightningCLI and the experiment configs (WP-038).
 
-Covers the DoD: every file under ``lucid_yolo/configs/`` dry-parses through the CLI parser
-(``LightningCLI(run=False)`` -- classes are instantiated, ``fit`` never runs) and
-the resolved config survives a YAML round trip unchanged
-(``test_yaml_roundtrip``). Alongside those, the ADR-001 boundary is asserted from
-both sides: the ``variant`` link expands a registry-row name into the module's
-compound-scaling multipliers and the datamodule augmentation policy (``variant:
-n`` -> n-row multipliers + 7.5 box gain; ``variant: s`` -> s-row multipliers),
-and a topology-like key the module does not accept (``model.layers``) -- as well
-as a direct write to a link-computed multiplier (``model.depth``) -- is rejected
-by the parser.
+Covers the DoD: every file under ``lucid_yolo/configs/`` dry-parses through the CLI parser (``LightningCLI(run=False)``
+-- classes are instantiated, ``fit`` never runs) and the resolved config survives a YAML round trip unchanged
+(``test_yaml_roundtrip``). Alongside those, the ADR-001 boundary is asserted from both sides: the ``variant`` link
+expands a registry-row name into the module's compound-scaling multipliers and the datamodule augmentation policy
+(``variant: n`` -> n-row multipliers + 7.5 box gain; ``variant: s`` -> s-row multipliers), and a topology-like key the
+module does not accept (``model.layers``) -- as well as a direct write to a link-computed multiplier (``model.depth``)
+-- is rejected by the parser.
 
-The CLI is always built with ``run=False`` so instantiation is exercised without
-launching training; the configs carry only placeholder data paths, which the
-datamodule stores without touching disk (loading happens in ``setup``).
+The CLI is always built with ``run=False`` so instantiation is exercised without launching training; the configs carry
+only placeholder data paths, which the datamodule stores without touching disk (loading happens in ``setup``).
 """
 
 from __future__ import annotations
@@ -40,9 +36,8 @@ _CONFIG_PATHS = sorted(_CONFIGS_DIR.glob("*.yaml"))
 def _build_cli(*args: str) -> DetectionCLI:
     """Build the detection CLI in non-running mode with the given extra args.
 
-    Mirrors :func:`lucid_yolo.cli.train.main` (same ``deterministic``/seed defaults)
-    but forces ``run=False`` so the model and datamodule are instantiated without
-    launching ``fit``.
+    Mirrors :func:`lucid_yolo.cli.train.main` (same ``deterministic``/seed defaults) but forces ``run=False`` so the
+    model and datamodule are instantiated without launching ``fit``.
 
     Examples:
         >>> cli = _build_cli("--config", str(packaged_config("det_nano_smoke")))
@@ -154,30 +149,17 @@ def test_smoke_tier_resolves_variant_n_multipliers_and_gains() -> None:
     assert cli.datamodule._policy == build_scale_policy("n")
 
 
-@pytest.mark.parametrize(
-    ("flags", "expected"),
-    [
-        pytest.param((), False, id="default-off"),
-        pytest.param(("--model.compile_step", "true"), True, id="flag-on"),
-    ],
-)
-def test_compile_step_flag_reaches_module(flags: tuple[str, ...], expected: bool) -> None:
-    """``--model.compile_step`` parses onto the module's hyperparameters, and defaults to off (WP-184)."""
-    cli = _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", *flags)
-    assert cli.model.hparams.compile_step is expected
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("name", ["compile_step", "capture_orthogonalization"])
+def test_model_flag_reaches_hparams(name: str, enabled: bool) -> None:
+    """``--model.<name>`` parses onto the module's hyperparameters, and defaults to off.
 
-
-@pytest.mark.parametrize(
-    ("flags", "expected"),
-    [
-        pytest.param((), False, id="default-off"),
-        pytest.param(("--model.capture_orthogonalization", "true"), True, id="flag-on"),
-    ],
-)
-def test_capture_orthogonalization_flag_reaches_module(flags: tuple[str, ...], expected: bool) -> None:
-    """``--model.capture_orthogonalization`` parses onto the module's hyperparameters, and defaults to off (WP-197)."""
+    Covers ``compile_step`` (WP-184) and ``capture_orthogonalization`` (WP-197): each is set only when the flag is
+    given as ``true`` and stays ``False`` when it is absent.
+    """
+    flags = [f"--model.{name}", "true"] if enabled else []
     cli = _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", *flags)
-    assert cli.model.hparams.capture_orthogonalization is expected
+    assert getattr(cli.model.hparams, name) is enabled
 
 
 def test_capture_updates_default_off() -> None:
@@ -217,40 +199,18 @@ def test_capture_updates_flag_reaches_optimizer(
     assert all(group["capture_orthogonalization"] is capture_orthogonalization for group in optimizer.param_groups)
 
 
-@pytest.mark.parametrize(
-    ("flags", "expected"),
-    [
-        pytest.param((), False, id="default-off"),
-        pytest.param(("--data.cache_train_images", "true"), True, id="flag-on"),
-    ],
-)
-def test_cache_train_images_flag_reaches_datamodule(flags: tuple[str, ...], expected: bool) -> None:
-    """``--data.cache_train_images`` parses onto the datamodule, and defaults to off.
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("name", ["cache_train_images", "cache_prepared_train_images"])
+def test_data_flag_reaches_datamodule(name: str, enabled: bool) -> None:
+    """``--data.<name>`` parses onto the datamodule, and defaults to off.
 
-    The flag is the public switch for the train image cache; nothing but the CLI parse proves a
-    user's command line reaches the constructor. The datamodule keeps no public accessor, so
-    the check reads its private attribute.
+    ``cache_train_images`` is the public switch for the train image cache and ``cache_prepared_train_images`` the one
+    for the float32 prepared cache; nothing but the CLI parse proves a user's command line reaches the constructor. The
+    datamodule keeps no public accessor, so the check reads its private ``_<name>`` attribute.
     """
+    flags = [f"--data.{name}", "true"] if enabled else []
     cli = _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", *flags)
-    assert cli.datamodule._cache_train_images is expected
-
-
-@pytest.mark.parametrize(
-    ("flags", "expected"),
-    [
-        pytest.param((), False, id="default-off"),
-        pytest.param(("--data.cache_prepared_train_images", "true"), True, id="flag-on"),
-    ],
-)
-def test_cache_prepared_train_images_flag_reaches_datamodule(flags: tuple[str, ...], expected: bool) -> None:
-    """``--data.cache_prepared_train_images`` parses onto the datamodule, and defaults to off.
-
-    The flag is the public switch for the float32 prepared cache; nothing but the CLI parse
-    proves a user's command line reaches the constructor. The datamodule keeps no public
-    accessor, so the check reads its private attribute.
-    """
-    cli = _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", *flags)
-    assert cli.datamodule._cache_prepared_train_images is expected
+    assert getattr(cli.datamodule, f"_{name}") is enabled
 
 
 def test_variant_s_resolves_registry_multipliers() -> None:
@@ -267,9 +227,8 @@ def test_variant_s_resolves_registry_multipliers() -> None:
 def test_yaml_roundtrip(config_path: Path) -> None:
     """Resolved config -> YAML -> re-parse -> YAML is a fixed point for each config.
 
-    The dumped config is the reproducibility artifact
-    (:class:`~pytorch_lightning.cli.SaveConfigCallback` writes it per run); parsing
-    it back through the same parser and re-dumping must reproduce it byte-for-byte.
+    The dumped config is the reproducibility artifact (:class:`~pytorch_lightning.cli.SaveConfigCallback` writes it
+    per run); parsing it back through the same parser and re-dumping must reproduce it byte-for-byte.
     """
     cli = _config_cli(config_path)
     dumped = cli.parser.dump(cli.config, format="yaml")
@@ -279,16 +238,19 @@ def test_yaml_roundtrip(config_path: Path) -> None:
     assert "variant:" in dumped
 
 
-def test_unknown_topology_key_rejected() -> None:
-    """A topology-like key the module does not accept aborts parsing (ADR-001)."""
+@pytest.mark.parametrize(
+    "override",
+    [
+        # A topology-like key the module does not accept aborts parsing (ADR-001).
+        "--model.layers=5",
+        # A link-computed multiplier cannot be set directly; ``variant`` is the seam.
+        "--model.depth=0.9",
+    ],
+)
+def test_model_override_outside_variant_seam_rejected(override: str) -> None:
+    """A topology key or a link-computed multiplier written directly aborts parsing; ``variant`` is the seam."""
     with pytest.raises(SystemExit):
-        _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", "--model.layers=5")
-
-
-def test_direct_multiplier_override_rejected() -> None:
-    """A link-computed multiplier cannot be set directly; ``variant`` is the seam."""
-    with pytest.raises(SystemExit):
-        _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", "--model.depth=0.9")
+        _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", override)
 
 
 def test_packaged_config_resolves_name_with_and_without_suffix() -> None:
@@ -301,16 +263,15 @@ def test_packaged_config_resolves_name_with_and_without_suffix() -> None:
 
 
 @pytest.mark.parametrize(
-    ("argv", "expected_value"),
+    "argv",
     [
-        pytest.param(["fit", "--config", "det_nano_smoke.yaml"], None, id="separate-token"),
-        pytest.param(["fit", "--config", "det_nano_smoke"], None, id="bare-name"),
-        pytest.param(["fit", "--config=det_nano_smoke"], None, id="equals-form"),
+        pytest.param(["fit", "--config", "det_nano_smoke.yaml"], id="separate-token"),
+        pytest.param(["fit", "--config", "det_nano_smoke"], id="bare-name"),
+        pytest.param(["fit", "--config=det_nano_smoke"], id="equals-form"),
     ],
 )
-def test_resolve_config_args_rewrites_packaged_names(argv, expected_value) -> None:
+def test_resolve_config_args_rewrites_packaged_names(argv: list[str]) -> None:
     """A --config value naming a packaged config is rewritten onto its real path."""
-    del expected_value
     resolved = " ".join(_resolve_config_args(argv))
     assert str(packaged_config("det_nano_smoke")) in resolved
 
@@ -334,43 +295,28 @@ def test_fit_without_config_defaults_to_packaged_recipe(capsys) -> None:
 
 
 @pytest.mark.parametrize(
-    ("config_name", "expected"),
+    ("config_name", "attribute", "expected"),
     [
-        pytest.param("seg_nano_smoke.yaml", True, id="segment-rasterises-in-the-loader"),
-        pytest.param("det_nano_smoke.yaml", False, id="detect-does-not"),
+        pytest.param("seg_nano_smoke.yaml", "_mask_targets", True, id="segment-rasterises-in-the-loader"),
+        pytest.param("det_nano_smoke.yaml", "_mask_targets", False, id="detect-does-not-rasterise"),
+        pytest.param("obb_nano_smoke.yaml", "_rotated_targets", True, id="obb-reads-rotated-targets"),
+        pytest.param("det_nano_smoke.yaml", "_rotated_targets", False, id="detect-does-not-read-rotated-targets"),
     ],
 )
-def test_mask_targets_follows_model_task(config_name: str, expected: bool) -> None:
-    """``model.task`` decides whether the loader rasterises mask targets, with no second knob.
+def test_loader_target_mode_follows_model_task(config_name: str, attribute: str, expected: bool) -> None:
+    """``model.task`` decides whether the loader rasterises mask targets or reads rotated boxes, with no second knob.
 
-    A detection loader that rasterised would raise on the first box without a ring;
-    a segmentation loader that did not would silently put ~1 s per step of CPU work
-    back on the training process's critical path, which is a performance regression
-    no test asserting correctness would ever see.
+    A detection loader that rasterised would raise on the first box without a ring; a segmentation loader that did not
+    would silently put ~1 s per step of CPU work back on the training process's critical path, which is a performance
+    regression no test asserting correctness would ever see.
+
+    The rotated-box failure is silent in exactly the WP-088 way: a loader left in axis-aligned mode hands an ``obb`` run
+    empty ``rboxes``, which is not a shape error anywhere — the step would simply raise on the padding check, or worse,
+    a future fallback would train the plain detection objective while the angle stems idled.
     """
     cli = _config_cli(_CONFIGS_DIR / config_name)
 
-    assert cli.datamodule._mask_targets is expected
-
-
-@pytest.mark.parametrize(
-    ("config_name", "expected"),
-    [
-        pytest.param("obb_nano_smoke.yaml", True, id="obb-reads-rotated-targets"),
-        pytest.param("det_nano_smoke.yaml", False, id="detect-does-not"),
-    ],
-)
-def test_rotated_targets_follows_model_task(config_name: str, expected: bool) -> None:
-    """``model.task`` decides whether the loader reads rotated boxes, with no second knob.
-
-    The failure this guards is silent in exactly the WP-088 way: a loader left in
-    axis-aligned mode hands an ``obb`` run empty ``rboxes``, which is not a shape error
-    anywhere — the step would simply raise on the padding check, or worse, a future
-    fallback would train the plain detection objective while the angle stems idled.
-    """
-    cli = _config_cli(_CONFIGS_DIR / config_name)
-
-    assert cli.datamodule._rotated_targets is expected
+    assert getattr(cli.datamodule, attribute) is expected
 
 
 def test_fused_assignment_flag_reaches_both_assigners() -> None:

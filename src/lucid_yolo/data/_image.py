@@ -2,14 +2,13 @@
 """Decode an image file to RGB and scale it into ``[0, 1]`` by its own bit depth.
 
 Both dataset readers — :class:`~lucid_yolo.data.coco.CocoDetectionDataset` and
-:class:`~lucid_yolo.data.yolo.YoloDetectionDataset` — decode through
-:func:`torchvision.io.read_image`, which keeps a source's depth: ``uint8`` for an 8-bit file,
-``uint16`` for a 16-bit PNG. Each used to divide whatever it decoded by the 8-bit 255, so a
-16-bit code of 60000 read as 235.3 rather than 0.9155, and the uint8 image transport clamped
+:class:`~lucid_yolo.data.yolo.YoloDetectionDataset` — decode through :func:`torchvision.io.read_image`, which keeps
+a source's depth: ``uint8`` for an 8-bit file, ``uint16`` for a 16-bit PNG. Each used to divide whatever it decoded
+by the 8-bit 255, so a 16-bit code of 60000 read as 235.3 rather than 0.9155, and the uint8 image transport clamped
 it to white after the photometric transforms had already run on the out-of-range value.
 
-:func:`to_unit_float` divides by the decoded dtype's own maximum instead. For ``uint8`` that
-maximum is 255, so every 8-bit pixel reads exactly as it always did.
+:func:`to_unit_float` divides by the decoded dtype's own maximum instead. For ``uint8`` that maximum is 255, so
+every 8-bit pixel reads exactly as it always did.
 """
 
 from __future__ import annotations
@@ -64,12 +63,12 @@ def to_unit_float(raw: Tensor) -> Tensor:
         raw: Decoded image codes of an unsigned integer dtype, such as ``uint8`` or ``uint16``.
 
     Returns:
-        ``raw`` as float32 divided by ``torch.iinfo(raw.dtype).max``: 255 for ``uint8``, so an
-        8-bit image reads exactly as ``code / 255.0``, and 65535 for ``uint16``.
+        ``raw`` as float32 divided by ``torch.iinfo(raw.dtype).max``: 255 for ``uint8``, so an 8-bit image
+        reads exactly as ``code / 255.0``, and 65535 for ``uint16``.
 
     Raises:
-        TypeError: If ``raw`` is a floating-point, complex, signed or boolean tensor, none of
-            which carries an unsigned code range to scale from.
+        TypeError: If ``raw`` is a floating-point, complex, signed or boolean tensor, none of which carries an
+            unsigned code range to scale from.
 
     Examples:
         ```pycon

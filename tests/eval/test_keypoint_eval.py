@@ -1,16 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gates for WP-124's COCO OKS keypoint evaluation wiring and WP-134's runner.
 
-The WP-124 cases pin the fixed-size prediction adapter, perfect and missed OKS
-matches, the no-predictions contract, and COCO visibility masking without loading a
-real dataset.
+The WP-124 cases pin the fixed-size prediction adapter, perfect and missed OKS matches, the no-predictions contract, and
+COCO visibility masking without loading a real dataset.
 
-WP-134 adds three subjects, all of which are wrong in ways that still produce a
-plausible-looking report: which **branch** each decode path reads its points from,
-what a padding row's anchor index does to the gather, and whether the OKS ground
-truth is the annotation's own metadata or a reconstruction of it. There is no COCO
-checkout on the gate machine, so each is separated by construction on synthetic
-tensors rather than by running a real split.
+WP-134 adds three subjects, all of which are wrong in ways that still produce a plausible-looking report: which
+**branch** each decode path reads its points from, what a padding row's anchor index does to the gather, and whether
+the OKS ground truth is the annotation's own metadata or a reconstruction of it. There is no COCO checkout on the gate
+machine, so each is separated by construction on synthetic tensors rather than by running a real split.
 """
 
 from __future__ import annotations
@@ -48,11 +45,54 @@ _KEYPOINT_STATS = (
 _TEST_SIGMAS = [0.5, 0.5, 0.5]
 
 
+def _prediction(points: Tensor) -> list[dict[str, Tensor]]:
+    """Return one full-confidence category-1 prediction of the three-point instance ``points``.
+
+    Args:
+        points: Keypoints of shape ``(1, 3, 2)``.
+
+    Returns:
+        A one-image prediction list in the shape :func:`evaluate_keypoints` takes.
+
+    Examples:
+        >>> _prediction(torch.zeros(1, 3, 2))[0]["scores"].tolist()
+        [1.0]
+    """
+    return [{"keypoints": points, "scores": torch.tensor([1.0]), "labels": torch.tensor([1])}]
+
+
+def _ground_truth(points: Tensor, visibility: Tensor | None = None, **metadata: Tensor) -> list[dict[str, Tensor]]:
+    """Return one category-1 ground-truth instance at ``points``, optionally carrying annotation metadata.
+
+    Args:
+        points: Keypoints of shape ``(1, 3, 2)``.
+        visibility: COCO visibility flags of shape ``(1, 3)``; every joint labeled visible when omitted.
+        **metadata: Annotation fields such as ``area`` or ``num_keypoints`` stored beside the points.
+
+    Returns:
+        A one-image target list in the shape :func:`evaluate_keypoints` takes.
+
+    Examples:
+        >>> _ground_truth(torch.zeros(1, 3, 2))[0]["visibility"].tolist()
+        [[2, 2, 2]]
+        >>> sorted(_ground_truth(torch.zeros(1, 3, 2), area=torch.tensor([9.0]))[0])
+        ['area', 'keypoints', 'labels', 'visibility']
+    """
+    return [
+        {
+            "keypoints": points,
+            "visibility": torch.tensor([[2, 2, 2]]) if visibility is None else visibility,
+            "labels": torch.tensor([1]),
+            **metadata,
+        }
+    ]
+
+
 def test_keypoints_to_predictions_drops_padding_and_remaps_category() -> None:
     """A score-zero padding row is dropped while shape and category identity survive.
 
-    The adapter must filter every per-instance field with one score mask; otherwise
-    keypoints, scores, and remapped labels can silently describe different rows.
+    The adapter must filter every per-instance field with one score mask; otherwise keypoints, scores, and remapped
+    labels can silently describe different rows.
     """
     keypoints = torch.tensor(
         [
@@ -81,20 +121,12 @@ class TestEvaluateKeypoints:
     def test_perfect_match_has_high_average_precision(self) -> None:
         """Predicted keypoints equal to labeled ground truth score near-perfect AP.
 
-        This is the positive end-to-end oracle for the in-memory COCO conversion and
-        the backend's OKS matching, accumulation, and summary sequence.
+        This is the positive end-to-end oracle for the in-memory COCO conversion and the backend's OKS matching,
+        accumulation, and summary sequence.
         """
         points = torch.tensor([[[10.0, 10.0], [50.0, 10.0], [10.0, 50.0]]])
-        predictions = [{"keypoints": points, "scores": torch.tensor([1.0]), "labels": torch.tensor([1])}]
-        targets = [
-            {
-                "keypoints": points,
-                "visibility": torch.tensor([[2, 2, 2]]),
-                "labels": torch.tensor([1]),
-            }
-        ]
 
-        stats = evaluate_keypoints(predictions, targets, sigmas=_TEST_SIGMAS)
+        stats = evaluate_keypoints(_prediction(points), _ground_truth(points), sigmas=_TEST_SIGMAS)
 
         assert stats["AP_all"] > 0.999
         assert stats["AP_50"] > 0.999
@@ -103,21 +135,13 @@ class TestEvaluateKeypoints:
     def test_far_prediction_has_zero_average_precision(self) -> None:
         """A prediction far outside the target's OKS tolerance scores zero AP.
 
-        The negative oracle prevents an implementation from reporting the presence
-        of a category as a match without evaluating keypoint localization.
+        The negative oracle prevents an implementation from reporting the presence of a category as a match without
+        evaluating keypoint localization.
         """
         target_points = torch.tensor([[[10.0, 10.0], [50.0, 10.0], [10.0, 50.0]]])
         predicted_points = torch.tensor([[[1010.0, 1010.0], [1050.0, 1010.0], [1010.0, 1050.0]]])
-        predictions = [{"keypoints": predicted_points, "scores": torch.tensor([1.0]), "labels": torch.tensor([1])}]
-        targets = [
-            {
-                "keypoints": target_points,
-                "visibility": torch.tensor([[2, 2, 2]]),
-                "labels": torch.tensor([1]),
-            }
-        ]
 
-        stats = evaluate_keypoints(predictions, targets, sigmas=_TEST_SIGMAS)
+        stats = evaluate_keypoints(_prediction(predicted_points), _ground_truth(target_points), sigmas=_TEST_SIGMAS)
 
         assert stats["AP_all"] == pytest.approx(0.0)
         assert stats["AP_50"] == pytest.approx(0.0)
@@ -125,8 +149,8 @@ class TestEvaluateKeypoints:
     def test_empty_predictions_return_all_zero_statistics(self) -> None:
         """No prediction images yield the exact ten-key all-zero report.
 
-        The explicit terminal contract avoids passing an empty results list into
-        ``COCO.loadRes``, whose keypoint loader expects at least one result row.
+        The explicit terminal contract avoids passing an empty results list into ``COCO.loadRes``, whose keypoint
+        loader expects at least one result row.
         """
         stats = evaluate_keypoints([], [])
 
@@ -136,17 +160,17 @@ class TestEvaluateKeypoints:
     def test_unlabeled_target_coordinates_excluded(self) -> None:
         """Corrupting only a ``v == 0`` target point leaves every statistic unchanged.
 
-        The two evaluations differ only in a coordinate that COCO marks unlabeled;
-        equality proves neither OKS distance nor the visible-point area reads it.
+        The two evaluations differ only in a coordinate that COCO marks unlabeled; equality proves neither OKS distance
+        nor the visible-point area reads it.
         """
         predicted_points = torch.tensor([[[10.0, 10.0], [20.0, 20.0], [30.0, 30.0]]])
         target_points = torch.tensor([[[10.0, 10.0], [20.0, 20.0], [30.0, 30.0]]])
         visibility = torch.tensor([[2, 2, 0]])
-        predictions = [{"keypoints": predicted_points, "scores": torch.tensor([1.0]), "labels": torch.tensor([1])}]
-        baseline_targets = [{"keypoints": target_points, "visibility": visibility, "labels": torch.tensor([1])}]
+        predictions = _prediction(predicted_points)
+        baseline_targets = _ground_truth(target_points, visibility)
         corrupted_points = target_points.clone()
         corrupted_points[0, 2] = torch.tensor([999.0, -999.0])
-        corrupted_targets = [{"keypoints": corrupted_points, "visibility": visibility, "labels": torch.tensor([1])}]
+        corrupted_targets = _ground_truth(corrupted_points, visibility)
 
         baseline = evaluate_keypoints(predictions, baseline_targets, sigmas=_TEST_SIGMAS)
         corrupted = evaluate_keypoints(predictions, corrupted_targets, sigmas=_TEST_SIGMAS)
@@ -188,12 +212,10 @@ class TestKeypointEvaluationParams:
     def test_pinned_values_equal_library_defaults(self) -> None:
         """The pinned ``maxDets``/``areaRng`` still equal what ``Params.setKpParams`` sets.
 
-        :func:`evaluate_keypoints` pins both so a report's AR lines and its
-        medium/large split are citable numbers rather than whatever the installed
-        faster_coco_eval happens to default to. That pin is only worth having if a
-        library that moves its own default is *noticed*: without this case the two
-        could silently diverge and the comment beside the constants would quietly
-        become false, exactly as the OKS sigma comment did.
+        :func:`evaluate_keypoints` pins both so a report's AR lines and its medium/large split are citable numbers
+        rather than whatever the installed faster_coco_eval happens to default to. That pin is only worth having if a
+        library that moves its own default is *noticed*: without this case the two could silently diverge and the
+        comment beside the constants would quietly become false, exactly as the OKS sigma comment did.
         """
         defaults = Params(iouType="keypoints")
 
@@ -205,10 +227,9 @@ class TestKeypointEvaluationParams:
     def test_evaluator_carries_pinned_values(self) -> None:
         """A constructed keypoint evaluator ends up holding the constants, not the defaults.
 
-        The assignment goes through ``evaluator.params``, and hotcoco's own
-        equivalent attribute is copy-on-read — an assignment there is a silent
-        no-op. This pins that faster_coco_eval's is not, so the pin above is
-        actually in force at ``evaluate()`` time rather than merely written down.
+        The assignment goes through ``evaluator.params``, and hotcoco's own equivalent attribute is copy-on-read — an
+        assignment there is a silent no-op. This pins that faster_coco_eval's is not, so the pin above is actually in
+        force at ``evaluate()`` time rather than merely written down.
         """
         evaluator = _keypoint_evaluator()
 
@@ -223,41 +244,26 @@ class TestKeypointEvaluationParams:
 class TestCanonicalGroundTruthMetadata:
     """WP-134: supplied annotation fields drive OKS, not a visible-point reconstruction."""
 
-    #: Points spanning 50x50 px. Their extent is 2500, which COCO buckets as *medium*;
-    #: the annotation below declares an area of 20000, which is *large*. The two readings
-    #: therefore disagree about which bucket the one instance belongs to, and exactly one
-    #: of the two buckets can be populated.
+    #: Points spanning 50x50 px. Their extent is 2500, which COCO buckets as *medium*; the annotation below declares an
+    #: area of 20000, which is *large*. The two readings therefore disagree about which bucket the one instance belongs
+    #: to, and exactly one of the two buckets can be populated.
     _POINTS = torch.tensor([[[10.0, 10.0], [60.0, 10.0], [10.0, 60.0]]])
     _DECLARED_AREA = 20000.0
-
-    def _predictions(self) -> list[dict[str, Tensor]]:
-        """One perfect prediction, so OKS is 1.0 under either area and only the bucket moves."""
-        return [{"keypoints": self._POINTS, "scores": torch.tensor([1.0]), "labels": torch.tensor([1])}]
-
-    def _target(self, **metadata: Tensor) -> list[dict[str, Tensor]]:
-        """One ground-truth instance, optionally carrying real annotation metadata."""
-        return [
-            {
-                "keypoints": self._POINTS,
-                "visibility": torch.tensor([[2, 2, 2]]),
-                "labels": torch.tensor([1]),
-                **metadata,
-            }
-        ]
 
     def test_declared_area_decides_bucket_over_visible_extent(self) -> None:
         """A supplied ``area`` of 20000 puts the instance in the large bucket, not the medium one.
 
-        The instance's visible points span 2500 px^2 while its annotation declares
-        20000, so the two readings land it in different buckets and the report says
-        which one was used. WP-124 reconstructed unconditionally and would report
-        the medium bucket here; COCO normalizes OKS by the supplied figure and
-        buckets on it, which for a person is the segmented area rather than the hull
-        of the labeled joints.
+        The instance's visible points span 2500 px^2 while its annotation declares 20000, so the two readings land it in
+        different buckets and the report says which one was used. WP-124 reconstructed unconditionally and would report
+        the medium bucket here; COCO normalizes OKS by the supplied figure and buckets on it, which for a person is the
+        segmented area rather than the hull of the labeled joints.
         """
+        # one perfect prediction, so OKS is 1.0 under either area and only the bucket moves
+        prediction = _prediction(self._POINTS)
+
         stats = evaluate_keypoints(
-            self._predictions(),
-            self._target(area=torch.tensor([self._DECLARED_AREA])),
+            prediction,
+            _ground_truth(self._POINTS, area=torch.tensor([self._DECLARED_AREA])),
             sigmas=_TEST_SIGMAS,
         )
 
@@ -267,11 +273,10 @@ class TestCanonicalGroundTruthMetadata:
     def test_visible_extent_decides_when_no_area_supplied(self) -> None:
         """Ground truth with no ``area`` keeps WP-124's reconstruction, and its medium bucket.
 
-        The fallback is what every pre-WP-134 caller and every synthetic fixture with
-        no annotation metadata relies on, so the new field must be a preference and
-        not a requirement.
+        The fallback is what every pre-WP-134 caller and every synthetic fixture with no annotation metadata relies on,
+        so the new field must be a preference and not a requirement.
         """
-        stats = evaluate_keypoints(self._predictions(), self._target(), sigmas=_TEST_SIGMAS)
+        stats = evaluate_keypoints(_prediction(self._POINTS), _ground_truth(self._POINTS), sigmas=_TEST_SIGMAS)
 
         assert stats["AP_medium"] == pytest.approx(1.0)
         assert stats["AP_large"] == pytest.approx(-1.0)
@@ -279,21 +284,20 @@ class TestCanonicalGroundTruthMetadata:
     def test_zero_num_keypoints_annotation_ignored(self) -> None:
         """A supplied ``num_keypoints`` of 0 removes the instance from the evaluation entirely.
 
-        COCO's protocol ignores a person annotated with a box but no joints. That
-        rule can only fire on the supplied count: this instance has three visible
-        points, so a recount from ``visibility`` would keep it and score 1.0.
+        COCO's protocol ignores a person annotated with a box but no joints. That rule can only fire on the supplied
+        count: this instance has three visible points, so a recount from ``visibility`` would keep it and score 1.0.
         """
         stats = evaluate_keypoints(
-            self._predictions(),
-            self._target(num_keypoints=torch.tensor([0])),
+            _prediction(self._POINTS),
+            _ground_truth(self._POINTS, num_keypoints=torch.tensor([0])),
             sigmas=_TEST_SIGMAS,
         )
 
         assert stats["AP_all"] == pytest.approx(-1.0)
 
 
-#: Letterbox canvas of the dual-path cases. Equal to the images' original size, so the
-#: A10 inverse is the identity and an assertion reads the decode rather than the resize.
+#: Letterbox canvas of the dual-path cases. Equal to the images' original size, so the A10 inverse is the identity and
+#: an assertion reads the decode rather than the resize.
 _CANVAS = 64
 #: Class count of the stub head; the stub decoders emit label 0 regardless.
 _NUM_CLASSES = 2
@@ -304,9 +308,8 @@ _POINT_COUNT = 3
 class _FixedDecoder(torch.nn.Module):
     """A decoder emitting fixed detections and fixed source anchor indices.
 
-    Both decode paths run the same untrained stub head, so a real decoder would give
-    the two paths identical output and crossing them would change nothing observable.
-    Fixing each path's answer separates them by construction.
+    Both decode paths run the same untrained stub head, so a real decoder would give the two paths identical output and
+    crossing them would change nothing observable. Fixing each path's answer separates them by construction.
     """
 
     def __init__(self, detections: Tensor, anchor_indices: Tensor) -> None:
@@ -330,8 +333,8 @@ class _FixedDecoder(torch.nn.Module):
 class _KeypointHead(torch.nn.Module):
     """A model whose two branches carry deliberately different raw point offsets.
 
-    ``None`` for both branches is a detection-only head, which is how the absence of
-    the keypoint report is asserted against the same stub.
+    ``None`` for both branches is a detection-only head, which is how the absence of the keypoint report is asserted
+    against the same stub.
     """
 
     def __init__(self, anchors: int, o2o_points: Tensor | None, o2m_points: Tensor | None) -> None:
@@ -357,10 +360,9 @@ class _KeypointHead(torch.nn.Module):
 def _distinct_branch_offsets() -> tuple[Tensor, Tensor, Tensor, Tensor]:
     """Build two branches' raw offsets and the anchor grid they decode against.
 
-    Every anchor of the one-to-one branch carries a positive offset and every anchor
-    of the one-to-many branch the negative of it; each anchor's magnitude differs from
-    its neighbours' and each point's from its siblings', so a gathered point set names
-    both the branch it came from and the anchor row it was taken at, and spans a
+    Every anchor of the one-to-one branch carries a positive offset and every anchor of the one-to-many branch the
+    negative of it; each anchor's magnitude differs from its neighbours' and each point's from its siblings', so a
+    gathered point set names both the branch it came from and the anchor row it was taken at, and spans a
     non-degenerate extent.
 
     Examples:
@@ -381,11 +383,10 @@ def _distinct_branch_offsets() -> tuple[Tensor, Tensor, Tensor, Tensor]:
 class TestDualPathKeypoints:
     """WP-134: each decode path's points come from its own branch, at its own anchors.
 
-    The ground truth is set to exactly what the **e2e** path should gather — the
-    one-to-one branch's offsets read at the E2E decoder's own anchor. Of the four
-    combinations of branch and anchor index the evaluator could take, only that one
-    scores OKS 1.0, so a crossed branch and a crossed index are both visible in the
-    report and neither can hide behind correct boxes, scores and labels.
+    The ground truth is set to exactly what the **e2e** path should gather — the one-to-one branch's offsets read at the
+    E2E decoder's own anchor. Of the four combinations of branch and anchor index the evaluator could take, only that
+    one scores OKS 1.0, so a crossed branch and a crossed index are both visible in the report and neither can hide
+    behind correct boxes, scores and labels.
     """
 
     _E2E_ANCHOR = 3
@@ -412,11 +413,10 @@ class TestDualPathKeypoints:
     def test_each_path_reads_own_branch_at_own_anchor(self) -> None:
         """Only ``o2o_keypoints`` gathered at the E2E anchor scores; the dense branch misses.
 
-        Reading the other branch, or gathering with the other path's anchor indices,
-        leaves every box, score and label correct and moves only the poses — a report
-        that looks entirely reasonable. The two branches differ in sign here and the
-        two anchors in magnitude, so all three wrong combinations land far outside
-        OKS tolerance while the right one lands exactly on the target.
+        Reading the other branch, or gathering with the other path's anchor indices, leaves every box, score and label
+        correct and moves only the poses — a report that looks entirely reasonable. The two branches differ in sign here
+        and the two anchors in magnitude, so all three wrong combinations land far outside OKS tolerance while the
+        right one lands exactly on the target.
         """
         o2o_points, o2m_points, anchor_points, strides = _distinct_branch_offsets()
         detections = torch.tensor([[[*self._BOX, 1.0, 0.0]]])
@@ -434,10 +434,9 @@ class TestDualPathKeypoints:
     def test_padding_anchor_index_neither_crashes_nor_invents_pose(self) -> None:
         """A ``PAD_ANCHOR_INDEX`` row leaves the real row's score untouched at a perfect OKS.
 
-        The sentinel is ``-1``, which ``Tensor.gather`` would accept as an index and
-        answer with the *last* anchor's points. That row also carries score 0, so a
-        correct implementation drops it entirely and the surviving prediction is the
-        real anchor's — which the perfect OKS below is only reachable through.
+        The sentinel is ``-1``, which ``Tensor.gather`` would accept as an index and answer with the *last* anchor's
+        points. That row also carries score 0, so a correct implementation drops it entirely and the surviving
+        prediction is the real anchor's — which the perfect OKS below is only reachable through.
         """
         o2o_points, o2m_points, anchor_points, strides = _distinct_branch_offsets()
         detections = torch.tensor([[[*self._BOX, 1.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]])
@@ -453,9 +452,8 @@ class TestDualPathKeypoints:
     def test_detection_checkpoint_reports_no_keypoint_statistics(self) -> None:
         """A head with no point branch produces exactly the box report it always produced.
 
-        The keypoint machinery is reached structurally, off the head output's own
-        fields, so a detection checkpoint must not gain an ``oks_`` key — the absence
-        is what makes the prefix's presence mean "this checkpoint has points".
+        The keypoint machinery is reached structurally, off the head output's own fields, so a detection checkpoint must
+        not gain an ``oks_`` key — the absence is what makes the prefix's presence mean "this checkpoint has points".
         """
         _, _, anchor_points, _ = _distinct_branch_offsets()
         head = _KeypointHead(int(anchor_points.shape[0]), None, None)
@@ -476,12 +474,11 @@ class TestPoseProtocolRefusesForeignSchemas:
     def test_non_seventeen_point_checkpoint_refused(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """A ``K=7`` checkpoint exits non-zero and names both point counts, scoring nothing.
 
-        This protocol's ground truth, point ordering and sigma table are all COCO's
-        person schema, so point *i* of a seven-point prediction is not point *i* of
-        the annotation and R12's sigmas measure variance on joints that are not being
-        predicted. Padding or truncating COCO's table would produce a real-looking
-        number for a comparison that does not exist. The refusal fires before any
-        annotation file is opened, which is why the data root here need not exist.
+        This protocol's ground truth, point ordering and sigma table are all COCO's person schema, so point *i* of a
+        seven-point prediction is not point *i* of the annotation and R12's sigmas measure variance on joints that are
+        not being predicted. Padding or truncating COCO's table would produce a real-looking number for a comparison
+        that does not exist. The refusal fires before any annotation file is opened, which is why the data root here
+        need not exist.
         """
         module = DetectionLitModule(
             depth=0.34, width=0.25, max_channels=64, num_classes=1, task="keypoints", num_keypoints=7

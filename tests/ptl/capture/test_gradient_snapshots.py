@@ -77,9 +77,8 @@ def certify(native) -> Callable[[], tuple[torch.Tensor, ...]]:
 def stepping(native) -> Iterator[tuple[DetectionLitModule, MuSGD, Closure, list[frozenset[int]]]]:
     """Build Lightning's own closure over a real batch, with a probe on the forward's clear permission.
 
-    The probe is a forward hook on a submodule, so it runs inside the real ``training_step`` without
-    shadowing any method the certificate inspects; each forward appends the parameter ids whose
-    snapshot is currently omitted.
+    The probe is a forward hook on a submodule, so it runs inside the real ``training_step`` without shadowing any
+    method the certificate inspects; each forward appends the parameter ids whose snapshot is currently omitted.
     """
     module, trainer, _ = native
     optimizer = trainer.optimizers[0]
@@ -195,21 +194,12 @@ _ZEROING_CHANGES: dict[str, Callable[..., object]] = {
 }
 
 
-@pytest.mark.parametrize("change", [pytest.param(change, id=name) for name, change in _ZEROING_CHANGES.items()])
-@skip_unless_native_zeroing
-def test_custom_zeroing_keeps_snapshots(native, certify, change: Callable[..., None]) -> None:
-    """Each unsupported zeroing contract independently selects the original clone route."""
-    assert certify()
-    change(*native)
-    assert certify() == ()
-
-
 @skip_unless_native_zeroing
 def test_shadowed_closure_keeps_snapshots(native, certify) -> None:
     """A closure whose own ``closure`` method was replaced on the instance keeps the clone route.
 
-    ``type(closure)`` and the class's ``closure``/``__call__`` stay the native ones, so this is
-    not caught by the class-identity checks alone; only the instance-dict check is.
+    ``type(closure)`` and the class's ``closure``/``__call__`` stay the native ones, so this is not caught by the
+    class-identity checks alone; only the instance-dict check is.
     """
     _, _, closure = native
     assert certify()
@@ -244,19 +234,19 @@ def fresh_profile_code() -> Iterator[None]:
 
 
 @pytest.mark.usefixtures("fresh_profile_code")
+@patch.object(
+    torch.optim.Optimizer,
+    "profile_hook_step",
+    staticmethod(MagicMock(side_effect=RuntimeError("factory contract changed"))),
+)
 @skip_unless_native_zeroing
-def test_failing_profile_factory_keeps_snapshots(native, certify, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_failing_profile_factory_keeps_snapshots(native, certify) -> None:
     """A profiler factory that raises withdraws the omission instead of failing the training step.
 
-    The wrapper code is read on the first certificate evaluation, mid-fit, so a changed private
-    PyTorch factory must leave the profiler-wrapped MuSGD step unrecognized rather than raise.
+    The wrapper code is read on the first certificate evaluation, mid-fit, so a changed private PyTorch factory must
+    leave the profiler-wrapped MuSGD step unrecognized rather than raise.
     """
     _, trainer, _ = native
-
-    def broken(func):
-        raise RuntimeError("factory contract changed")
-
-    monkeypatch.setattr(torch.optim.Optimizer, "profile_hook_step", staticmethod(broken))
     assert _resolve_profile_wrapper_code() is None
     assert not _native_update_step(trainer.optimizers[0])
     assert certify() == ()
@@ -311,10 +301,9 @@ def test_optimizer_scope_restores_closure_after_forward(native, fails: bool) -> 
 def test_shadowed_closure_never_enters_fast_path(native) -> None:
     """The ``optimizer_step`` gate never wraps ``_step_fn`` of a closure with a shadowed ``closure`` method.
 
-    This is the gate layer, not the certificate: ``type(closure)`` stays the native one, so only
-    the instance-dict check of the shared closure shape catches it. The certificate is patched to
-    accept, so the pre-filter in ``optimizer_step`` alone must leave the step function unwrapped
-    and the snapshot copy in place.
+    This is the gate layer, not the certificate: ``type(closure)`` stays the native one, so only the instance-dict
+    check of the shared closure shape catches it. The certificate is patched to accept, so the pre-filter in
+    ``optimizer_step`` alone must leave the step function unwrapped and the snapshot copy in place.
     """
     module, trainer, _ = native
     parameter = torch.nn.Parameter(torch.zeros(3))
@@ -358,9 +347,8 @@ def test_replaced_module_helper_keeps_snapshots(
 ) -> None:
     """Any helper the module class defines keeps snapshots when replaced, without being listed.
 
-    These helpers run inside ``training_step`` and once were missing from a hand-kept table; the
-    certificate now reads every member of the class itself, so a class patch or an instance
-    shadow of each one refuses the omission.
+    These helpers run inside ``training_step`` and once were missing from a hand-kept table; the certificate now reads
+    every member of the class itself, so a class patch or an instance shadow of each one refuses the omission.
     """
     module, _, _ = native
     assert certify()
@@ -398,10 +386,16 @@ _OBSERVER_CHANGES: dict[str, Callable[..., object]] = {
 }
 
 
-@pytest.mark.parametrize("change", [pytest.param(change, id=name) for name, change in _OBSERVER_CHANGES.items()])
+@pytest.mark.parametrize(
+    "change", [pytest.param(change, id=name) for name, change in {**_ZEROING_CHANGES, **_OBSERVER_CHANGES}.items()]
+)
 @skip_unless_native_zeroing
-def test_forward_observers_keep_snapshots(native, certify, change: Callable[..., None]) -> None:
-    """Public forward-time hooks and replaced zeroing helpers cannot retain static gradients."""
+def test_unsupported_change_keeps_snapshots(native, certify, change: Callable[..., None]) -> None:
+    """Each unsupported zeroing contract, forward-time hook or replaced zeroing helper selects the clone route.
+
+    Every change independently withdraws the omission, so a hook that could observe or retain static gradients never
+    sees them overwritten by a replayed backward.
+    """
     assert certify()
     change(*native)
     assert certify() == ()
@@ -412,9 +406,9 @@ def test_forward_observers_keep_snapshots(native, certify, change: Callable[...,
 def test_replaced_autocast_keeps_snapshots(native, certify, monkeypatch: pytest.MonkeyPatch, replaced: str) -> None:
     """A replaced autocast context, entered by the native mixed-precision forward context, keeps snapshots.
 
-    ``MixedPrecision.forward_context`` enters ``autocast_context_manager()`` after the forward-time
-    copy-out. A replacement that holds ``parameter.grad`` on exit would keep the static buffer the
-    next replayed backward overwrites, so a class patch and an instance shadow both refuse.
+    ``MixedPrecision.forward_context`` enters ``autocast_context_manager()`` after the forward-time copy-out. A
+    replacement that holds ``parameter.grad`` on exit would keep the static buffer the next replayed backward
+    overwrites, so a class patch and an instance shadow both refuse.
     """
     _, trainer, _ = native
     trainer.strategy.precision_plugin = MixedPrecision("bf16-mixed", "cpu")
@@ -431,9 +425,9 @@ def test_replaced_autocast_keeps_snapshots(native, certify, monkeypatch: pytest.
 def test_replaced_hook_dispatcher_keeps_snapshots(certify, monkeypatch: pytest.MonkeyPatch, dispatcher: str) -> None:
     """A replaced Lightning hook dispatcher keeps snapshots.
 
-    The closure runs its forward through ``_call_strategy_hook`` and its zeroing hooks through
-    ``_call_callback_hooks`` and ``_call_lightning_module_hook``, each looked up on the module at
-    call time. A replacement there can observe the old gradients or skip zeroing.
+    The closure runs its forward through ``_call_strategy_hook`` and its zeroing hooks through ``_call_callback_hooks``
+    and ``_call_lightning_module_hook``, each looked up on the module at call time. A replacement there can observe the
+    old gradients or skip zeroing.
     """
     assert certify()
     monkeypatch.setattr(trainer_call, dispatcher, lambda *args, **kwargs: None)
@@ -445,10 +439,9 @@ def test_replaced_hook_dispatcher_keeps_snapshots(certify, monkeypatch: pytest.M
 def test_foreign_optimizer_wrapper_keeps_snapshots(native, change: str) -> None:
     """An optimizer wrapper that can step outside the certified strategy keeps snapshots.
 
-    ``LightningOptimizer.step`` routes through its own ``_strategy``, which Lightning sets to a weak
-    proxy of the trainer's strategy. The trainer's own wrapper qualifies; one bound to a second
-    strategy, one whose ``step`` is shadowed on the instance, and one over a different optimizer
-    do not.
+    ``LightningOptimizer.step`` routes through its own ``_strategy``, which Lightning sets to a weak proxy of the
+    trainer's strategy. The trainer's own wrapper qualifies; one bound to a second strategy, one whose ``step`` is
+    shadowed on the instance, and one over a different optimizer do not.
     """
     module, trainer, closure = native
     wrapper = trainer.strategy._lightning_optimizers[0]
@@ -488,25 +481,11 @@ def test_replaced_closure_class_keeps_snapshots(certify, monkeypatch: pytest.Mon
 def test_refusal_names_first_failed_predicate(native, change: str, refusal: _Refusal | None) -> None:
     """The certificate reports the first refusing predicate as its constant token.
 
-    Each change breaks exactly one predicate, so the token names the hazard the step was refused
-    for; an unchanged native step reports none.
+    Each change breaks exactly one predicate, so the token names the hazard the step was refused for; an unchanged
+    native step reports none.
     """
     module, trainer, closure = native
-    if change == "inactive":
-        module._capture_network_active = False
-    elif change == "accumulation":
-        trainer.accumulate_grad_batches = 2
-    elif change == "callback":
-
-        class _Observer(Callback):
-            def on_before_zero_grad(self, trainer, module, optimizer):
-                raise AssertionError("not executed by the certificate")
-
-        trainer.callbacks.append(_Observer())
-    elif change == "missing_zero":
-        closure._zero_grad_fn = None
-    elif change == "custom_zero":
-        trainer.optimizers[0].zero_grad = lambda: None
+    _ZEROING_CHANGES.get(change, lambda *_: None)(module, trainer, closure)
     wrapper = trainer.strategy._lightning_optimizers[0]
     assert module._native_closure_refusal(closure, closure._step_fn, wrapper) == refusal
 
@@ -515,8 +494,8 @@ def test_refusal_names_first_failed_predicate(native, change: str, refusal: _Ref
 def test_active_snapshot_skip_logs_once_per_fit(certify, reported: MagicMock) -> None:
     """Many native steps of one fit log the active verdict once, at the first.
 
-    The certificate is evaluated at every step's forward; the line must not repeat per step, or a
-    long fit would flood the log with a fact that did not change.
+    The certificate is evaluated at every step's forward; the line must not repeat per step, or a long fit would flood
+    the log with a fact that did not change.
     """
     for _ in range(3):
         assert certify()
@@ -528,8 +507,8 @@ def test_active_snapshot_skip_logs_once_per_fit(certify, reported: MagicMock) ->
 def test_certificate_flip_after_first_step_stays_silent(native, certify, reported: MagicMock) -> None:
     """A later step that falls back does not add a second line to the fit.
 
-    The first step reported active; accumulation changing afterwards still keeps the original
-    snapshots, but the one-line-per-fit contract holds and the hot path formats nothing.
+    The first step reported active; accumulation changing afterwards still keeps the original snapshots, but the
+    one-line-per-fit contract holds and the hot path formats nothing.
     """
     _, trainer, _ = native
     assert certify()
@@ -573,8 +552,8 @@ def test_refused_snapshot_skip_logs_first_failed_check(
 ) -> None:
     """A refused certificate logs the constant token of the first predicate that failed.
 
-    The last case breaks two predicates; only the one evaluated first is named, so a user fixing
-    the report sees the next refusal on the following run instead of a misleading list.
+    The last case breaks two predicates; only the one evaluated first is named, so a user fixing the report sees the
+    next refusal on the following run instead of a misleading list.
     """
     break_certificate(*native)
     assert certify() == ()
@@ -588,8 +567,8 @@ def test_refused_snapshot_skip_logs_first_failed_check(
 def test_setup_rearms_snapshot_skip_log_for_fit_only(native, certify, reported: MagicMock, stage: str) -> None:
     """Setting up ``fit`` again starts a new report; another stage leaves the fit's report spent.
 
-    ``setup`` clears the CPU fixture's activation, as it would on any non-CUDA run, so the
-    activation the fixture stands in for is restored before the next step.
+    ``setup`` clears the CPU fixture's activation, as it would on any non-CUDA run, so the activation the fixture
+    stands in for is restored before the next step.
     """
     module, _, _ = native
     assert certify()
@@ -611,8 +590,8 @@ def test_inapplicable_snapshot_skip_logs_nothing(
 ) -> None:
     """A module the fast path cannot serve never logs a verdict about it.
 
-    Network replay off, or a task other than detection, means the certificate has nothing to report
-    and a line would only suggest a fast path the run never had.
+    Network replay off, or a task other than detection, means the certificate has nothing to report and a line would
+    only suggest a fast path the run never had.
     """
     module, _, _ = native
     silence(module)
@@ -624,8 +603,8 @@ def test_inapplicable_snapshot_skip_logs_nothing(
 def test_foreign_closure_logs_zeroing_check_once(native, reported: MagicMock) -> None:
     """A closure whose own ``closure`` method was replaced is reported by the pre-filter.
 
-    The shape check sits in ``optimizer_step`` before the certificate runs, so it must report on
-    its own; the zeroing-closure predicate owns this shape and is the first that fails here.
+    The shape check sits in ``optimizer_step`` before the certificate runs, so it must report on its own; the
+    zeroing-closure predicate owns this shape and is the first that fails here.
     """
     module, trainer, _ = native
     parameter = torch.nn.Parameter(torch.zeros(3))
@@ -659,8 +638,8 @@ def test_delegating_callback_keeps_snapshots(native, certify) -> None:
 def test_profiler_observer_retains_old_gradient_values(native, monkeypatch: pytest.MonkeyPatch, observer: str) -> None:
     """A profiler observing the forward must retain an independent old-gradient snapshot.
 
-    The forward stand-in replaces Lightning's strategy-hook dispatcher, so it is also registered as
-    the certified dispatcher; otherwise the certificate refuses on it and never reaches the profiler.
+    The forward stand-in replaces Lightning's strategy-hook dispatcher, so it is also registered as the certified
+    dispatcher; otherwise the certificate refuses on it and never reaches the profiler.
     """
     module, trainer, closure = native
     parameter = next(module.parameters())
@@ -702,8 +681,8 @@ def test_profiler_observer_retains_old_gradient_values(native, monkeypatch: pyte
 def test_custom_precision_closure_keeps_snapshots(native) -> None:
     """A precision wrapper that bypasses zeroing cannot suppress the forward snapshot.
 
-    The forward stand-in is registered as the certified strategy-hook dispatcher, so the replaced
-    ``_wrap_closure`` alone decides the refusal.
+    The forward stand-in is registered as the certified strategy-hook dispatcher, so the replaced ``_wrap_closure``
+    alone decides the refusal.
     """
     module, trainer, closure = native
     parameter = next(module.parameters())
@@ -726,27 +705,27 @@ def test_custom_precision_closure_keeps_snapshots(native) -> None:
     assert parameter.grad is not live
 
 
-def test_unsupported_lightning_minor_refuses_certificate(native, certify, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(_native_closure, "_ZEROING_RUNTIME_SUPPORTED", False)
+def test_unsupported_lightning_minor_refuses_certificate(native, certify) -> None:
     """A Lightning minor outside the inspected 2.4-2.6 contract yields no clearing set.
 
-    Lightning is not capped, so a newer minor reaches users with the runtime gate off. The
-    certificate must name the trainer contract as the first failed check and clear nothing.
+    Lightning is not capped, so a newer minor reaches users with the runtime gate off. The certificate must name the
+    trainer contract as the first failed check and clear nothing.
     """
     module, trainer, closure = native
-    monkeypatch.setattr(_native_closure, "_ZEROING_RUNTIME_SUPPORTED", False)
     wrapper = trainer.strategy._lightning_optimizers[0]
     assert module._native_closure_refusal(closure, closure._step_fn, wrapper) == _Refusal.TRAINER_CONTRACT
     assert certify() == ()
 
 
-def test_unsupported_lightning_minor_steps_with_snapshots(stepping, monkeypatch: pytest.MonkeyPatch) -> None:
+@patch.object(_native_closure, "_ZEROING_RUNTIME_SUPPORTED", False)
+def test_unsupported_lightning_minor_steps_with_snapshots(stepping) -> None:
     """A real ``optimizer_step`` on an unsupported Lightning minor reaches the forward with no omission permission.
 
-    The closure, optimizer and certificate are all unpatched; only the runtime gate is off, so
-    the forward must run through the original snapshot route.
+    The closure, optimizer and certificate are all unpatched; only the runtime gate is off, so the forward must run
+    through the original snapshot route.
     """
     module, optimizer, closure, permissions = stepping
-    monkeypatch.setattr(_native_closure, "_ZEROING_RUNTIME_SUPPORTED", False)
     step = closure._step_fn
     module.optimizer_step(0, 0, optimizer, closure)
     assert permissions == [frozenset()]
@@ -756,8 +735,8 @@ def test_unsupported_lightning_minor_steps_with_snapshots(stepping, monkeypatch:
 def test_runtime_gate_tracks_lightning_2_4_to_2_6() -> None:
     """The snapshot-skip gate is open exactly on the Lightning minors whose closure was inspected.
 
-    The expectation is spelled out here from the installed version, not read from the gate, so a
-    changed production set fails this test instead of silently skipping every fast-path case.
+    The expectation is spelled out here from the installed version, not read from the gate, so a changed production
+    set fails this test instead of silently skipping every fast-path case.
     """
     minor = Version(pytorch_lightning.__version__).release[:2]
     assert (minor in {(2, 4), (2, 5), (2, 6)}) == _native_closure._ZEROING_RUNTIME_SUPPORTED
@@ -767,9 +746,9 @@ def test_runtime_gate_tracks_lightning_2_4_to_2_6() -> None:
 def test_real_closure_scopes_permission_to_optimizer_parameters(stepping) -> None:
     """An unpatched ``optimizer_step`` over Lightning's own closure omits snapshots for the live optimizer parameters.
 
-    Nothing is patched: the certificate, the closure, the optimizer and the strategy are the
-    native ones, so this joins ``optimizer_step`` to the real certificate. A parameter dropped
-    from the optimizer's group keeps its snapshot, and the step function is restored afterwards.
+    Nothing is patched: the certificate, the closure, the optimizer and the strategy are the native ones, so this joins
+    ``optimizer_step`` to the real certificate. A parameter dropped from the optimizer's group keeps its snapshot, and
+    the step function is restored afterwards.
     """
     module, optimizer, closure, permissions = stepping
     removed = optimizer.param_groups[0]["params"].pop()
@@ -786,9 +765,9 @@ def test_real_closure_scopes_permission_to_optimizer_parameters(stepping) -> Non
 def test_non_detect_task_keeps_snapshots(native, certify, task: str) -> None:
     """Every task other than detection keeps the original snapshots.
 
-    The fast path is certified for the detection objective alone, so segmentation, oriented boxes
-    and keypoints replay with their snapshots. The cases come from the ``Task`` enum, so a task
-    added later is held to the same guard without editing this test.
+    The fast path is certified for the detection objective alone, so segmentation, oriented boxes and keypoints replay
+    with their snapshots. The cases come from the ``Task`` enum, so a task added later is held to the same guard
+    without editing this test.
     """
     module, _, _ = native
     assert certify()

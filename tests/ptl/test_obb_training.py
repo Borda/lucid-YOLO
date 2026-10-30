@@ -1,33 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the oriented supervision wired into the training step (WP-088).
 
-Phase 8 built every oriented component standalone and wired none of them into
-training: ``task="obb"`` constructed the angle stems, then trained the plain
-detection objective while they never received a gradient. Every component gate
-still passed, because each component was correct in isolation. These tests
-therefore aim at the **wiring** rather than at the components again:
+Phase 8 built every oriented component standalone and wired none of them into training: ``task="obb"`` constructed
+the angle stems, then trained the plain detection objective while they never received a gradient. Every component
+gate still passed, because each component was correct in isolation. These tests therefore aim at the **wiring**
+rather than at the components again:
 
-* the angle stems of **both** head branches carry gradient after one step — the
-  test that would have caught the original defect;
-* each of the three oriented gains has leverage on the total, so a term that is
-  connected but weightless (the same defect wearing a disguise) fails here;
-* the rotated and angle terms gather their targets by the *assignment*, not by
-  positional order, so an anchor's orientation cannot be scored against another
-  instance's box;
-* ``task="detect"`` reproduces a snapshot captured **before** this work package
-  touched the shared modules — not merely "the detection tests pass" — to the
-  tolerance an architecture's choice of summation order forces on it;
-* the oriented module's state-dict keys are the detection module's plus the angle
-  stems, so the stages stayed flat and the accepted checkpoints keep loading;
+* the angle stems of **both** head branches carry gradient after one step — the test that would have caught the
+  original defect;
+* each of the three oriented gains has leverage on the total, so a term that is connected but weightless (the same
+  defect wearing a disguise) fails here;
+* the rotated and angle terms gather their targets by the *assignment*, not by positional order, so an anchor's
+  orientation cannot be scored against another instance's box;
+* ``task="detect"`` reproduces a snapshot captured **before** this work package touched the shared modules — not
+  merely "the detection tests pass" — to the tolerance an architecture's choice of summation order forces on it;
+* the oriented module's state-dict keys are the detection module's plus the angle stems, so the stages stayed flat
+  and the accepted checkpoints keep loading;
 * rotated ground truth survives the loader transport into
   :func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map`, difficult flags included.
 
-The module is built at n-scale multipliers with a low channel cap and a 160-px
-input so the real stack runs in a couple of seconds on CPU. Ground truths are
-**elongated and rotated** on purpose: at initialisation the head emits
-``theta ~ 0``, and both ``sin^2(2 d_theta)`` and ProbIoU have a vanishing angular
-gradient at ``d_theta = 0``, so a square or axis-aligned fixture would report zero
-gradient on perfectly wired code.
+The module is built at n-scale multipliers with a low channel cap and a 160-px input so the real stack runs in a
+couple of seconds on CPU. Ground truths are **elongated and rotated** on purpose: at initialisation the head emits
+``theta ~ 0``, and both ``sin^2(2 d_theta)`` and ProbIoU have a vanishing angular gradient at ``d_theta = 0``, so a
+square or axis-aligned fixture would report zero gradient on perfectly wired code.
 """
 
 from __future__ import annotations
@@ -64,33 +59,30 @@ _BOX_GAIN, _CLS_GAIN, _L1_GAIN, _ANGLE_GAIN, _ALPHA = 7.5, 0.5, 6.0, 1.0, 0.5
 #: Column count of a long-edge rotated box.
 _RBOX_DIM = 5
 
-#: The ``task="detect"`` training-step snapshot and the run that produced it: the
-#: pre-WP-088 scene, re-captured at WP-169 when the align-weight fix moved the objective.
+#: The ``task="detect"`` training-step snapshot and the run that produced it: the pre-WP-088 scene, re-captured at
+#: WP-169 when the align-weight fix moved the objective.
 _SNAPSHOT_FILE = Path(__file__).parent / "prechange_detect_step.json"
-#: Relative tolerance on a term's leverage. The difference of two float32 totals near
-#: 22 resolves to ~2e-6, so a term of order 1e-4 is recovered to about a percent; this
-#: bounds that cancellation rather than the correctness of the arithmetic.
+#: Relative tolerance on a term's leverage. The difference of two float32 totals near 22 resolves to ~2e-6, so a term
+#: of order 1e-4 is recovered to about a percent; this bounds that cancellation rather than the correctness of the
+#: arithmetic.
 _LEVERAGE_RTOL = 0.05
 
-#: Relative tolerance on the snapshot's scalars. Set from two measured cross-architecture
-#: datapoints: the snapshot was captured on arm64, and x86-64 CI reproduces its total as
-#: ``22.80112076`` against the recorded ``22.80110550`` — 1.5e-5 apart — while the same
-#: run reproduces the ``o2o_l1`` component as ``0.024623577`` against ``0.024620384``,
-#: 1.3e-4 apart. Both come from a reduction order the two builds choose differently; the
-#: component drifts relatively further because it is a small term summed out of much
-#: larger ones, so the same absolute wobble lands on a smaller magnitude. 1e-3 leaves
-#: eight times the worse of the two and still fails any change to the objective, which
-#: moves these numbers by percent rather than by ulps.
+#: Relative tolerance on the snapshot's scalars. Set from two measured cross-architecture datapoints: the snapshot was
+#: captured on arm64, and x86-64 CI reproduces its total as ``22.80112076`` against the recorded ``22.80110550`` —
+#: 1.5e-5 apart — while the same run reproduces the ``o2o_l1`` component as ``0.024623577`` against ``0.024620384``,
+#: 1.3e-4 apart. Both come from a reduction order the two builds choose differently; the component drifts relatively
+#: further because it is a small term summed out of much larger ones, so the same absolute wobble lands on a smaller
+#: magnitude. 1e-3 leaves eight times the worse of the two and still fails any change to the objective, which moves
+#: these numbers by percent rather than by ulps.
 _SNAPSHOT_RTOL = 1e-3
-#: Absolute floor beneath the relative tolerance. Two components are ``o2m`` terms of a
-#: batch that assigns almost nothing, of order 1e-9 and 1e-8; a relative bound on those
-#: would compare float32 noise against float32 noise and mean nothing.
+#: Absolute floor beneath the relative tolerance. Two components are ``o2m`` terms of a batch that assigns almost
+#: nothing, of order 1e-9 and 1e-8; a relative bound on those would compare float32 noise against float32 noise and
+#: mean nothing.
 _SNAPSHOT_ATOL = 1e-6
 
-#: Relative tolerance on the snapshot's gradient norm — looser than the scalars above,
-#: and by argument rather than by measurement: no cross-architecture value for it has
-#: been observed, and it is a float64 reduction over 700+ tensors that each carry the
-#: same class of drift. A real change to the objective moves it by percent.
+#: Relative tolerance on the snapshot's gradient norm — looser than the scalars above, and by argument rather than by
+#: measurement: no cross-architecture value for it has been observed, and it is a float64 reduction over 700+ tensors
+#: that each carry the same class of drift. A real change to the objective moves it by percent.
 _GRAD_NORM_RTOL = 1e-4
 
 
@@ -98,9 +90,9 @@ _GRAD_NORM_RTOL = 1e-4
 def single_threaded() -> Iterator[None]:
     """Pin torch's intra-op thread count to one, restoring it afterwards.
 
-    Thread count changes how reductions are split and so the summation order of the
-    dense terms; a bit-identity golden that did not pin it would be a golden about the
-    machine's core count. Restored on the way out so no other test inherits the pin.
+    Thread count changes how reductions are split and so the summation order of the dense terms; a bit-identity golden
+    that did not pin it would be a golden about the machine's core count. Restored on the way out so no other test
+    inherits the pin.
     """
     previous = torch.get_num_threads()
     torch.set_num_threads(1)
@@ -109,7 +101,7 @@ def single_threaded() -> Iterator[None]:
 
 
 def _tiny_module(task: str = "obb", **overrides: float) -> DetectionLitModule:
-    """Build an n-scale module with a low channel cap for fast CPU tests.
+    """Build an n-scale module with a low channel cap and a recording ``log`` for fast CPU tests.
 
     Examples:
         >>> module = _tiny_module()
@@ -124,7 +116,9 @@ def _tiny_module(task: str = "obb", **overrides: float) -> DetectionLitModule:
         "alpha": _ALPHA,
     }
     gains.update(overrides)
-    return tiny_module(task, **gains)
+    module = tiny_module(task, **gains)
+    module.log = LogRecorder()  # type: ignore[method-assign]
+    return module
 
 
 def _oriented_batch() -> tuple[Tensor, list[Targets]]:
@@ -150,19 +144,17 @@ def _oriented_batch() -> tuple[Tensor, list[Targets]]:
 def test_each_oriented_gain_enters_total_at_weight(gain: str, term: str, value: float) -> None:
     """Zeroing any one oriented gain drops exactly ``gain * term`` from the total.
 
-    A term that is wired but weightless is the Phase 8 defect wearing a disguise: the
-    gradient test above would still pass through the other two terms while this one
-    contributed nothing to what the optimizer minimises. The assertion is the *size*
-    of the change rather than merely its presence, because at initialisation the total
-    is dominated by the classification term — a bare inequality at any default
-    tolerance would call the angle term absent while it was working.
+    A term that is wired but weightless is the Phase 8 defect wearing a disguise: the gradient test above would still
+    pass through the other two terms while this one contributed nothing to what the optimizer minimises. The assertion
+    is the *size* of the change rather than merely its presence, because at initialisation the total is dominated by
+    the classification term — a bare inequality at any default tolerance would call the angle term absent while it was
+    working.
     """
     weighted = _tiny_module()
     zeroed = _tiny_module(**{gain: 0.0})
     zeroed.load_state_dict(weighted.state_dict())
     recorder = LogRecorder()
     weighted.log = recorder  # type: ignore[method-assign]
-    zeroed.log = LogRecorder()  # type: ignore[method-assign]
     batch = _oriented_batch()
 
     with_gain = weighted.training_step(batch, 0)
@@ -176,13 +168,12 @@ def test_each_oriented_gain_enters_total_at_weight(gain: str, term: str, value: 
 def test_angle_gain_default_registered_a22_value() -> None:
     """The angle term's default weight is A22's measured ``0.25``, not the assumed ``1.0``.
 
-    Every other test here passes its gains explicitly, so until this one nothing read the
-    default at all — it could have drifted back with the whole suite green. That matters
-    more than for a hyperparameter nobody argued over: A22 is a registered gap R1 never
-    fills, and ``0.25`` is the value WP-093 *measured* rather than assumed, after the
-    inherited ``1.0`` was shown to destabilise angle regression on elongated targets (the
-    oriented overfit cleared its floor on 1 of 5 seeds at ``1.0`` against 4 of 5 at
-    ``0.25``, with the run-to-run spread falling from 0.667 to 0.096).
+    Every other test here passes its gains explicitly, so until this one nothing read the default at all — it could
+    have drifted back with the whole suite green. That matters more than for a hyperparameter nobody argued over: A22
+    is a registered gap R1 never fills, and ``0.25`` is the value WP-093 *measured* rather than assumed, after the
+    inherited ``1.0`` was shown to destabilise angle regression on elongated targets (the oriented overfit cleared its
+    floor on 1 of 5 seeds at ``1.0`` against 4 of 5 at ``0.25``, with the run-to-run spread falling from 0.667 to
+    0.096).
     """
     assert DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=1, task="obb")._angle_gain == 0.25
 
@@ -190,41 +181,33 @@ def test_angle_gain_default_registered_a22_value() -> None:
 def test_detect_step_reproduces_pre_change_snapshot(single_threaded: None) -> None:
     """A ``task="detect"`` step reproduces the total and every component captured before this WP.
 
-    WP-088 edited modules that also sit on the detection path — the dual loss, the
-    target container, four geometric transforms, the COCO reader and the decode
-    helpers. "The detection tests still pass" would not distinguish an objective that
-    moved from one that did not; the frozen numbers do. The scene — seeds, config, gains
-    and both target sets — is ``fcf3040``'s, exported with ``git archive`` rather than
-    remembered.
+    WP-088 edited modules that also sit on the detection path — the dual loss, the target container, four geometric
+    transforms, the COCO reader and the decode helpers. "The detection tests still pass" would not distinguish an
+    objective that moved from one that did not; the frozen numbers do. The scene — seeds, config, gains and both
+    target sets — is ``fcf3040``'s, exported with ``git archive`` rather than remembered.
 
-    The *values* were re-captured at WP-169, which is the one change since that has moved
-    this objective; the JSON's ``recapture_reason`` records what and why. In short, the
-    target normalization used to divide by ``t_max + 1e-9``, and ``t_max = s * u_max**6``
-    is far under that floor at initialization, where the head's boxes decode with near-zero
-    IoU. The one-to-many box and L1 terms were therefore reported as ~4e-09 and ~3e-08 —
-    the branch's whole localization objective, weighted into nothing — and the total sat at
-    22.801105. Dividing by ``t_max`` puts them at 7.70e-03 and 5.86e-02 and the total at
-    24.321342. The assignment itself did not move: the same anchors are positive.
+    The *values* were re-captured at WP-169, which is the one change since that has moved this objective; the JSON's
+    ``recapture_reason`` records what and why. In short, the target normalization used to divide by ``t_max + 1e-9``,
+    and ``t_max = s * u_max**6`` is far under that floor at initialization, where the head's boxes decode with
+    near-zero IoU. The one-to-many box and L1 terms were therefore reported as ~4e-09 and ~3e-08 — the branch's whole
+    localization objective, weighted into nothing — and the total sat at 22.801105. Dividing by ``t_max`` puts them at
+    7.70e-03 and 5.86e-02 and the total at 24.321342. The assignment itself did not move: the same anchors are
+    positive.
 
-    **The comparison is to a tolerance, and it did not start that way.** Three values
-    of the same total were observed from source trees that compute the same arithmetic
-    — these are the pre-WP-169 totals, and they are what set ``_SNAPSHOT_RTOL``; the
-    spread they measure is a property of the build, not of the objective, so it carries
-    over to the re-captured value unchanged: ``22.80110550`` on arm64 with one intra-op
-    thread, ``22.80111694`` on arm64 with twelve, and ``22.80112076`` on x86-64 CI.
-    Summation order is a property
-    of the build and the core count, not of the objective, so bit-identity holds within
-    an architecture and cannot hold across one. This test was written asserting equality
-    and passed for the whole of Phase 8 — because until the 0.3.0 push it had only ever
-    run on the machine its snapshot came from. What it can still catch is any change to
-    the objective, which moves these numbers by percent; what it can no longer catch is
-    a change of a single rounding step, and no amount of tolerance choosing recovers
-    that across architectures.
+    **The comparison is to a tolerance, and it did not start that way.** Three values of the same total were observed
+    from source trees that compute the same arithmetic — these are the pre-WP-169 totals, and they are what set
+    ``_SNAPSHOT_RTOL``; the spread they measure is a property of the build, not of the objective, so it carries over
+    to the re-captured value unchanged: ``22.80110550`` on arm64 with one intra-op thread, ``22.80111694`` on arm64
+    with twelve, and ``22.80112076`` on x86-64 CI. Summation order is a property of the build and the core count, not
+    of the objective, so bit-identity holds within an architecture and cannot hold across one. This test was written
+    asserting equality and passed for the whole of Phase 8 — because until the 0.3.0 push it had only ever run on the
+    machine its snapshot came from. What it can still catch is any change to the objective, which moves these numbers
+    by percent; what it can no longer catch is a change of a single rounding step, and no amount of tolerance choosing
+    recovers that across architectures.
 
-    The ``single_threaded`` fixture therefore no longer decides pass from fail — the
-    thread-count spread is well inside ``_SNAPSHOT_RTOL``. It is kept because it removes
-    the one source of drift that *is* under this suite's control, leaving the tolerance
-    to absorb only the architecture; without it the margin would be spent on whichever
+    The ``single_threaded`` fixture therefore no longer decides pass from fail — the thread-count spread is well
+    inside ``_SNAPSHOT_RTOL``. It is kept because it removes the one source of drift that *is* under this suite's
+    control, leaving the tolerance to absorb only the architecture; without it the margin would be spent on whichever
     test last touched ``torch.set_num_threads`` (the WP-079 loader worker init does).
     """
     snapshot = json.loads(_SNAPSHOT_FILE.read_text())
@@ -290,12 +273,10 @@ def _gradient_norm(module: nn.Module) -> float:
 def test_obb_step_needs_one_rotated_box_per_instance() -> None:
     """Axis-aligned targets under ``task="obb"`` raise instead of training on nothing.
 
-    The silent-subset failure of this path: a loader left in axis-aligned mode ships
-    empty ``rboxes``, and without the guard the rotated terms would score zero
-    positives forever while the loss curve looked entirely ordinary.
+    The silent-subset failure of this path: a loader left in axis-aligned mode ships empty ``rboxes``, and without the
+    guard the rotated terms would score zero positives forever while the loss curve looked entirely ordinary.
     """
     module = _tiny_module()
-    module.log = LogRecorder()  # type: ignore[method-assign]
     images, targets = _oriented_batch()
     boxes_only = [Targets(boxes=target.boxes, labels=target.labels) for target in targets]
 
@@ -306,11 +287,10 @@ def test_obb_step_needs_one_rotated_box_per_instance() -> None:
 def test_image_without_instances_gives_finite_loss() -> None:
     """An empty batch yields finite oriented terms rather than a ``0 / 0`` NaN.
 
-    With no ground truth the padded rotated axis has length zero, which no ``gather``
-    can index; the term has to answer with an exact zero that is still connected to
-    the predictions. Connected means the backward reaches every angle stem of both
-    branches with a gradient, the native premise full-network replay rests on: an empty
-    batch that left an angle gradient absent would make a recorded backward differ.
+    With no ground truth the padded rotated axis has length zero, which no ``gather`` can index; the term has to answer
+    with an exact zero that is still connected to the predictions. Connected means the backward reaches every angle
+    stem of both branches with a gradient, the native premise full-network replay rests on: an empty batch that left an
+    angle gradient absent would make a recorded backward differ.
     """
     module = _tiny_module()
     recorder = LogRecorder()
@@ -330,20 +310,18 @@ def test_image_without_instances_gives_finite_loss() -> None:
 def test_rotated_candidacy_reaches_assigner() -> None:
     """``gt_rboxes`` threads through the dual loss into both assigners' candidate filter.
 
-    A25 restricts the rotated ground truth to candidacy, so the only observable effect
-    is *which* anchors become positive. A thin diagonal box whose axis-aligned envelope
-    is large is where the two tests disagree most, and where a dropped argument shows.
+    A25 restricts the rotated ground truth to candidacy, so the only observable effect is *which* anchors become
+    positive. A thin diagonal box whose axis-aligned envelope is large is where the two tests disagree most, and where
+    a dropped argument shows.
 
-    The observable is the positive **set**, not its size. Until WP-169 this asserted the
-    rotated call produced strictly *fewer* positives, and it passed — but for the wrong
-    reason. The module here is freshly initialized, so every predicted box decodes with
-    near-zero IoU and the whole alignment metric ties at zero; the old ``topk`` then
-    ranked those ties globally instead of within each ground truth's candidates, and the
-    smaller rotated candidate set simply lost more slots to anchors outside it. With that
-    defect fixed a ground truth keeps ``min(k, c)`` of its own candidates either way, and
-    both sets saturate at ``k`` whenever both candidate counts clear it — so the count
-    stopped discriminating while the membership still does. A dropped ``gt_rboxes`` makes
-    the two calls identical, which this still catches.
+    The observable is the positive **set**, not its size. Until WP-169 this asserted the rotated call produced strictly
+    *fewer* positives, and it passed — but for the wrong reason. The module here is freshly initialized, so every
+    predicted box decodes with near-zero IoU and the whole alignment metric ties at zero; the old ``topk`` then ranked
+    those ties globally instead of within each ground truth's candidates, and the smaller rotated candidate set simply
+    lost more slots to anchors outside it. With that defect fixed a ground truth keeps ``min(k, c)`` of its own
+    candidates either way, and both sets saturate at ``k`` whenever both candidate counts clear it — so the count
+    stopped discriminating while the membership still does. A dropped ``gt_rboxes`` makes the two calls identical,
+    which this still catches.
     """
     module = _tiny_module()
     thin = Targets(
@@ -389,13 +367,11 @@ def _dense_inputs(module: DetectionLitModule, images: Tensor, target: Targets) -
 def test_oriented_terms_follow_assignment_not_positive_order() -> None:
     """Positive ``k``'s rotated box is scored against ``gt_index[k]``, not against instance ``k``.
 
-    The decisive pairing test, and the one no loss value can stand in for: pairing an
-    anchor with the wrong instance produces a perfectly finite, perfectly plausible
-    number. Each positive is given the prediction that *matches* the instance its
-    ``gt_index`` names, so the assignment pairing scores an exact zero and the naive
-    positional pairing — the same two terms, merely swapped — does not. Predictions
-    identical across anchors would make the two orders permutations of one sum and the
-    test vacuous.
+    The decisive pairing test, and the one no loss value can stand in for: pairing an anchor with the wrong instance
+    produces a perfectly finite, perfectly plausible number. Each positive is given the prediction that *matches* the
+    instance its ``gt_index`` names, so the assignment pairing scores an exact zero and the naive positional pairing —
+    the same two terms, merely swapped — does not. Predictions identical across anchors would make the two orders
+    permutations of one sum and the test vacuous.
     """
     strides = torch.full((4,), 8.0)
     first = [20.0, 20.0, 40.0, 10.0, 0.2]
@@ -430,15 +406,14 @@ def test_oriented_terms_follow_assignment_not_positive_order() -> None:
     assert float(naive.angle) > 0.0
 
 
-def _validated_module(batch: tuple[Tensor, list[Targets]]) -> tuple[DetectionLitModule, LogRecorder]:
-    """Run one validation batch plus the epoch end on an ``obb`` module.
+def _validated_module(batch: tuple[Tensor, list[Targets]], task: str = "obb") -> tuple[DetectionLitModule, LogRecorder]:
+    """Run one validation batch plus the epoch end on a ``task`` module, returning it and the epoch-end recorder.
 
     Examples:
         >>> callable(_validated_module)  # needs a live LogRecorder-backed module
         True
     """
-    module = _tiny_module().eval()
-    module.log = LogRecorder()  # type: ignore[method-assign]
+    module = _tiny_module(task=task).eval()
     module.validation_step(batch, 0)
     recorder = LogRecorder()
     module.log = recorder  # type: ignore[method-assign]
@@ -449,11 +424,10 @@ def _validated_module(batch: tuple[Tensor, list[Targets]]) -> tuple[DetectionLit
 def test_validation_logs_rotated_map_and_not_box_map() -> None:
     """An ``obb`` run reports the metric of the branch it exists for, and only that one.
 
-    ``val/mAP`` reads the A44 composition's pre-rotation rectangle: a run whose
-    orientations were random and one whose orientations were right log the identical
-    curve. Carrying it beside the rotated figure is not a free second opinion — its
-    accumulator walks every detection of every batch on the CPU to produce a number
-    that cannot answer the question the run is asking (WP-102).
+    ``val/mAP`` reads the A44 composition's pre-rotation rectangle: a run whose orientations were random and one whose
+    orientations were right log the identical curve. Carrying it beside the rotated figure is not a free second
+    opinion — its accumulator walks every detection of every batch on the CPU to produce a number that cannot answer
+    the question the run is asking (WP-102).
     """
     _, recorder = _validated_module(_oriented_batch())
 
@@ -465,13 +439,7 @@ def test_validation_logs_rotated_map_and_not_box_map() -> None:
 
 def test_detection_validation_logs_no_rotated_metric() -> None:
     """A detection module has no angle branch, so it must not report a rotated metric."""
-    module = _tiny_module(task="detect").eval()
-    module.log = LogRecorder()  # type: ignore[method-assign]
-    module.validation_step(_oriented_batch(), 0)
-    recorder = LogRecorder()
-    module.log = recorder  # type: ignore[method-assign]
-
-    module.on_validation_epoch_end()
+    _, recorder = _validated_module(_oriented_batch(), task="detect")
 
     assert "val/mAP" in recorder.values
     assert "val/rotated_mAP50" not in recorder.values
@@ -488,17 +456,15 @@ def test_epoch_metric_clears_buffers() -> None:
 def test_rotated_targets_survive_loader_transport_into_metric() -> None:
     """Rotated ground truth reaches ``evaluate_rotated_map`` through the loader's packed batch.
 
-    The whole target-side path in one assertion: pack for the worker boundary, unpack
-    on arrival, run the validation step that builds the metric's target dicts, then
-    score a prediction built from the *original* rotated boxes. Anything that dropped,
-    reordered or re-fitted a rotated box on the way makes this less than a perfect
-    match, while every intermediate shape would still look right.
+    The whole target-side path in one assertion: pack for the worker boundary, unpack on arrival, run the validation
+    step that builds the metric's target dicts, then score a prediction built from the *original* rotated boxes.
+    Anything that dropped, reordered or re-fitted a rotated box on the way makes this less than a perfect match, while
+    every intermediate shape would still look right.
     """
     targets = [_oriented_targets(2), _oriented_targets(1)]
     images = torch.rand(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
     restored = unpack_targets(collate_detection(list(zip(images, targets, strict=True)))[1])
     module = _tiny_module().eval()
-    module.log = LogRecorder()  # type: ignore[method-assign]
 
     module.validation_step((images, restored), 0)
 
@@ -514,10 +480,9 @@ def test_rotated_targets_survive_loader_transport_into_metric() -> None:
 def test_difficult_flags_reach_metric_through_loader() -> None:
     """An R18 difficult flag survives packing, unpacking and the letterbox (A48).
 
-    Filtering difficult instances at load — or dropping the flag anywhere between the
-    reader and the metric — turns every ignorable detection into a false positive and
-    silently depresses the score. The flag has no other consumer, so nothing else in
-    the suite would notice it going missing.
+    Filtering difficult instances at load — or dropping the flag anywhere between the reader and the metric — turns
+    every ignorable detection into a false positive and silently depresses the score. The flag has no other consumer,
+    so nothing else in the suite would notice it going missing.
     """
     flagged = _oriented_targets(3, difficult=torch.tensor([True, False, True]))
     images = torch.rand(1, 3, _IMG_SIZE, _IMG_SIZE)
@@ -526,7 +491,6 @@ def test_difficult_flags_reach_metric_through_loader() -> None:
 
     assert torch.equal(restored[0].difficult, flagged.difficult)
     module = _tiny_module().eval()
-    module.log = LogRecorder()  # type: ignore[method-assign]
     module.validation_step((images, restored), 0)
     assert torch.equal(module._val_rotated._images()[1][0]["difficult"], flagged.difficult)
 
@@ -534,17 +498,15 @@ def test_difficult_flags_reach_metric_through_loader() -> None:
 def test_oriented_train_pipeline_suppresses_copy_paste() -> None:
     """An oriented loader never attempts copy-paste, which cannot act on rotated targets.
 
-    Found by the acceptance run rather than by any component test, and it could only
-    be found there: ``CopyPaste`` refuses rotated boxes correctly (WP-056 — it moves
-    rasterised polygon masks and the oriented path deliberately carries no polygons),
-    the datamodule composes it correctly for detection, and neither knew about the
-    other. At the ``n`` policy's ``copy_paste = 0.1`` the first oriented epoch dies
-    partway through, which is a crash rather than a silent defect — but a crash the
-    wiring is supposed to prevent, since the composition is what chooses the
+    Found by the acceptance run rather than by any component test, and it could only be found there: ``CopyPaste``
+    refuses rotated boxes correctly (WP-056 — it moves rasterised polygon masks and the oriented path deliberately
+    carries no polygons), the datamodule composes it correctly for detection, and neither knew about the other. At the
+    ``n`` policy's ``copy_paste = 0.1`` the first oriented epoch dies partway through, which is a crash rather than a
+    silent defect — but a crash the wiring is supposed to prevent, since the composition is what chooses the
     transforms.
 
-    The draw is still consumed (``_draw() >= 0.0`` is always true), so suppressing the
-    transform does not shift the augmentation RNG stream that WP-079 pinned.
+    The draw is still consumed (``_draw() >= 0.0`` is always true), so suppressing the transform does not shift the
+    augmentation RNG stream that WP-079 pinned.
     """
     policy = build_scale_policy("n")
 
@@ -559,10 +521,9 @@ def test_oriented_train_pipeline_suppresses_copy_paste() -> None:
 class _FakeBase:
     """Minimal stand-in for the base dataset: a length and the mirror pairing it declares.
 
-    Both readers publish ``keypoint_flip_pairs`` because A64 makes the left/right swap the
-    dataset's statement to make, and the pipeline reads it when it builds the flip. An
-    oriented base declares ``None``, which is what a rotated-box dataset has to say: it
-    carries no landmark table for a swap to act on.
+    Both readers publish ``keypoint_flip_pairs`` because A64 makes the left/right swap the dataset's statement to make,
+    and the pipeline reads it when it builds the flip. An oriented base declares ``None``, which is what a rotated-box
+    dataset has to say: it carries no landmark table for a swap to act on.
     """
 
     keypoint_flip_pairs: list[tuple[int, int]] | None = None
@@ -575,9 +536,9 @@ class _FakeBase:
 def test_letterbox_inverse_returns_rotated_boxes_unturned() -> None:
     """Un-letterboxing an oriented detection scales it and leaves ``theta`` alone.
 
-    A letterbox is an isotropic scale plus a translation, so the inverse is exact
-    rather than a re-fit. Asserting ``theta`` explicitly is the point: an inverse that
-    warped the angle would still return plausible boxes at plausible sizes.
+    A letterbox is an isotropic scale plus a translation, so the inverse is exact rather than a re-fit. Asserting
+    ``theta`` explicitly is the point: an inverse that warped the angle would still return plausible boxes at
+    plausible sizes.
     """
     detections = torch.tensor([[[40.0, 60.0, 32.0, 8.0, 0.7, 0.9, 3.0]]])
 

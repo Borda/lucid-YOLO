@@ -1,15 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-011 four-image mosaic assembly (blueprint section 5.9).
 
-Covers the canvas geometry (``2S x 2S``), that every output box lies within the
-canvas, that instances are lost only to clipping (kept count bounded by the input
-count when nothing is clipped), seeded quadrant placement of a distinctive pixel,
-box/polygon consistency, grey fill in uncovered regions, the wrong-count and
-rotated-box guards, and byte-for-byte determinism under a seeded generator.
+Covers the canvas geometry (``2S x 2S``), that every output box lies within the canvas, that instances are lost only to
+clipping (kept count bounded by the input count when nothing is clipped), seeded quadrant placement of a distinctive
+pixel, box/polygon consistency, grey fill in uncovered regions, the wrong-count and rotated-box guards, and
+byte-for-byte determinism under a seeded generator.
 
-Keypoints (WP-132) get their own class: points shift by their image's placement offset,
-drop with their instance, and — A70 — keep coordinate and visibility when the quadrant
-crop carries them off the canvas, rather than being clamped to the edge or zeroed.
+Keypoints (WP-132) get their own class: points shift by their image's placement offset, drop with their instance, and —
+A70 — keep coordinate and visibility when the quadrant crop carries them off the canvas, rather than being clamped to
+the edge or zeroed.
 """
 
 from __future__ import annotations
@@ -82,13 +81,13 @@ def _items(targets_factory: Callable[[], Targets]) -> list[tuple[torch.Tensor, T
     return [(_image(), targets_factory()) for _ in range(_MOSAIC_COUNT)]
 
 
-#: A box centred in the tile. Every quadrant placement keeps it above ``min_box_size`` and
-#: ``min_visibility`` for any sampled centre, so all four instances always survive and the
-#: concat order stays image 0, 1, 2, 3 — which is what lets a test index a known row.
+#: A box centred in the tile. Every quadrant placement keeps it above ``min_box_size`` and ``min_visibility`` for any
+#: sampled centre, so all four instances always survive and the concat order stays image 0, 1, 2, 3 — which is what
+#: lets a test index a known row.
 _CENTRED_BOX = torch.tensor([[12.0, 12.0, 20.0, 20.0]])
-#: A point whose tile-local coordinate is far enough left and above the tile that image 0's
-#: placement (offset ``cx - 32``, ``cy - 32``, with the centre sampled from ``[16, 48]``)
-#: puts it off the canvas for every possible centre.
+#: A point whose tile-local coordinate is far enough left and above the tile that image 0's placement (offset
+#: ``cx - 32``, ``cy - 32``, with the centre sampled from ``[16, 48]``) puts it off the canvas for every possible
+#: centre.
 _OFF_TILE_POINT = -40.0
 
 
@@ -113,9 +112,9 @@ class TestKeypoints:
     def test_points_shift_by_placement_offset(self) -> None:
         """Each image's points move onto the canvas by exactly that image's placement offset.
 
-        Placement is a pure translation, so a point must land at ``local + offset`` — the
-        same offset its box takes. Anything else puts the landmark somewhere other than the
-        pixels it describes, which the merged canvas gives no way to detect later.
+        Placement is a pure translation, so a point must land at ``local + offset`` — the same offset its box takes.
+        Anything else puts the landmark somewhere other than the pixels it describes, which the merged canvas gives
+        no way to detect later.
         """
         mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
         items = _items(_posed_targets)
@@ -130,8 +129,8 @@ class TestKeypoints:
     def test_keypoint_free_targets_keep_canonical_empty(self) -> None:
         """A detection-only mosaic returns the canonical empty keypoint pair, untouched.
 
-        Mosaic is on the train path of every task, and the frozen goldens run through it
-        with no points at all. The carry-through has to be an exact no-op for them.
+        Mosaic is on the train path of every task, and the frozen goldens run through it with no points at all. The
+        carry-through has to be an exact no-op for them.
         """
         mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
 
@@ -140,12 +139,11 @@ class TestKeypoints:
         assert out.keypoints.shape == (0, 0, 2)
         assert out.keypoint_vis.shape == (0, 0)
 
-    def test_dropped_instance_takes_points_with_it(self) -> None:
+    def test_dropped_instance_takes_points_along(self) -> None:
         """An instance clipped away by its quadrant removes its keypoint rows too.
 
-        Points share the box instance axis. A drop that removed the box alone would shift
-        every later instance onto its neighbour's landmarks — a silent misalignment, since
-        the counts would still agree.
+        Points share the box instance axis. A drop that removed the box alone would shift every later instance onto
+        its neighbour's landmarks — a silent misalignment, since the counts would still agree.
         """
         mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
         vanishing = Targets(
@@ -163,12 +161,10 @@ class TestKeypoints:
     def test_point_pushed_off_canvas_neither_clamped_nor_zeroed(self) -> None:
         """A70: a point placed outside the canvas on a kept instance keeps coordinate and visibility.
 
-        Image 0 is anchored with its bottom-right corner at the sampled centre, so its
-        left and top edges are what the canvas crops. The second point sits far enough
-        outside the tile that this placement always carries it past ``x = 0``, while its box
-        stays comfortably inside. Clamping the point to the edge would invent a target and
-        zeroing its visibility would overload A66's "never annotated" flag, so it must
-        survive exactly as given.
+        Image 0 is anchored with its bottom-right corner at the sampled centre, so its left and top edges are what the
+        canvas crops. The second point sits far enough outside the tile that this placement always carries it past
+        ``x = 0``, while its box stays comfortably inside. Clamping the point to the edge would invent a target and
+        zeroing its visibility would overload A66's "never annotated" flag, so it must survive exactly as given.
         """
         mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
 
@@ -186,7 +182,11 @@ class TestCanvasGeometry:
     """The stitched canvas is ``2S x 2S`` and every output box lies within it."""
 
     def test_canvas_twice_target_size(self) -> None:
-        """The output image spans ``2S x 2S`` regardless of centre sampling."""
+        """The output image spans ``2S x 2S`` regardless of centre sampling.
+
+        Four one-box tiles are assembled under a seeded generator, so the sampled centre varies only through the
+        generator, never through the canvas size.
+        """
         mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
 
         out_image, _ = mosaic(_items(_one_box_targets))
@@ -194,7 +194,11 @@ class TestCanvasGeometry:
         assert out_image.shape == (3, 2 * _TARGET, 2 * _TARGET)
 
     def test_every_box_within_canvas_bounds(self) -> None:
-        """Every merged box is clamped to ``[0, 2S]`` on both axes."""
+        """Every merged box is clamped to ``[0, 2S]`` on both axes.
+
+        A box can only be shifted by a quadrant offset, so a coordinate outside the canvas would mean the clip against
+        the ``2S x 2S`` window was skipped.
+        """
         mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
 
         _, out = mosaic(_items(_one_box_targets))
@@ -208,7 +212,11 @@ class TestInstanceCounts:
     """Kept instances are bounded by the inputs, and drops come only from clipping."""
 
     def test_unclipped_inputs_keep_every_instance(self) -> None:
-        """Four one-box tiles placed without clipping yield exactly four boxes."""
+        """Four one-box tiles placed without clipping yield exactly four boxes.
+
+        The centred 8x8 box never reaches a tile edge, so none of the four instances may be dropped and all labels
+        carry through.
+        """
         mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
 
         _, out = mosaic(_items(_one_box_targets))
@@ -217,7 +225,11 @@ class TestInstanceCounts:
         assert out.labels.tolist() == [0, 0, 0, 0]
 
     def test_clipped_instance_dropped(self) -> None:
-        """A box straddling a tile edge is dropped once the off-canvas part is cut away."""
+        """A box straddling a tile edge is dropped once the off-canvas part is cut away.
+
+        Each tile carries a box that extends past its right edge; with ``min_visibility=0.5`` the clipped remainders
+        may be dropped, so the kept count is bounded by the input count.
+        """
         edge = Targets(boxes=torch.tensor([[28.0, 8.0, 60.0, 16.0]]), labels=torch.tensor([0]))
         items = [(_image(), edge.clone()) for _ in range(_MOSAIC_COUNT)]
         mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator(), min_visibility=0.5)
@@ -230,14 +242,14 @@ class TestInstanceCounts:
 def _sliver_items(route: str) -> list[tuple[torch.Tensor, Targets]]:
     """Return four tiles each carrying one box that clips to a sliver, on ``route``'s axis.
 
-    Paired with a centre of ``(_TILE, _TILE)``, image 0 places at offset ``(0, 0)``, so its
-    box spans ``[60, 10, 160, 40]`` against a 64-wide canvas and keeps four columns of
-    thirty rows — 4% of its own area. The other three place further right or lower and clip
-    away entirely, which is why the control below expects one survivor rather than four.
+    Paired with a centre of ``(_TILE, _TILE)``, image 0 places at offset ``(0, 0)``, so its box spans
+    ``[60, 10, 160, 40]`` against a 64-wide canvas and keeps four columns of thirty rows — 4% of its own area. The
+    other three place further right or lower and clip away entirely, which is why the control below expects one
+    survivor rather than four.
 
     Args:
-        route: ``"rotated"``, ``"polygons"`` or ``"boxes"``, naming which of the three
-            keep-mask call sites the returned targets route through.
+        route: ``"rotated"``, ``"polygons"`` or ``"boxes"``, naming which of the three keep-mask call sites the
+            returned targets route through.
 
     Returns:
         Four ``(image, targets)`` pairs.
@@ -264,8 +276,8 @@ def _sliver_items(route: str) -> list[tuple[torch.Tensor, Targets]]:
     return [(_image(), _targets()) for _ in range(_MOSAIC_COUNT)]
 
 
-#: Centre that anchors image 0 at offset ``(0, 0)``, so its targets are shifted by nothing
-#: and the clip against the canvas is the only thing acting on them.
+#: Centre that anchors image 0 at offset ``(0, 0)``, so its targets are shifted by nothing and the clip against the
+#: canvas is the only thing acting on them.
 _ANCHORED_CENTRE = MosaicParams(center_x=_TILE, center_y=_TILE)
 
 
@@ -273,18 +285,17 @@ _ANCHORED_CENTRE = MosaicParams(center_x=_TILE, center_y=_TILE)
 class TestKeepThresholdsReachUpstream:
     """Both thresholds are passed to upstream's keep mask at every one of the three call sites.
 
-    Upstream's ``instance_keep_mask`` defaults ``min_size`` and ``min_visibility`` to
-    ``0.0``, which drops nothing, against this project's ``2.0`` and ``0.1``. Omitting
-    either argument at any call site keeps every instance with no shape change and no
-    exception, so the failure is silent — these cases are what makes it loud. One case per
-    site per threshold, plus the control that the drop is the threshold's doing.
+    Upstream's ``instance_keep_mask`` defaults ``min_size`` and ``min_visibility`` to ``0.0``, which drops nothing,
+    against this project's ``2.0`` and ``0.1``. Omitting either argument at any call site keeps every instance with no
+    shape change and no exception, so the failure is silent — these cases are what makes it loud. One case per site
+    per threshold, plus the control that the drop is the threshold's doing.
     """
 
     def test_size_threshold_drops_sliver(self, route: str) -> None:
         """A four-column clipped box falls below ``min_box_size`` and is dropped.
 
-        ``min_visibility`` is pinned at ``0.0`` so nothing but the size rule can account
-        for the drop: at upstream's default the instance would survive, since 4 >= 0.0.
+        ``min_visibility`` is pinned at ``0.0`` so nothing but the size rule can account for the drop: at upstream's
+        default the instance would survive, since 4 >= 0.0.
         """
         mosaic = MosaicAssembly(target_size=_TARGET, min_box_size=8.0, min_visibility=0.0)
 
@@ -295,9 +306,8 @@ class TestKeepThresholdsReachUpstream:
     def test_visibility_threshold_drops_sliver(self, route: str) -> None:
         """A box retaining 4% of its area falls below ``min_visibility`` and is dropped.
 
-        ``min_box_size`` is pinned at ``0.0`` so nothing but the visibility rule can
-        account for the drop: at upstream's default the instance would survive, since
-        0.04 >= 0.0.
+        ``min_box_size`` is pinned at ``0.0`` so nothing but the visibility rule can account for the drop: at
+        upstream's default the instance would survive, since 0.04 >= 0.0.
         """
         mosaic = MosaicAssembly(target_size=_TARGET, min_box_size=0.0, min_visibility=0.5)
 
@@ -308,11 +318,10 @@ class TestKeepThresholdsReachUpstream:
     def test_upstream_defaults_would_keep_every_instance(self, route: str) -> None:
         """With both thresholds at upstream's defaults all four instances survive.
 
-        The control for the two cases above, and the sharpest statement of what omitting an
-        argument would cost: at ``0.0``/``0.0`` not only image 0's sliver survives but the
-        three instances the placement clips away to nothing do too — a zero-width box is
-        still ``>= 0.0`` on both rules — so the pipeline would carry three empty instances
-        with every shape lining up and nothing raising.
+        The control for the two cases above, and the sharpest statement of what omitting an argument would cost: at
+        ``0.0``/``0.0`` not only image 0's sliver survives but the three instances the placement clips away to
+        nothing do too — a zero-width box is still ``>= 0.0`` on both rules — so the pipeline would carry three empty
+        instances with every shape lining up and nothing raising.
         """
         mosaic = MosaicAssembly(target_size=_TARGET, min_box_size=0.0, min_visibility=0.0)
 
@@ -325,7 +334,11 @@ class TestQuadrantPlacement:
     """With a fixed centre, a distinctive pixel from each input lands in its quadrant."""
 
     def test_marker_pixels_land_in_expected_quadrants(self) -> None:
-        """Each tile's bright marker pixel appears inside that tile's canvas quadrant."""
+        """Each tile's bright marker pixel appears inside that tile's canvas quadrant.
+
+        Four grey tiles each carry one white pixel at their centre; after assembly the maximum of every quadrant
+        around the sampled centre must be that white pixel.
+        """
         mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
         images = [torch.full((1, _TILE, _TILE), _GREY) for _ in range(_MOSAIC_COUNT)]
         for image in images:
@@ -349,7 +362,11 @@ class TestBoxPolygonConsistency:
     """Recomputed boxes track the clipped polygons exactly (box/mask agreement)."""
 
     def test_merged_boxes_match_polygon_extents(self) -> None:
-        """Every merged box equals the extent of its merged polygon ring."""
+        """Every merged box equals the extent of its merged polygon ring.
+
+        Boxes are recomputed from the clipped rings, so after assembly the two modalities must agree exactly (bit
+        for bit) and keep one entry per instance.
+        """
         mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
 
         _, out = mosaic(_items(_polygon_targets))
@@ -363,7 +380,11 @@ class TestGreyFill:
     """Regions no tile covers keep the grey pad value."""
 
     def test_uncovered_canvas_grey(self) -> None:
-        """Small tiles leave grey gaps between the quadrants."""
+        """Small tiles leave grey gaps between the quadrants.
+
+        Black 8x8 tiles cover only a corner of each 32x32 quadrant, so the canvas must contain both the black tile
+        value and the grey fill, and nothing else.
+        """
         small = 8
         mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
         images = [torch.zeros(3, small, small) for _ in range(_MOSAIC_COUNT)]
@@ -379,14 +400,21 @@ class TestGuards:
     """Wrong input counts and rotated boxes are rejected."""
 
     def test_wrong_item_count_raises(self) -> None:
-        """Fewer than four items raises ValueError naming the required count."""
+        """Fewer than four items raises ValueError naming the required count.
+
+        Mosaic consumes exactly four images; three is the near-miss a caller could plausibly pass.
+        """
         mosaic = MosaicAssembly(target_size=_TARGET)
 
         with pytest.raises(ValueError, match="exactly 4"):
             mosaic([(_image(), Targets.empty()) for _ in range(3)])
 
     def test_unpaired_rboxes_raise_value_error(self) -> None:
-        """Rotated boxes that do not share an input's instance axis are rejected (WP-056)."""
+        """Rotated boxes that do not share an input's instance axis are rejected (WP-056).
+
+        The last input carries one rotated box against zero axis-aligned boxes, so the two cannot be merged on one
+        instance axis.
+        """
         rboxes = torch.tensor([[10.0, 20.0, 8.0, 4.0, 0.3]])
         with_rbox = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64), rboxes=rboxes)
         items = [(_image(), Targets.empty()) for _ in range(3)] + [(_image(), with_rbox)]

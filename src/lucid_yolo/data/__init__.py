@@ -1,15 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """data subpackage — see blueprint section 7 layout.
 
-This list is an index, not the public API declaration: every module below states its own
-``__all__``, and that is where a symbol is published. Re-exported here are the names some
-consumer actually reaches for through the package — the ``Targets`` container, the
-composition order and the seven transforms, dataset IO, DOTA parsing and tiling, and the
-rotated-box conversions the assigner and the OBB head read — which since WP-158 is what the
-list is narrowed to. Membership tracks use rather than ownership, so it is not a boundary:
-a symbol absent here is neither private nor upstream's, it is imported from the module that
-owns it, the way ``rasterize_polygons``, ``rotated_iou`` and ``verify_coco_root`` already
-are everywhere they are used.
+This list is an index, not the public API declaration: every module below states its own ``__all__``, and that is
+where a symbol is published. Re-exported here are the names some consumer actually reaches for through the package —
+the ``Targets`` container, the composition order and the seven transforms, dataset IO, DOTA parsing and tiling,
+and the rotated-box conversions the assigner and the OBB head read — which since WP-158 is what the list is
+narrowed to. Membership tracks use rather than ownership, so it is not a boundary: a symbol absent here is neither
+private nor upstream's, it is imported from the module that owns it, the way ``rasterize_polygons``, ``rotated_iou``
+and ``verify_coco_root`` already are everywhere they are used.
 """
 
 from __future__ import annotations

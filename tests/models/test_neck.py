@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-021 detection neck (test_neck.py).
 
-Covers :class:`lucid_yolo.models.DetectionNeck`: that the three outputs preserve the
-stride-8/16/32 resolution of the backbone taps with width-scaled channel counts for
-the ``n``/``s`` multipliers, that the attention tail carries exactly one PSABlock
-inner unit regardless of the depth multiplier, that a backbone+neck pass on a small
-input runs clean in eval mode, and that the fuse convolutions account for the
-concatenated channel counts.
+Covers :class:`lucid_yolo.models.DetectionNeck`: that the three outputs preserve the stride-8/16/32 resolution of the
+backbone taps with width-scaled channel counts for the ``n``/``s`` multipliers, that the attention tail carries exactly
+one PSABlock inner unit regardless of the depth multiplier, that a backbone+neck pass on a small input runs clean in
+eval mode, and that the fuse convolutions account for the concatenated channel counts.
 """
 
 from __future__ import annotations
@@ -55,13 +53,7 @@ def test_output_shapes(
     assert n5.shape == (1, ch5, 20, 20), "N5 output must stay stride 32 with width-scaled channels"
 
 
-@pytest.mark.parametrize(
-    "depth",
-    [
-        pytest.param(0.50, id="d0.50"),
-        pytest.param(1.00, id="d1.00"),
-    ],
-)
+@pytest.mark.parametrize("depth", [0.50, 1.00])
 def test_attention_tail_fixed_single_unit(depth: float) -> None:
     """The final stage carries exactly one PSABlock inner unit, independent of depth."""
     neck = DetectionNeck(in_channels=(256, 256, 512), depth=depth, width=0.5, max_channels=1024)

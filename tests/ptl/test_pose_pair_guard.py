@@ -81,9 +81,8 @@ def test_pose_step_keeps_unpaired_scoring_when_density_loss_is_hooked(
 ) -> None:
     """A hook the user put on the pose module's `rle_loss` keeps its two original calls.
 
-    The user observes each density call separately, so batching the two branches into
-    one call would change what the hook sees. The step must fall back to the per-branch
-    scoring path instead of the shared batch.
+    The user observes each density call separately, so batching the two branches into one call would change what the
+    hook sees. The step must fall back to the per-branch scoring path instead of the shared batch.
     """
     seed_everything(5)
     model = _pose()

@@ -1,39 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
 """Dual-path evaluation of a training checkpoint on COCO val2017 (WP-045).
 
-Drives :class:`lucid_yolo.eval.coco_eval.DualPathEvaluator` end to end: loads a
-Lightning checkpoint (optionally overlaying the EMA shadow the
-:class:`~lucid_yolo.ptl.callbacks.EMACallback` stored inside it), letterboxes
-val2017, runs the model once per batch, decodes both the suppression-free E2E
-path and the NMS path, and prints the twelve COCO summary statistics for each.
+Drives :class:`lucid_yolo.eval.coco_eval.DualPathEvaluator` end to end: loads a Lightning checkpoint (optionally
+overlaying the EMA shadow the :class:`~lucid_yolo.ptl.callbacks.EMACallback` stored inside it), letterboxes val2017,
+runs the model once per batch, decodes both the suppression-free E2E path and the NMS path, and prints the twelve
+COCO summary statistics for each.
 
-The ground truth is read straight from ``instances_val2017.json`` in original
-image coordinates, including ``iscrowd`` flags and annotation areas so the
-crowd-ignore rule and the small/medium/large breakdown follow the COCO protocol.
+The ground truth is read straight from ``instances_val2017.json`` in original image coordinates, including ``iscrowd``
+flags and annotation areas so the crowd-ignore rule and the small/medium/large breakdown follow the COCO protocol.
 
-A **segmentation** checkpoint additionally reports the twelve ``segm_``
-statistics per path, against ground-truth masks decoded from the same annotation
-file. That is driven by the checkpoint's own ``task``, not by a flag the caller
-has to remember: a detection checkpoint takes exactly the path it always took and
-pays nothing for the mask machinery, and a segmentation checkpoint cannot be
-evaluated on boxes alone by accident. ``--no-masks`` forces the detection-only
-reading when only the box numbers are wanted.
+A **segmentation** checkpoint additionally reports the twelve ``segm_`` statistics per path, against ground-truth
+masks decoded from the same annotation file. That is driven by the checkpoint's own ``task``, not by a flag the
+caller has to remember: a detection checkpoint takes exactly the path it always took and pays nothing for the mask
+machinery, and a segmentation checkpoint cannot be evaluated on boxes alone by accident. ``--no-masks`` forces the
+detection-only reading when only the box numbers are wanted.
 
-Two properties make the segmentation path affordable at val2017 scale, both in
-the library rather than here: the ground truth is a
-:class:`~lucid_yolo.eval.annotations.LazyTargets` that decodes an image's masks
-when that image is reached, and the evaluator folds each batch into the metric
-immediately (masks are RLE-encoded into the metric state on update). Neither the
-targets nor the predictions are ever dense for the whole split at once.
+Two properties make the segmentation path affordable at val2017 scale, both in the library rather than here: the
+ground truth is a :class:`~lucid_yolo.eval.annotations.LazyTargets` that decodes an image's masks when that image
+is reached, and the evaluator folds each batch into the metric immediately (masks are RLE-encoded into the metric
+state on update). Neither the targets nor the predictions are ever dense for the whole split at once.
 
-The scoring stages themselves live in :mod:`lucid_yolo.eval.coco_score`, shared with the
-keypoint runner and with :func:`~lucid_yolo.eval.coco_score.score_coco`, which returns the
-same report to a Python caller instead of printing it; this module is the command's
-wrapper around them: the banner, the progress bar, the per-path lines and the JSON file.
+The scoring stages themselves live in :mod:`lucid_yolo.eval.coco_score`, shared with the keypoint runner and with
+:func:`~lucid_yolo.eval.coco_score.score_coco`, which returns the same report to a Python caller instead of printing
+it; this module is the command's wrapper around them: the banner, the progress bar, the per-path lines and the
+JSON file.
 
-This is the path :func:`lucid_yolo.eval.cli.main` takes for a ``detect`` or ``segment``
-checkpoint (WP-096); the oriented one is :mod:`lucid_yolo.eval.rotated_eval`. Which of
-the two runs is decided by the checkpoint, in the same spirit as the mask decision above.
+This is the path :func:`lucid_yolo.eval.cli.main` takes for a ``detect`` or ``segment`` checkpoint (WP-096); the
+oriented one is :mod:`lucid_yolo.eval.rotated_eval`. Which of the two runs is decided by the checkpoint, in the
+same spirit as the mask decision above.
 
 Usage::
 
@@ -41,8 +35,8 @@ Usage::
         [--no-ema] [--no-masks] [--batch-size 32] [--img-size 640] \
         [--device mps] [--output report.json]
 
-Provenance: R1 Table 7, R1 sec. 4.4 (dual-path protocol), R1 Table S9
-(segmentation protocol). Assumptions: A9, A10, A37.
+Provenance: R1 Table 7, R1 sec. 4.4 (dual-path protocol), R1 Table S9 (segmentation protocol). Assumptions: A9, A10,
+A37.
 """
 
 from __future__ import annotations
@@ -111,8 +105,8 @@ def run(
         ```
     """
     ann_file, images_dir = _coco_paths("detect", data_root, ann_file, images_dir)
-    # Whether the ground truth needs masks at all is the checkpoint's property, not the
-    # caller's: --masks false can decline them, but nothing opts a detector *into* them.
+    # Whether the ground truth needs masks at all is the checkpoint's property, not the caller's: --masks false can
+    # decline them, but nothing opts a detector *into* them.
     segmentation = module.task == "segment" and masks
     info["masks"] = segmentation
     info["eval_backend"] = eval_backend
@@ -133,9 +127,8 @@ def run(
         f"eval: {len(coco_run.images)} images, device={coco_run.device.type}, ema={info.get('ema')}, "
         f"img_size={img_size}, masks={segmentation}"
     )
-    # The bar wraps the batch generator rather than living inside DualPathEvaluator: the
-    # evaluator is library code that tests drive in-process, and a progress bar is a
-    # property of being run from a command line, which is here.
+    # The bar wraps the batch generator rather than living inside DualPathEvaluator: the evaluator is library code
+    # that tests drive in-process, and a progress bar is a property of being run from a command line, which is here.
     batches = tqdm(coco_run.batches(), total=coco_run.num_batches, desc="eval", unit="batch")
     score = _score_run(coco_run, batches)
     _print_timing(score)

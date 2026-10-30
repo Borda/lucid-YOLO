@@ -1,55 +1,47 @@
 # SPDX-License-Identifier: Apache-2.0
 """Build the tiled COCO layout the OBB-smoke tier trains on, from a DOTA-v1.0 root (WP-094).
 
-WP-057 built the tiling geometry and WP-056 the label parsing, and both deliberately
-write nothing: "the tiles themselves are a **build artifact** (AGENTS.md sec. 3), so
-nothing here writes to disk on its own." This script is the caller that decides where
-they land. Until it existed, :func:`~lucid_yolo.data.tiling.tile_image_targets` had no
-production consumer at all and ``obb_nano_smoke.yaml``'s ``data_root`` was a placeholder
-pointing at a directory nothing could produce.
+WP-057 built the tiling geometry and WP-056 the label parsing, and both deliberately write nothing: "the tiles
+themselves are a **build artifact** (AGENTS.md sec. 3), so nothing here writes to disk on its own." This script is the
+caller that decides where they land. Until it existed, :func:`~lucid_yolo.data.tiling.tile_image_targets` had no
+production consumer at all and ``obb_nano_smoke.yaml``'s ``data_root`` was a placeholder pointing at a directory
+nothing could produce.
 
 What it emits:
-    A COCO-layout root — ``<split>/`` image directories beside
-    ``annotations/instances_<split>.json`` — whose ``segmentation`` is the four-corner
-    quadrilateral of the oriented annotation, which is exactly what
-    :class:`~lucid_yolo.data.coco.CocoDetectionDataset` reads under ``oriented=True``
-    (its "COCO file written for an oriented task" path). Nothing about the layout is
-    DOTA-specific, so the same recipe trains on any oriented dataset converted into it.
+    A COCO-layout root — ``<split>/`` image directories beside ``annotations/instances_<split>.json`` — whose
+    ``segmentation`` is the four-corner quadrilateral of the oriented annotation, which is exactly what
+    :class:`~lucid_yolo.data.coco.CocoDetectionDataset` reads under ``oriented=True`` (its "COCO file written for an
+    oriented task" path). Nothing about the layout is DOTA-specific, so the same recipe trains on any oriented dataset
+    converted into it.
 
 Category ids (R18):
-    ``DOTA_CLASSES`` index plus one. The reader assigns dense labels by *sorted category
-    id*, so this offset preserves R18's published class order through the label space:
-    category ``i + 1`` becomes label ``i``. The offset itself is COCO convention (no
-    category 0); nothing downstream depends on it beyond the ordering it protects.
+    ``DOTA_CLASSES`` index plus one. The reader assigns dense labels by *sorted category id*, so this offset preserves
+    R18's published class order through the label space: category ``i + 1`` becomes label ``i``. The offset itself is
+    COCO convention (no category 0); nothing downstream depends on it beyond the ordering it protects.
 
 The ``difficult`` flag (A53):
-    Tiling **creates** difficult instances — R18 flags any part below 0.7 of its original
-    area, so a label file with no difficult objects still produces tiles that have them —
-    and COCO has no field for that. Each annotation therefore carries a non-schema
-    ``difficult`` key, forwarded by the reader onto the A51 channel of
-    :class:`~lucid_yolo.data.targets.Targets` and acted on at the metric under A48.
-    ``visible_fraction`` (R18's ``U_i``) rides along on the same annotation: the fitted
-    box's area is not the clipped area, so the quantity the rule turns on is otherwise
-    unrecoverable, and a sweep over the threshold should not have to re-tile.
+    Tiling **creates** difficult instances — R18 flags any part below 0.7 of its original area, so a label file with no
+    difficult objects still produces tiles that have them — and COCO has no field for that. Each annotation therefore
+    carries a non-schema ``difficult`` key, forwarded by the reader onto the A51 channel of
+    :class:`~lucid_yolo.data.targets.Targets` and acted on at the metric under A48. ``visible_fraction`` (R18's
+    ``U_i``) rides along on the same annotation: the fitted box's area is not the clipped area, so the quantity the
+    rule turns on is otherwise unrecoverable, and a sweep over the threshold should not have to re-tile.
 
 Window provenance (A53):
-    Every image record carries ``source_image`` and ``window``. A per-tile number is not
-    comparable to anything published — in an NMS-free path two tiles detecting one object
-    have nothing to suppress the duplicate — so whole-image evaluation needs a merge step
-    (WP-064). That step needs to know which source image a tile came from and where it
-    sat; recovering it by parsing file names would make the naming a load-bearing
-    interface. The name still encodes it, for a human reading a directory listing.
+    Every image record carries ``source_image`` and ``window``. A per-tile number is not comparable to anything
+    published — in an NMS-free path two tiles detecting one object have nothing to suppress the duplicate — so
+    whole-image evaluation needs a merge step (WP-064). That step needs to know which source image a tile came from and
+    where it sat; recovering it by parsing file names would make the naming a load-bearing interface. The name still
+    encodes it, for a human reading a directory listing.
 
 Empty tiles (A52):
-    Kept by default. A 1024 px window over a DOTA image frequently contains no annotated
-    object, and neither R1 nor R18 says whether such crops are trained on. Dropping them
-    would remove exactly the background the one-to-one branch must learn not to fire on;
-    keeping them costs disk. ``--drop-empty-tiles`` selects the other reading, and the
-    report prints how many tiles the choice covers either way.
+    Kept by default. A 1024 px window over a DOTA image frequently contains no annotated object, and neither R1 nor
+    R18 says whether such crops are trained on. Dropping them would remove exactly the background the one-to-one
+    branch must learn not to fire on; keeping them costs disk. ``--drop-empty-tiles`` selects the other reading, and
+    the report prints how many tiles the choice covers either way.
 
-This module never downloads anything (AGENTS.md sec. 3). It ships in the wheel as
-``lucid-data build-tiles`` (WP-096), because a remote tier run installs a wheel and the
-build is a step of that run, not of developing this repository.
+This module never downloads anything (AGENTS.md sec. 3). It ships in the wheel as ``lucid-data build-tiles`` (WP-096),
+because a remote tier run installs a wheel and the build is a step of that run, not of developing this repository.
 
 Examples:
     Build both annotated splits at R18's own stride (1024 patch, 512 overlap)::
@@ -86,15 +78,13 @@ IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 TILE_SEPARATOR = "__"
 #: Corner coordinates per quadrilateral, flattened into a COCO ``segmentation`` ring.
 _RING_VALUES = 8
-#: Id written by a worker, which cannot know how many tiles preceded it. The parent
-#: overwrites every one in source order, so this value never reaches the JSON — it is
-#: out of COCO's 1-based range so that a missed overwrite fails a reader rather than
-#: silently colliding with a real record.
+#: Id written by a worker, which cannot know how many tiles preceded it. The parent overwrites every one in source
+#: order, so this value never reaches the JSON — it is out of COCO's 1-based range so that a missed overwrite fails a
+#: reader rather than silently colliding with a real record.
 _UNNUMBERED = 0
-#: Tile image formats that may be written. PNG is the default because it is lossless and
-#: the source is: a tile is an exact crop of a DOTA PNG, and a build should not decide on
-#: an operator's behalf to throw information away. JPEG is offered because the cost lands
-#: on every epoch rather than once — the loader decodes each tile every epoch, and PNG
+#: Tile image formats that may be written. PNG is the default because it is lossless and the source is: a tile is an
+#: exact crop of a DOTA PNG, and a build should not decide on an operator's behalf to throw information away. JPEG is
+#: offered because the cost lands on every epoch rather than once — the loader decodes each tile every epoch, and PNG
 #: decode is the bottleneck a mosaic-fed 1024 px pipeline hits first.
 TILE_SUFFIXES = (".png", ".jpg", ".jpeg")
 #: Quality passed to the JPEG encoder when a lossy suffix is chosen; ignored for PNG.
@@ -174,10 +164,9 @@ def tile_file_name(stem: str, window: torch.Tensor, suffix: str = ".png") -> str
 def annotation_records(image_id: int, first_id: int, tiled: TiledTargets) -> list[dict[str, object]]:
     """Turn one tile's targets into COCO annotation records.
 
-    ``segmentation`` is the rotated box's own quadrilateral (the oriented reading fits
-    ``rboxes`` back out of it, so the ring is the load-bearing field and ``bbox`` is
-    advisory); ``area`` is that quadrilateral's area, which for a rotated box is
-    ``w * h`` and not the axis-aligned envelope's area.
+    ``segmentation`` is the rotated box's own quadrilateral (the oriented reading fits ``rboxes`` back out of it, so the
+    ring is the load-bearing field and ``bbox`` is advisory); ``area`` is that quadrilateral's area, which for a
+    rotated box is ``w * h`` and not the axis-aligned envelope's area.
 
     Args:
         image_id: The tile's image id.
@@ -295,15 +284,13 @@ def tile_source_image(
 ) -> tuple[list[_TileResult], int]:
     """Tile one source image, writing its tiles and returning their unnumbered records.
 
-    This is the unit of parallelism, and it is the whole of the per-image work: reading
-    the label file, decoding the image, cropping, and writing every tile PNG. What comes
-    back is metadata only — a tile tensor returned to the parent would be shipped through
-    a pickle for no reason, and the tiles of one DOTA image outweigh the image.
+    This is the unit of parallelism, and it is the whole of the per-image work: reading the label file, decoding the
+    image, cropping, and writing every tile PNG. What comes back is metadata only — a tile tensor returned to the
+    parent would be shipped through a pickle for no reason, and the tiles of one DOTA image outweigh the image.
 
-    Ids are **not** assigned here. A worker cannot know how many tiles the images before
-    it produced, and numbering by anything a worker does know (its own index, a shared
-    counter) would make the file depend on scheduling order. The parent numbers them in
-    source order, so the JSON is byte-identical however many workers ran.
+    Ids are **not** assigned here. A worker cannot know how many tiles the images before it produced, and numbering by
+    anything a worker does know (its own index, a shared counter) would make the file depend on scheduling order. The
+    parent numbers them in source order, so the JSON is byte-identical however many workers ran.
 
     Args:
         path: The source image.
@@ -316,13 +303,13 @@ def tile_source_image(
         quality: JPEG quality; ignored for PNG.
 
     Returns:
-        A ``(tiles, empty)`` pair: one ``(image record, annotation records)`` entry per
-        tile written, in window order, and how many windows carried no annotation.
+        A ``(tiles, empty)`` pair: one ``(image record, annotation records)`` entry per tile written, in window order,
+        and how many windows carried no annotation.
 
     Raises:
-        ValueError: If the source decodes to more than 8 bits per channel (a 16-bit
-            PNG): tiles are written as 8-bit JPEG or PNG, and narrowing the depth is a
-            conversion the operator chooses, not one this build makes silently.
+        ValueError: If the source decodes to more than 8 bits per channel (a 16-bit PNG): tiles are written as 8-bit
+            JPEG or PNG, and narrowing the depth is a conversion the operator chooses, not one this build makes
+            silently.
 
     Examples:
         ```pycon
@@ -383,9 +370,8 @@ def _number(tiles: list[_TileResult], images: list[dict[str, object]], annotatio
 def _worker_setup() -> None:
     """Pin each pool worker to one torch thread.
 
-    Tiling is one process per image already; letting every worker also fan out over the
-    machine's cores turns the pool into oversubscription, which on a many-core host is
-    slower than the serial build it replaced.
+    Tiling is one process per image already; letting every worker also fan out over the machine's cores turns the pool
+    into oversubscription, which on a many-core host is slower than the serial build it replaced.
     """
     torch.set_num_threads(1)
 
@@ -405,11 +391,10 @@ def _results(
     Yields:
         ``(tiles, empty)`` pairs, always in ``paths`` order.
 
-    The bar counts **completions**, not positions: source images differ by an order of
-    magnitude in size, so consuming an ordered map would leave the bar still while one
-    multi-thousand-pixel image held up results already finished behind it. Order is a
-    requirement of the numbering, not of the counting, so the results are collected by
-    index and replayed in order once the pool drains.
+    The bar counts **completions**, not positions: source images differ by an order of magnitude in size, so consuming
+    an ordered map would leave the bar still while one multi-thousand-pixel image held up results already finished
+    behind it. Order is a requirement of the numbering, not of the counting, so the results are collected by index and
+    replayed in order once the pool drains.
     """
     if workers > 1:
         with ProcessPoolExecutor(max_workers=workers, initializer=_worker_setup) as pool:
@@ -522,10 +507,9 @@ def _write_instances(
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-#: Annotation readers ``build_tiles`` can tile from. ``source`` names the reader rather
-#: than the command doing so: what this writes is a plain COCO container with
-#: quadrilateral rings, so a second oriented dataset is a reader, not a second command
-#: with its own flags to keep in step.
+#: Annotation readers ``build_tiles`` can tile from. ``source`` names the reader rather than the command doing so: what
+#: this writes is a plain COCO container with quadrilateral rings, so a second oriented dataset is a reader, not a
+#: second command with its own flags to keep in step.
 SOURCES = ("dota",)
 
 
@@ -554,25 +538,21 @@ def build_tiles(
         overlap: Nominal crop overlap in pixels (A21; R18's own protocol is 512).
         drop_empty_tiles: Skip tiles that carry no annotation (A52).
         limit: Read at most this many source images per split.
-        workers: Processes tiling source images in parallel. ``None`` (default)
-            takes one per available CPU; ``1`` stays in this process. The output is
-            byte-identical either way — ids are assigned by the parent in source
+        workers: Processes tiling source images in parallel. ``None`` (default) takes one per available CPU; ``1``
+            stays in this process. The output is byte-identical either way — ids are assigned by the parent in source
             order, never by a worker.
-        progress: Whether to draw a per-image progress bar. A full DOTA build is
-            thousands of multi-megapixel decodes, so silence for an hour is not a
-            reasonable thing to ask of an operator.
-        suffix: Tile image format, one of :data:`TILE_SUFFIXES`. PNG is lossless and
-            matches the source; ``.jpg`` trades that for a decode the loader pays
-            once per tile per epoch, which is where a mosaic-fed 1024 px pipeline
-            starves first.
+        progress: Whether to draw a per-image progress bar. A full DOTA build is thousands of multi-megapixel decodes,
+            so silence for an hour is not a reasonable thing to ask of an operator.
+        suffix: Tile image format, one of :data:`TILE_SUFFIXES`. PNG is lossless and matches the source; ``.jpg``
+            trades that for a decode the loader pays once per tile per epoch, which is where a mosaic-fed 1024 px
+            pipeline starves first.
         quality: JPEG quality; ignored when ``suffix`` is PNG.
 
     Returns:
         ``0`` on success; ``1`` when a split directory is not a split of ``source``.
 
     Raises:
-        ValueError: If ``source`` is not a known reader, or ``suffix`` not a known
-            tile format.
+        ValueError: If ``source`` is not a known reader, or ``suffix`` not a known tile format.
 
     Examples:
         ```pycon

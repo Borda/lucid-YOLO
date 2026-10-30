@@ -1,20 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """lucid-yolo: independent PyTorch Lightning reproduction of the YOLO26 methods.
 
-Implements the detection, instance-segmentation, and oriented-detection methods
-published in arXiv:2606.03748, plus a keypoint task whose loss and evaluation
-protocol come from arXiv:2107.11291 instead. Every method input is a paper, its
-cited primary literature, or a recorded assumption; a small set of permissively
-licensed implementations is admitted for diagnostic reading only, never copied
-(D13 / ADR-004). See docs/PROVENANCE.md and docs/ASSUMPTIONS.md for the
-clean-room record.
+Implements the detection, instance-segmentation, and oriented-detection methods published in arXiv:2606.03748,
+plus a keypoint task whose loss and evaluation protocol come from arXiv:2107.11291 instead. Every method input is
+a paper, its cited primary literature, or a recorded assumption; a small set of permissively licensed
+implementations is admitted for diagnostic reading only, never copied (D13 / ADR-004). See docs/PROVENANCE.md and
+docs/ASSUMPTIONS.md for the clean-room record.
 
-The names a Python caller needs after training are importable from here: load a
-checkpoint (:func:`load_eval_module`, :func:`pick_device`), predict on one image file or
-tensor (:func:`predict_image`, :func:`predict_segmentation`, :func:`predict_oriented`,
-:func:`predict_keypoints`), and score it on COCO val2017 (:func:`score_coco`). They are
-resolved on first access rather than at import: each pulls in torch and Lightning, and
-``import lucid_yolo`` -- which reading ``__version__`` needs -- stays free of both.
+The names a Python caller needs after training are importable from here: load a checkpoint
+(:func:`load_eval_module`, :func:`pick_device`), predict on one image file or tensor (:func:`predict_image`,
+:func:`predict_segmentation`, :func:`predict_oriented`, :func:`predict_keypoints`), and score it on COCO val2017
+(:func:`score_coco`). They are resolved on first access rather than at import: each pulls in torch and Lightning,
+and ``import lucid_yolo`` -- which reading ``__version__`` needs -- stays free of both.
 
 Examples:
     ```pycon
@@ -44,13 +41,12 @@ if TYPE_CHECKING:
         predict_segmentation,
     )
 
-#: Single source of truth for the package version (pyproject reads this attribute
-#: statically). Pre-release wheels for a tier run carry a PEP 440 ``.devN`` suffix,
-#: which sorts *below* the release it leads to, so ``pip install lucid-yolo`` never
-#: resolves to one by accident and a run's artifacts record exactly which build trained
-#: them. ``N`` counts from zero. Bump it for every wheel that leaves this machine, even a rebuild of the same
-#: tree: a 15-hour run once trained on a stale wheel because the intended version was
-#: never published and pip silently resolved the newest that existed.
+#: Single source of truth for the package version (pyproject reads this attribute statically). Pre-release wheels
+#: for a tier run carry a PEP 440 ``.devN`` suffix, which sorts *below* the release it leads to, so
+#: ``pip install lucid-yolo`` never resolves to one by accident and a run's artifacts record exactly which build
+#: trained them. ``N`` counts from zero. Bump it for every wheel that leaves this machine, even a rebuild of the
+#: same tree: a 15-hour run once trained on a stale wheel because the intended version was never published and pip
+#: silently resolved the newest that existed.
 __version__ = "0.8.0"
 
 __all__ = [

@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Download COCO 2017 from the official public hosting into the repo's layout.
 
-This module fetches the COCO 2017 archives from the project's canonical public
-host (``images.cocodataset.org``) and extracts them into a data root that
-:mod:`lucid_yolo.data.check` and :class:`~lucid_yolo.data.coco.CocoDetectionDataset`
-already expect::
+This module fetches the COCO 2017 archives from the project's canonical public host (``images.cocodataset.org``)
+and extracts them into a data root that :mod:`lucid_yolo.data.check` and
+:class:`~lucid_yolo.data.coco.CocoDetectionDataset` already expect::
 
     <data_root>/
         train2017/000000000009.jpg ...
@@ -12,11 +11,9 @@ already expect::
         annotations/instances_train2017.json
         annotations/instances_val2017.json
 
-The official archives extract to exactly those top-level directories, so
-unpacking them into ``data_root`` produces the validated layout with no
-post-processing. Only the standard library is used (``urllib.request`` for the
-streaming transfer, ``zipfile`` for extraction), so no runtime dependency is
-added.
+The official archives extract to exactly those top-level directories, so unpacking them into ``data_root`` produces
+the validated layout with no post-processing. Only the standard library is used (``urllib.request`` for the
+streaming transfer, ``zipfile`` for extraction), so no runtime dependency is added.
 
 Download behaviour:
     * ``val`` is the default split (5,000 images, ~1 GB); ``train`` is 18 GB and
@@ -25,25 +22,20 @@ Download behaviour:
       completion (atomic), so a killed run never leaves a truncated ``.zip``.
     * A partial ``.part`` is resumed with an HTTP ``Range`` request when the
       server honours it (``206``); otherwise the transfer cleanly restarts.
-    * Resuming is gated on a ``<archive>.part.json`` sidecar naming the URL the
-      partial was opened for and the total the server declared then. A partial with
-      no sidecar, one naming a different URL, or one already longer than that total
-      is discarded and the transfer restarts: the bytes on disk are only meaningful
-      as a prefix of a known object, and appending to the wrong one produces a file
-      that is corrupt in a way no length check can see.
+    * Resuming is gated on a ``<archive>.part.json`` sidecar naming the URL the partial was opened for and the total
+      the server declared then. A partial with no sidecar, one naming a different URL, or one already longer than
+      that total is discarded and the transfer restarts: the bytes on disk are only meaningful as a prefix of a known
+      object, and appending to the wrong one produces a file that is corrupt in a way no length check can see.
     * An already-extracted split/annotations tree is skipped without touching the
       network (idempotent), unless ``force`` is set.
 
 Checksum policy:
-    The official COCO archives publish no authoritative SHA-256 digests, so none
-    are hard-coded here. The computed digest of every downloaded archive is
-    printed, and an expected digest may be supplied per archive
-    (``--sha256 '[val2017.zip=<hex>]'``) to enforce a mismatch failure. Enforcement
-    covers the archives a run actually downloads: an already-extracted split is
-    skipped before any transfer, and there is no archive left to hash (the ``.zip``
-    is removed after extraction unless ``--keep_archives`` was set), so a digest
-    supplied for it is reported as *not verified* on stderr — ``--force true``
-    re-downloads and re-checks.
+    The official COCO archives publish no authoritative SHA-256 digests, so none are hard-coded here. The computed
+    digest of every downloaded archive is printed, and an expected digest may be supplied per archive
+    (``--sha256 '[val2017.zip=<hex>]'``) to enforce a mismatch failure. Enforcement covers the archives a run
+    actually downloads: an already-extracted split is skipped before any transfer, and there is no archive left to
+    hash (the ``.zip`` is removed after extraction unless ``--keep_archives`` was set), so a digest supplied for it
+    is reported as *not verified* on stderr — ``--force true`` re-downloads and re-checks.
 
 Examples:
     Fetch the validation split plus annotations::
@@ -54,8 +46,7 @@ Examples:
 
         lucid-data download --data_root /data/coco --splits '[train,val]' --verify true
 
-    Without the console scripts on ``PATH``, the same command is
-    ``python -m lucid_yolo.cli.data download ...``.
+    Without the console scripts on ``PATH``, the same command is ``python -m lucid_yolo.cli.data download ...``.
 """
 
 from __future__ import annotations
@@ -74,10 +65,9 @@ from lucid_yolo.data.verify import VerifyResult, format_report, verify_coco_root
 
 __all__ = ["download_coco", "download_dataset"]
 
-#: Official public COCO 2017 image host (blueprint sec. 14.3); no mirrors. The
-#: S3 path-style form is used because the ``images.cocodataset.org`` CNAME is an
-#: S3 bucket whose TLS certificate does not cover that hostname (the official
-#: site links plain http); path-style keeps the same bucket behind a valid cert.
+#: Official public COCO 2017 image host (blueprint sec. 14.3); no mirrors. The S3 path-style form is used because
+#: the ``images.cocodataset.org`` CNAME is an S3 bucket whose TLS certificate does not cover that hostname (the
+#: official site links plain http); path-style keeps the same bucket behind a valid cert.
 COCO_ZIP_BASE = "https://s3.amazonaws.com/images.cocodataset.org/zips"
 #: Official public COCO 2017 annotation host (same bucket, path-style TLS).
 COCO_ANNOTATION_BASE = "https://s3.amazonaws.com/images.cocodataset.org/annotations"
@@ -232,12 +222,10 @@ def _write_part_meta(meta: Path, url: str, total: int | None) -> None:
 def _resumable_bytes(part: Path, meta: Path, url: str) -> int:
     """Return how much of ``part`` may be resumed for ``url``, discarding a stranger.
 
-    A ``.part`` is only meaningful as a *prefix of a known object*. Its byte length
-    alone says nothing: a partial left by a different URL, by a remote that has since
-    changed, or by a run whose sidecar never landed would be appended to and renamed
-    into place as a plausible-looking archive that is corrupt in the middle. So a
-    partial is resumed only when the sidecar agrees with the request being made, and
-    is deleted outright otherwise (L-33).
+    A ``.part`` is only meaningful as a *prefix of a known object*. Its byte length alone says nothing: a partial
+    left by a different URL, by a remote that has since changed, or by a run whose sidecar never landed would be
+    appended to and renamed into place as a plausible-looking archive that is corrupt in the middle. So a partial is
+    resumed only when the sidecar agrees with the request being made, and is deleted outright otherwise (L-33).
 
     Args:
         part: The partial-download file.
@@ -265,12 +253,10 @@ def _resumable_bytes(part: Path, meta: Path, url: str) -> int:
 def _download_to(url: str, dest: Path, *, progress: bool) -> None:
     """Download ``url`` to ``dest`` atomically, resuming a vouched-for partial if any.
 
-    A partial ``<dest>.part`` is resumed via an HTTP ``Range`` request when its
-    ``<dest>.part.json`` sidecar names this same ``url`` (see :func:`_resumable_bytes`);
-    if the server ignores the range (responds ``200``) the transfer restarts cleanly.
-    The completed ``.part`` is renamed onto ``dest`` and its sidecar removed, so an
-    interrupted run never leaves a truncated archive at ``dest`` nor a sidecar for a
-    partial that no longer exists.
+    A partial ``<dest>.part`` is resumed via an HTTP ``Range`` request when its ``<dest>.part.json`` sidecar names
+    this same ``url`` (see :func:`_resumable_bytes`); if the server ignores the range (responds ``200``) the transfer
+    restarts cleanly. The completed ``.part`` is renamed onto ``dest`` and its sidecar removed, so an interrupted run
+    never leaves a truncated archive at ``dest`` nor a sidecar for a partial that no longer exists.
 
     Args:
         url: Source URL on the official host.
@@ -365,13 +351,12 @@ def _process_archive(
 ) -> None:
     """Download, verify and extract one ``archive`` into ``data_root``.
 
-    Skips all work (no network) when the extraction sentinel already exists and
-    ``force`` is not set. A checksum cannot be enforced on that path — the archive it
-    would hash is normally deleted after extraction (``keep_archives`` is off by
-    default), and the extracted tree is not the archive — so a supplied ``expected``
-    is reported as *not verified* rather than silently dropped. Passing an expected
-    digest on a second run is exactly the case an operator means as "confirm what is
-    already here", and answering it with nothing is the failure M-40 named.
+    Skips all work (no network) when the extraction sentinel already exists and ``force`` is not set. A checksum
+    cannot be enforced on that path — the archive it would hash is normally deleted after extraction
+    (``keep_archives`` is off by default), and the extracted tree is not the archive — so a supplied ``expected`` is
+    reported as *not verified* rather than silently dropped. Passing an expected digest on a second run is exactly
+    the case an operator means as "confirm what is already here", and answering it with nothing is the failure M-40
+    named.
 
     Args:
         archive: The archive to process.
@@ -411,20 +396,18 @@ def download_coco(
 ) -> Path:
     """Download and extract COCO 2017 into ``data_root``.
 
-    Fetches each requested image split plus (by default) the shared annotations
-    archive from the official public host and extracts them so the tree matches
-    the layout validated by :mod:`lucid_yolo.data.check`. Already-extracted archives
-    are skipped without network access unless ``force`` is set.
+    Fetches each requested image split plus (by default) the shared annotations archive from the official public host
+    and extracts them so the tree matches the layout validated by :mod:`lucid_yolo.data.check`. Already-extracted
+    archives are skipped without network access unless ``force`` is set.
 
     Args:
         data_root: Target root directory (created if missing).
         splits: Image splits to fetch; defaults to ``("val",)`` (the smallest
             useful split). Duplicates are collapsed and order is preserved.
         annotations: Whether to also fetch the shared annotations archive.
-        checksums: Optional per-archive expected SHA-256 digests, keyed by archive
-            file name (e.g. ``{"val2017.zip": "<hex>"}``); a mismatch aborts. Applies to
-            archives fetched *this run* only: an archive whose extraction sentinel already
-            exists is skipped without a download, and its digest is reported as not
+        checksums: Optional per-archive expected SHA-256 digests, keyed by archive file name (e.g.
+            ``{"val2017.zip": "<hex>"}``); a mismatch aborts. Applies to archives fetched *this run* only: an archive
+            whose extraction sentinel already exists is skipped without a download, and its digest is reported as not
             verified on stderr rather than enforced (pass ``force`` to re-verify).
         force: Re-download and re-extract even when the sentinel already exists.
         keep_archives: Keep the downloaded ``.zip`` files after extraction.
@@ -503,9 +486,9 @@ def _skipped_splits(data_root: Path, splits: Sequence[str], *, force: bool) -> s
 def _emit_repair_hints(data_root: Path, result: VerifyResult, skipped: set[str]) -> None:
     """Print a ``--force`` re-run hint for each incomplete but skipped split.
 
-    The hint is the shipped ``lucid-data download`` spelling, quoted as a shell would need
-    it: a repair hint naming a command the caller cannot run is worse than none, which is
-    what the removed ``lucid-download`` alias would have left behind here (WP-110).
+    The hint is the shipped ``lucid-data download`` spelling, quoted as a shell would need it: a repair hint naming a
+    command the caller cannot run is worse than none, which is what the removed ``lucid-download`` alias would have
+    left behind here (WP-110).
 
     Args:
         data_root: The verified data root, named in the printed command.

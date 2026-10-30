@@ -1,17 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """Check replay's Python ownership and failure contracts without a CUDA device.
 
-CPU tensors exercise storage, signatures and state restoration. CUDA submission
-objects are stubs: these tests do not certify graph execution or device arithmetic.
-The real CUDA trajectories remain in test_replay.py and test_update_replay.py.
+CPU tensors exercise storage, signatures and state restoration. CUDA submission objects are stubs: these tests do not
+certify graph execution or device arithmetic. The real CUDA trajectories remain in test_replay.py and
+test_update_replay.py.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 import torch
@@ -65,50 +66,44 @@ def inputs() -> tuple[MuSGD, list[torch.nn.Parameter], list[Tensor], list[Tensor
 
 class TestUpdateSignatures:
     @pytest.mark.parametrize(
-        "change",
+        "edits",
         [
-            "bool-rate",
-            "float-steps",
-            "dtype",
-            "device",
-            "empty",
-            "strides",
-            "layout",
-            "shape",
-            "parameters",
-            "buffers",
-            "gradient",
+            # Each edit is (target, key, build): ``target[key]`` is replaced by ``build(params, grads, bufs)``.
+            pytest.param([("group", "lr", lambda params, grads, bufs: True)], id="bool-rate"),
+            pytest.param([("group", "ns_steps", lambda params, grads, bufs: 2.0)], id="float-steps"),
+            pytest.param([("gradients", 0, lambda params, grads, bufs: grads[0].double())], id="dtype"),
+            pytest.param(
+                [("buffers", 0, lambda params, grads, bufs: torch.empty_like(bufs[0], device="meta"))], id="device"
+            ),
+            pytest.param(
+                [
+                    ("params", 0, lambda params, grads, bufs: torch.nn.Parameter(torch.empty(0, 3))),
+                    ("gradients", 0, lambda params, grads, bufs: torch.empty(0, 3)),
+                    ("buffers", 0, lambda params, grads, bufs: torch.empty(0, 3)),
+                ],
+                id="empty",
+            ),
+            pytest.param([("gradients", 0, lambda params, grads, bufs: torch.ones(2, 6)[:, ::2])], id="strides"),
+            pytest.param([("gradients", 0, lambda params, grads, bufs: grads[0].to_sparse())], id="layout"),
+            pytest.param([("buffers", 0, lambda params, grads, bufs: torch.zeros(3, 2))], id="shape"),
+            pytest.param(
+                [("params", 1, lambda params, grads, bufs: torch.nn.Parameter(params[0].detach()))], id="parameters"
+            ),
+            pytest.param([("buffers", 1, lambda params, grads, bufs: bufs[0])], id="buffers"),
+            pytest.param([("gradients", 0, lambda params, grads, bufs: params[0].detach())], id="gradient"),
         ],
     )
-    def test_unsupported_storage_or_scalar_keeps_native_route(self, inputs: Any, change: str) -> None:
+    def test_unsupported_storage_or_scalar_keeps_native_route(
+        self, inputs: Any, edits: list[tuple[str, int | str, Callable[..., Any]]]
+    ) -> None:
         """An unsupported input cannot acquire live-state ownership through replay."""
         optimizer, params, gradients, buffers = inputs
         group = optimizer.param_groups[0]
         owner = preparation._UpdateReplay(_memory_overlaps)
         assert owner._supported(params, gradients, buffers, group)
-        if change == "bool-rate":
-            group["lr"] = True
-        elif change == "float-steps":
-            group["ns_steps"] = 2.0
-        elif change == "dtype":
-            gradients[0] = gradients[0].double()
-        elif change == "device":
-            buffers[0] = torch.empty_like(buffers[0], device="meta")
-        elif change == "empty":
-            params[0] = torch.nn.Parameter(torch.empty(0, 3))
-            gradients[0], buffers[0] = torch.empty(0, 3), torch.empty(0, 3)
-        elif change == "strides":
-            gradients[0] = torch.ones(2, 6)[:, ::2]
-        elif change == "layout":
-            gradients[0] = gradients[0].to_sparse()
-        elif change == "shape":
-            buffers[0] = torch.zeros(3, 2)
-        elif change == "parameters":
-            params[1] = torch.nn.Parameter(params[0].detach())
-        elif change == "buffers":
-            buffers[1] = buffers[0]
-        else:
-            gradients[0] = params[0].detach()
+        targets = {"group": group, "params": params, "gradients": gradients, "buffers": buffers}
+        for target, key, build in edits:
+            targets[target][key] = build(params, gradients, buffers)
         assert not owner._supported(params, gradients, buffers, group)
 
     def test_cross_allocation_overlap_keeps_native_route(self, inputs: Any) -> None:
@@ -203,13 +198,13 @@ class TestUpdateCacheOwnership:
     @pytest.mark.parametrize(
         "change", ["values", "rate", "signed-zero", "scalar-type", "buffer", "storage", "stream", "missing"]
     )
+    @patch.object(torch.nn.Parameter, "is_cuda", property(lambda self: True))
     def test_only_values_and_rates_reuse_cached_group(
         self, inputs: Any, submission: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, change: str
     ) -> None:
         """A cache hit may accept fresh allocations without accepting a different state owner."""
         optimizer, params, _, _ = inputs
         group = optimizer.param_groups[0]
-        monkeypatch.setattr(torch.nn.Parameter, "is_cuda", property(lambda self: True))
         factory = Mock(
             side_effect=lambda *args: SimpleNamespace(
                 key=args[-1],
@@ -250,12 +245,12 @@ class TestUpdateCacheOwnership:
         assert not owner.entries
 
     @pytest.mark.parametrize("failure", ["construct", "submit", "synchronize"])
+    @patch.object(torch.nn.Parameter, "is_cuda", property(lambda self: True))
     def test_failed_first_submission_never_enters_cache(
         self, inputs: Any, submission: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: str
     ) -> None:
         """A partially initialized owner is never reused after an unsuccessful first call."""
         optimizer, _, _, _ = inputs
-        monkeypatch.setattr(torch.nn.Parameter, "is_cuda", property(lambda self: True))
         entry = SimpleNamespace(run=Mock(), replay_stream=submission.current)
         factory = Mock(return_value=entry)
         if failure == "construct":
@@ -272,11 +267,9 @@ class TestUpdateCacheOwnership:
 
 
 class TestSharedRecordingState:
-    def test_returned_results_own_storage_and_capacity_limits_recordings(
-        self, submission: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    @patch.object(Tensor, "is_cuda", property(lambda self: True))
+    def test_returned_results_own_storage_and_capacity_limits_recordings(self, submission: SimpleNamespace) -> None:
         """Returned tensors cannot mutate recordings, and a changed stream cannot grow a full cache."""
-        monkeypatch.setattr(Tensor, "is_cuda", property(lambda self: True))
         operation = Mock(side_effect=lambda value, steps, eps: value * steps + eps)
         value = torch.arange(6, dtype=torch.float32).reshape(2, 3)
         owner = orthogonalization._OrthogonalizationReplay(1)

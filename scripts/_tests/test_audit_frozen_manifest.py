@@ -1,54 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 """Functional-core tests: the frozen-golden digest manifest (WP-168).
 
-Covers ``scripts/lint/audit_frozen_manifest.py`` and the manifest half of
-``scripts/freeze_goldens.py`` on synthetic trees under ``tmp_path``, never against the
-live ``goldens/frozen/`` -- the pre-commit hook is what runs against that, and a test
-asserting over it would fail for anyone mid-freeze rather than reporting a defect in
-this code.
+Covers ``scripts/lint/audit_frozen_manifest.py`` and the manifest half of ``scripts/freeze_goldens.py`` on synthetic
+trees under ``tmp_path``, never against the live ``goldens/frozen/`` -- the pre-commit hook is what runs against that,
+and a test asserting over it would fail for anyone mid-freeze rather than reporting a defect in this code.
 
-Four cases decide whether the manifest is a control or decoration: the clean tree, a
-tampered digest, a frozen file no row covers, and a row whose file is gone. The tamper
-case is the one the whole row exists for -- editing a frozen golden's values and its
-tolerances together is green under ``check_goldens.py`` by construction, because that
-harness compares each file with itself.
+Four cases decide whether the manifest is a control or decoration: the clean tree, a tampered digest, a frozen file no
+row covers, and a row whose file is gone. The tamper case is the one the whole row exists for -- editing a frozen
+golden's values and its tolerances together is green under ``check_goldens.py`` by construction, because that harness
+compares each file with itself.
 """
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
-from types import ModuleType
 
 import pytest
+from script_loader import load_script
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _load(name: str, relative: str) -> ModuleType:
-    """Load a ``scripts/`` module by path, since ``scripts/`` is not a package.
-
-    Examples:
-        >>> _load("freeze_goldens", "scripts/freeze_goldens.py").MANIFEST_NAME
-        'MANIFEST.sha256'
-    """
-    spec = importlib.util.spec_from_file_location(name, REPO_ROOT / relative)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-writer = _load("freeze_goldens", "scripts/freeze_goldens.py")
-audit = _load("audit_frozen_manifest", "scripts/lint/audit_frozen_manifest.py")
+writer = load_script("freeze_goldens")
+audit = load_script("audit_frozen_manifest")
 
 
 @pytest.fixture
 def sealed(tmp_path: Path) -> Path:
     """A two-minor frozen tree whose manifest matches it exactly.
 
-    The starting point every case below perturbs in one way, so that the assertion is
-    about the perturbation rather than about how the tree was built.
+    The starting point every case below perturbs in one way, so that the assertion is about the perturbation rather than
+    about how the tree was built.
     """
     for minor, name in (("0.6", "optim_toy.json"), ("0.7", "optim_toy.json"), ("0.7", "params_flops_det.json")):
         (tmp_path / minor).mkdir(exist_ok=True)
@@ -67,10 +49,9 @@ class TestFindViolations:
     def test_flags_tampered_golden(self, sealed: Path) -> None:
         """Editing a frozen golden's values and tolerances together is reported.
 
-        The case the row exists for. ``check_goldens.py`` recomputes the producer and
-        compares it against that same file's stored values within its stored
-        tolerances, so a coordinated edit of both is green there -- the file is being
-        compared with itself. Only the digest notices the file changed at all.
+        The case the row exists for. ``check_goldens.py`` recomputes the producer and compares it against that same
+        file's stored values within its stored tolerances, so a coordinated edit of both is green there -- the file is
+        being compared with itself. Only the digest notices the file changed at all.
         """
         target = sealed / "0.7" / "optim_toy.json"
         target.write_text('{"values": {"loss": 2.0}, "tolerances": {"loss": 1.0}}\n', encoding="utf-8")
@@ -83,8 +64,8 @@ class TestFindViolations:
     def test_flags_frozen_file_no_row_covers(self, sealed: Path) -> None:
         """A frozen file added without sealing it is reported rather than admitted.
 
-        Without this the manifest would be satisfiable by deleting rows: a new file
-        covered by nothing would be as good as a file whose digest matched.
+        Without this the manifest would be satisfiable by deleting rows: a new file covered by nothing would be as good
+        as a file whose digest matched.
         """
         (sealed / "0.7" / "smuggled.json").write_text('{"values": {}}\n', encoding="utf-8")
 
@@ -121,8 +102,8 @@ class TestMain:
     def test_exits_one_and_names_sanctioned_command(self, sealed: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """A tampered tree exits 1 and the refusal says which command records a sanctioned move.
 
-        A gate that only says no teaches the next reader to work around it; naming
-        ``--reseal`` is what makes the approved path the obvious one.
+        A gate that only says no teaches the next reader to work around it; naming ``--reseal`` is what makes the
+        approved path the obvious one.
         """
         (sealed / "0.7" / "optim_toy.json").write_text('{"values": {"loss": 9.0}}\n', encoding="utf-8")
 
@@ -135,13 +116,12 @@ class TestMain:
 class TestSeal:
     """Tests for ``freeze_goldens.seal`` and ``freeze_goldens.reseal``."""
 
-    def test_seal_preserves_rows_it_did_not_write(self, sealed: Path) -> None:
+    def test_seal_preserves_rows_not_written(self, sealed: Path) -> None:
         """Freezing a new minor leaves every earlier row exactly as it stood.
 
-        Re-hashing the whole tree on every release freeze would let a snapshot tampered
-        with under an earlier minor be re-blessed by the next release, which is the
-        failure the manifest exists to catch -- so the release path seals only what it
-        copied, and ``--reseal`` is the separate, named act.
+        Re-hashing the whole tree on every release freeze would let a snapshot tampered with under an earlier minor be
+        re-blessed by the next release, which is the failure the manifest exists to catch -- so the release path seals
+        only what it copied, and ``--reseal`` is the separate, named act.
         """
         before = writer.read_manifest(sealed)
         (sealed / "0.8").mkdir()
@@ -190,7 +170,7 @@ class TestSeal:
 class TestFreeze:
     """Tests for ``freeze_goldens.freeze``'s manifest half."""
 
-    def test_freezing_minor_seals_what_it_copied(self, tmp_path: Path) -> None:
+    def test_freezing_minor_seals_copied_files(self, tmp_path: Path) -> None:
         """``make freeze-goldens MINOR=0.N`` stays one command: the copy and the seal are one act."""
         (tmp_path / "optim_toy.json").write_text('{"values": {"loss": 1.0}}\n', encoding="utf-8")
         (tmp_path / "generated.json").write_text('{"values": {"x": 1.0}, "freezable": false}\n', encoding="utf-8")

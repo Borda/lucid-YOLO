@@ -1,30 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for rotated containment in TAL and STAL (WP-061, A25).
 
-The rotated path is one optional argument, ``gt_rboxes``, on the assigner call: it
-replaces the centre-inside candidate test with the point-in-rotated-rect test of
-:func:`lucid_yolo.data.rotated_geom.points_in_rboxes`, and STAL clamps the rotated
-``(w, h)`` instead of the axis-aligned ones. Nothing else moves — scoring, targets,
-and weights keep running on the axis-aligned ``gt_boxes``.
+The rotated path is one optional argument, ``gt_rboxes``, on the assigner call: it replaces the centre-inside candidate
+test with the point-in-rotated-rect test of :func:`lucid_yolo.data.rotated_geom.points_in_rboxes`, and STAL clamps the
+rotated ``(w, h)`` instead of the axis-aligned ones. Nothing else moves — scoring, targets, and weights keep running on
+the axis-aligned ``gt_boxes``.
 
-The claims covered. A tiny rotated ground truth gets zero candidates under
-vanilla TAL and gains them under the STAL surrogate (the rotated analogue of
-``test_stal.py::test_tiny_box_gains_candidates``), and its targets stay the
-axis-aligned box. Containment genuinely respects rotation: a 45-degree square admits
-its diamond of anchors and rejects the corner anchors that lie inside its axis-aligned
-envelope. Candidate sets stay separated per image and per ground truth, which is what
-pins the ``(B, N, A)`` layout of the rotated mask. The rotated surrogate clamps each
-edge independently and re-canonicalizes when the short edge overtakes the long one.
-And the axis-aligned assignment is bit-identical to the values frozen at 485ac14, the
-commit before this work package — every expected value below was produced by running
-that code, not by running the code under test.
+The claims covered. A tiny rotated ground truth gets zero candidates under vanilla TAL and gains them under the STAL
+surrogate (the rotated analogue of ``test_stal.py::test_tiny_box_gains_candidates``), and its targets stay the
+axis-aligned box. Containment genuinely respects rotation: a 45-degree square admits its diamond of anchors and rejects
+the corner anchors that lie inside its axis-aligned envelope. Candidate sets stay separated per image and per ground
+truth, which is what pins the ``(B, N, A)`` layout of the rotated mask. The rotated surrogate clamps each edge
+independently and re-canonicalizes when the short edge overtakes the long one. And the axis-aligned assignment is
+bit-identical to the values frozen at 485ac14, the commit before this work package — every expected value below was
+produced by running that code, not by running the code under test.
 
-WP-169 is the one amendment to that. It corrected the target-normalization denominator,
-which moves the ``align_weight`` column and nothing else: the foreground mask, the
-ground-truth indices, the labels and the target boxes below are still 485ac14's, bit for
-bit. The weights were not re-read off the code under test either — each was corrected by
-the closed-form factor the fix implies, and the correction is spelled out with its
-verification on :data:`_FROZEN_O2M`.
+WP-169 is the one amendment to that. It corrected the target-normalization denominator, which moves the
+``align_weight`` column and nothing else: the foreground mask, the ground-truth indices, the labels and the target
+boxes below are still 485ac14's, bit for bit. The weights were not re-read off the code under test either — each was
+corrected by the closed-form factor the fix implies, and the correction is spelled out with its verification on
+:data:`_FROZEN_O2M`.
 """
 
 import math
@@ -66,9 +61,8 @@ def _rotated_scene(
 ) -> tuple[torch.Tensor, ...]:
     """Assemble a single-image scene on a 4x4 stride-8 grid around one rotated GT.
 
-    Anchor centres are x, y in {4, 12, 20, 28}. Class-0 score is 0.9 at every anchor
-    and every predicted box equals ``gt_boxes``, so the alignment metric is flat and
-    the positive set is decided purely by candidacy.
+    Anchor centres are x, y in {4, 12, 20, 28}. Class-0 score is 0.9 at every anchor and every predicted box equals
+    ``gt_boxes``, so the alignment metric is flat and the positive set is decided purely by candidacy.
 
     Examples:
         >>> scores, pred_boxes, points, gt_boxes, gt_labels, gt_mask, gt_rboxes = _rotated_scene(
@@ -130,8 +124,8 @@ def test_rotation_excludes_envelope_corners() -> None:
 
     assert _positive_indices(rotated) == _DIAMOND_CANDIDATES
     assert _positive_indices(axis_aligned) == tuple(sorted(_DIAMOND_CANDIDATES + _ENVELOPE_ONLY))
-    # Anchor 0 sits at (4, 4): 8 px from the centre on each axis, so inside the envelope
-    # that spans 12 +- 11.3137 — and 11.3137 px along the box's own long axis, outside it.
+    # Anchor 0 sits at (4, 4): 8 px from the centre on each axis, so inside the envelope that spans 12 +- 11.3137 — and
+    # 11.3137 px along the box's own long axis, outside it.
     assert abs(4.0 - 12.0) <= _DIAMOND_ENVELOPE_HALF
     assert not bool(rotated.fg_mask[0, 0])
     assert bool(axis_aligned.fg_mask[0, 0])
@@ -200,9 +194,8 @@ def test_rotated_surrogate_clamps_per_edge(rbox: list[float], expected: list[flo
 def _frozen_scene() -> tuple[torch.Tensor, ...]:
     """Rebuild the deterministic two-image scene the frozen expectations were taken on.
 
-    Two ground truths per image (the second image's second slot is padding), scores and
-    predicted boxes derived from the anchor index by arithmetic so the scene carries no
-    RNG and no stored fixture.
+    Two ground truths per image (the second image's second slot is padding), scores and predicted boxes derived from the
+    anchor index by arithmetic so the scene carries no RNG and no stored fixture.
 
     Examples:
         >>> scores, pred_boxes, points, gt_boxes, gt_labels, gt_mask = _frozen_scene()
@@ -231,9 +224,9 @@ def _frozen_scene() -> tuple[torch.Tensor, ...]:
 def _expected_result(rows: list[tuple[int, int, int, int, list[float], float]]) -> AssignResult:
     """Expand frozen foreground rows into a full :class:`AssignResult` over 2 images, 16 anchors.
 
-    Each row is ``(image, anchor, gt_index, label, box, align_weight)``; every anchor not
-    listed carries the documented background sentinels (``-1`` index and label, zero box,
-    zero weight), so a stray positive breaks the comparison just as a wrong value does.
+    Each row is ``(image, anchor, gt_index, label, box, align_weight)``; every anchor not listed carries the documented
+    background sentinels (``-1`` index and label, zero box, zero weight), so a stray positive breaks the comparison just
+    as a wrong value does.
 
     Examples:
         >>> result = _expected_result([(0, 5, 0, 1, [1.0, 2.0, 3.0, 4.0], 0.5)])
@@ -258,21 +251,19 @@ def _expected_result(rows: list[tuple[int, int, int, int, list[float], float]]) 
 
 #: Assignment frozen at 485ac14 (pre-WP-061) on ``_frozen_scene``, as
 #: ``(image, anchor, gt_index, label, target_box, align_weight)`` foreground rows.
-#: Regenerate only from a commit whose axis-aligned path is known good, never from the
-#: code under test. TAL and STAL share these rows: no ground truth in the scene is tiny,
-#: so the STAL surrogate is the identity here and must not move a single value.
+#: Regenerate only from a commit whose axis-aligned path is known good, never from the code under test. TAL and STAL
+#: share these rows: no ground truth in the scene is tiny, so the STAL surrogate is the identity here and must not move
+#: a single value.
 #:
-#: WP-169 moved the ``align_weight`` column and nothing else. The mask, the ground-truth
-#: indices, the labels and the target boxes are still 485ac14's, bit for bit — the fix
-#: changes no anchor's fate in this scene. The weights were re-derived from 485ac14's own
-#: values rather than read off the code under test: the target normalization divided by
-#: ``t_max + 1e-9`` and now divides by ``t_max``, so each frozen weight was corrected by
-#: the closed-form factor ``(t_max + 1e-9) / t_max`` with ``t_max`` the per-ground-truth
-#: maximum of ``t`` over its positives (0.028469763696193695, 0.001523747923783958 and
-#: 0.00017089843458961695 for the scene's three assigned ground truths). Every row agrees
-#: with the current output to within 2 ULP, and the corroborating case is image 1 anchor 5:
-#: it is its ground truth's best anchor, so its weight is exactly ``u_max``, and it lands
-#: on 0.25 exactly where 485ac14 pinned 0.249998539686203 — the absolute floor, visible.
+#: WP-169 moved the ``align_weight`` column and nothing else. The mask, the ground-truth indices, the labels and the
+#: target boxes are still 485ac14's, bit for bit — the fix changes no anchor's fate in this scene. The weights were
+#: re-derived from 485ac14's own values rather than read off the code under test: the target normalization divided by
+#: ``t_max + 1e-9`` and now divides by ``t_max``, so each frozen weight was corrected by the closed-form factor
+#: ``(t_max + 1e-9) / t_max`` with ``t_max`` the per-ground-truth maximum of ``t`` over its positives
+#: (0.028469763696193695, 0.001523747923783958 and 0.00017089843458961695 for the scene's three assigned ground
+#: truths). Every row agrees with the current output to within 2 ULP, and the corroborating case is image 1 anchor 5: it
+#: is its ground truth's best anchor, so its weight is exactly ``u_max``, and it lands on 0.25 exactly where 485ac14
+#: pinned 0.249998539686203 — the absolute floor, visible.
 _FROZEN_O2M = [
     (0, 1, 0, 0, [2.0, 2.0, 18.0, 18.0], 0.0064817494712769985),
     (0, 4, 0, 0, [2.0, 2.0, 18.0, 18.0], 0.004321165848523378),

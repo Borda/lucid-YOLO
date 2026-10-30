@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Gate on :func:`~lucid_yolo.eval.coco_score.score_coco`, the Python door to the COCO protocol.
 
-The command runners print their numbers and return an exit code; this function returns
-the numbers. What matters most is that the two cannot disagree, so the first test scores
-one module both ways and asserts the report the runner writes equals the report the
-function returns. The rest pin the refusals a Python caller reaches without a command
-line in front of it: a task the protocol does not score, a keypoint schema it cannot
-score, and paths it cannot resolve.
+The command runners print their numbers and return an exit code; this function returns the numbers. What matters most
+is that the two cannot disagree, so the first test scores one module both ways and asserts the report the runner writes
+equals the report the function returns. The rest pin the refusals a Python caller reaches without a command line in
+front of it: a task the protocol does not score, a keypoint schema it cannot score, and paths it cannot resolve.
 """
 
 from __future__ import annotations
@@ -59,8 +57,8 @@ def coco_root(detseg_fixture_dir: Path, tmp_path: Path) -> Path:
 def test_score_equals_report_runner_writes(coco_root: Path, tmp_path: Path) -> None:
     """One module scored by the function and by ``lucid-eval``'s runner yields one report.
 
-    The runner's JSON file is its only durable output, so it is the comparison target:
-    equal reports mean a notebook caller and an operator read the same numbers.
+    The runner's JSON file is its only durable output, so it is the comparison target: equal reports mean a notebook
+    caller and an operator read the same numbers.
     """
     module = _module("detect")
     output = tmp_path / "report.json"
@@ -94,16 +92,23 @@ def test_segmentation_checkpoint_scores_masks_unless_declined(coco_root: Path, m
     assert ("segm_map" in score.report["nms"]) is has_segm
 
 
-def test_oriented_checkpoint_refused(coco_root: Path) -> None:
-    """An ``obb`` module is refused by name rather than scored as an axis-aligned detector."""
-    with pytest.raises(ValueError, match="task must be one of"):
-        score_coco(_module("obb"), coco_root, img_size=_CANVAS, device="cpu")
+@pytest.mark.parametrize(
+    ("task", "module_kwargs", "message"),
+    [
+        pytest.param("obb", {}, "task must be one of", id="oriented-task"),
+        pytest.param("keypoints", {"num_keypoints": 5}, "checkpoint has K=5", id="non-coco-keypoint-schema"),
+    ],
+)
+def test_unscorable_checkpoint_refused(
+    coco_root: Path, task: str, module_kwargs: dict[str, object], message: str
+) -> None:
+    """A module the protocol cannot score is refused by name instead of being scored as something else.
 
-
-def test_keypoint_schema_other_than_coco_refused(coco_root: Path) -> None:
-    """A keypoint module whose ``K`` is not COCO's 17 is refused before any file is read."""
-    with pytest.raises(ValueError, match="checkpoint has K=5"):
-        score_coco(_module("keypoints", num_keypoints=5), coco_root, img_size=_CANVAS, device="cpu")
+    An ``obb`` module is not scored as an axis-aligned detector, and a keypoint module whose ``K`` is not COCO's 17 is
+    refused before any file is read.
+    """
+    with pytest.raises(ValueError, match=message):
+        score_coco(_module(task, **module_kwargs), coco_root, img_size=_CANVAS, device="cpu")
 
 
 def test_overrides_without_data_root_need_both(coco_root: Path) -> None:

@@ -1,28 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 """Progressive dual-branch loss schedule (WP-035).
 
-Transcribed by hand from the reproduction's technical specification (R1 Eq. 2-3,
-§4.1; blueprint sec. 5.7). The dual detection loss combines the two branch
-totals as::
+Transcribed by hand from the reproduction's technical specification (R1 Eq. 2-3, §4.1; blueprint sec. 5.7). The dual
+detection loss combines the two branch totals as::
 
     L = alpha(t) * L_o2m + (1 - alpha(t)) * L_o2o
 
-where the one-to-many weight ``alpha`` is *ramped down* once per epoch on a
-linear schedule::
+where the one-to-many weight ``alpha`` is *ramped down* once per epoch on a linear schedule::
 
     alpha(t) = max(1 - t / max(E - 1, 1), 0) * (alpha_init - alpha_final) + alpha_final
 
 with ``t`` the 0-based epoch index and ``E >= 1`` the total epoch count. The defaults
-``(alpha_init, alpha_final) = (0.8, 0.1)`` place the branch weights at
-``(0.8, 0.2)`` on the first epoch (dense o2m supervision dominates, driving fast
-high-recall learning) and ramp them to ``(0.1, 0.9)`` on the last epoch (the
-NMS-free o2o branch takes over). The ``max(E - 1, 1)`` guard keeps the single
-epoch case (``E == 1``) finite: the ramp evaluates to ``alpha_init``.
+``(alpha_init, alpha_final) = (0.8, 0.1)`` place the branch weights at ``(0.8, 0.2)`` on the first epoch (dense o2m
+supervision dominates, driving fast high-recall learning) and ramp them to ``(0.1, 0.9)`` on the last epoch (the
+NMS-free o2o branch takes over). The ``max(E - 1, 1)`` guard keeps the single epoch case (``E == 1``) finite: the ramp
+evaluates to ``alpha_init``.
 
-The schedule writes to the bare ``alpha`` attribute exposed by
-:class:`~lucid_yolo.losses.dual_loss.DualBranchLoss` (via
-:attr:`~lucid_yolo.ptl.module.DetectionLitModule.alpha`); the Lightning
-``on_train_epoch_start`` hook applies :func:`progressive_alpha` per epoch.
+The schedule writes to the bare ``alpha`` attribute exposed by :class:`~lucid_yolo.losses.dual_loss.DualBranchLoss`
+(via :attr:`~lucid_yolo.ptl.module.DetectionLitModule.alpha`); the Lightning ``on_train_epoch_start`` hook applies
+:func:`progressive_alpha` per epoch.
 
 Provenance: R1 Eq. 2-3, R1 §4.1. Assumptions: none.
 """
@@ -48,41 +44,34 @@ def progressive_alpha(
     """Linear once-per-epoch ramp of the one-to-many branch weight (R1 Equation 2-3).
 
     Implements ``alpha(t) = max(1 - t / max(E - 1, 1), 0) * (alpha_init -
-    alpha_final) + alpha_final`` verbatim, with ``t = epoch`` (0-based) and
-    ``E = total_epochs``. The ``max(E - 1, 1)`` denominator guard keeps the
-    ``E == 1`` degenerate case finite (the ramp factor is ``1``, so the result
-    is ``alpha_init``), and the outer ``max(..., 0)`` clamps the ramp to zero at
-    and beyond the final epoch so ``alpha`` never falls below ``alpha_final``.
+    alpha_final) + alpha_final`` verbatim, with ``t = epoch`` (0-based) and ``E = total_epochs``. The
+    ``max(E - 1, 1)`` denominator guard keeps the ``E == 1`` degenerate case finite (the ramp factor is ``1``, so the
+    result is ``alpha_init``), and the outer ``max(..., 0)`` clamps the ramp to zero at and beyond the final epoch so
+    ``alpha`` never falls below ``alpha_final``.
 
-    The ramp is clamped at **both** ends (L-08). Clamping only below left a negative
-    epoch index extrapolating backwards past the start of the schedule — measured
-    ``progressive_alpha(-10, 100) = 0.8707`` against an ``alpha_init`` of ``0.8`` — so
-    a caller that reached here with an off-by-one would silently weight the o2m branch
-    above the endpoint the schedule is defined by. The upper clamp costs nothing for
-    ``epoch >= 0``, where the ramp never exceeds one, so every value on the schedule's
-    own domain is unchanged.
+    The ramp is clamped at **both** ends (L-08). Clamping only below left a negative epoch index extrapolating backwards
+    past the start of the schedule — measured ``progressive_alpha(-10, 100) = 0.8707`` against an ``alpha_init`` of
+    ``0.8`` — so a caller that reached here with an off-by-one would silently weight the o2m branch above the endpoint
+    the schedule is defined by. The upper clamp costs nothing for ``epoch >= 0``, where the ramp never exceeds one, so
+    every value on the schedule's own domain is unchanged.
 
-    A non-positive ``total_epochs`` is rejected rather than absorbed. ``max(E - 1, 1)``
-    is a guard for ``E == 1``, and it happens to swallow ``E <= 0`` too: those runs took
-    the single-epoch branch and returned ``alpha_init`` for every epoch, a plausible
-    number describing a schedule that does not exist. The one caller,
-    :meth:`~lucid_yolo.ptl.module.DetectionLitModule.on_train_epoch_start`, already
-    returns early when ``trainer.max_epochs`` is ``None`` or ``<= 0``, so this raises
-    for nothing the training path reaches.
+    A non-positive ``total_epochs`` is rejected rather than absorbed. ``max(E - 1, 1)`` is a guard for ``E == 1``, and
+    it happens to swallow ``E <= 0`` too: those runs took the single-epoch branch and returned ``alpha_init`` for every
+    epoch, a plausible number describing a schedule that does not exist. The one caller,
+    :meth:`~lucid_yolo.ptl.module.DetectionLitModule.on_train_epoch_start`, already returns early when
+    ``trainer.max_epochs`` is ``None`` or ``<= 0``, so this raises for nothing the training path reaches.
 
     Args:
-        epoch: Current 0-based epoch index ``t``. Values ``>= total_epochs - 1``
-            all yield ``alpha_final`` (the ramp is clamped at zero), and negative
-            values yield ``alpha_init`` (the ramp is clamped at one).
+        epoch: Current 0-based epoch index ``t``. Values ``>= total_epochs - 1`` all yield ``alpha_final`` (the ramp is
+            clamped at zero), and negative values yield ``alpha_init`` (the ramp is clamped at one).
         total_epochs: Total epoch count ``E`` of the training run. Must be ``>= 1``.
         alpha_init: One-to-many weight at ``epoch == 0``. Defaults to ``0.8``.
         alpha_final: One-to-many weight at ``epoch == total_epochs - 1``.
             Defaults to ``0.1``.
 
     Returns:
-        The one-to-many branch weight ``alpha`` for this epoch; the one-to-one
-        branch receives ``1 - alpha``. Always between ``alpha_final`` and
-        ``alpha_init`` inclusive.
+        The one-to-many branch weight ``alpha`` for this epoch; the one-to-one branch receives ``1 - alpha``. Always
+        between ``alpha_final`` and ``alpha_init`` inclusive.
 
     Raises:
         ValueError: If ``total_epochs`` is less than ``1``.
@@ -117,12 +106,11 @@ def progressive_alpha(
 class ProgressiveLossSchedule:
     """Stateless linear schedule for the dual-loss one-to-many branch weight.
 
-    Holds the ramp endpoints ``(alpha_init, alpha_final)`` and evaluates the
-    per-epoch weight through :func:`progressive_alpha`. The object carries no
-    epoch state of its own — the caller supplies the current epoch and total
-    epoch count each call — so a single instance is reused across the run and
-    the :class:`~lucid_yolo.ptl.module.DetectionLitModule` ``on_train_epoch_start``
-    hook drives it from ``self.current_epoch`` / ``trainer.max_epochs``.
+    Holds the ramp endpoints ``(alpha_init, alpha_final)`` and evaluates the per-epoch weight through
+    :func:`progressive_alpha`. The object carries no epoch state of its own — the caller supplies the current epoch and
+    total epoch count each call — so a single instance is reused across the run and the
+    :class:`~lucid_yolo.ptl.module.DetectionLitModule` ``on_train_epoch_start`` hook drives it from
+    ``self.current_epoch`` / ``trainer.max_epochs``.
 
     Attributes:
         alpha_init: One-to-many weight at ``epoch == 0``. Defaults to ``0.8``.

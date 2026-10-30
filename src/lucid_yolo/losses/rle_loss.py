@@ -1,117 +1,86 @@
 # SPDX-License-Identifier: Apache-2.0
 """Residual log-likelihood estimation loss for keypoint regression (R14, WP-123).
 
-R14 replaces a fixed-shape regression loss (L1, equivalent to assuming the
-prediction error follows a Laplace distribution of constant scale) with a
-**learned** residual distribution: a small RealNVP normalizing flow that
-captures whatever shape the true error distribution actually has, while the
-regression head still predicts a location ``mu_hat`` and a per-axis scale
-``sigma_hat`` exactly as before.
+R14 replaces a fixed-shape regression loss (L1, equivalent to assuming the prediction error follows a Laplace
+distribution of constant scale) with a **learned** residual distribution: a small RealNVP normalizing flow that
+captures whatever shape the true error distribution actually has, while the regression head still predicts a location
+``mu_hat`` and a per-axis scale ``sigma_hat`` exactly as before.
 
-**The reparameterization (R14 sec. 3.2).** Every keypoint's ground-truth
-location ``mu_g`` is standardized against the network's own prediction into a
-residual ``x_bar = (mu_g - mu_hat) / sigma_hat``. Training maximizes the
-likelihood of ``x_bar`` under a residual density that is itself a sum of two
-parts (R14 Eq. 7): a fixed, untrained density ``Q`` (Laplace, "the preset
-density function") plus a learned correction ``G_phi`` — the density the
-RealNVP flow induces over ``x_bar`` via the standard normalizing-flow
-change-of-variables identity, using a standard normal latent
-(``z_bar ~ N(0, I)``, R14 sec. 3.2: "the flow model f_phi is leveraged to map a
-zero-mean initial distribution z_bar ~ N(0, I)"). ``Q`` is *not* trained and
-carries no parameters; only ``G_phi`` (the flow) has weights. R14's own
-motivation for the split (sec. 3.2) is a training-stability property: the
-gradient of ``log Q(x_bar)`` with respect to ``mu_hat``/``sigma_hat`` does not
-depend on the flow at all, so early in training — while the flow is still
-close to its untrained identity-like state and would otherwise contribute
-near-useless gradient — the regression head still receives a clean, direct
-signal through ``Q``.
+**The reparameterization (R14 sec. 3.2).** Every keypoint's ground-truth location ``mu_g`` is standardized against the
+network's own prediction into a residual ``x_bar = (mu_g - mu_hat) / sigma_hat``. Training maximizes the likelihood
+of ``x_bar`` under a residual density that is itself a sum of two parts (R14 Eq. 7): a fixed, untrained density ``Q``
+(Laplace, "the preset density function") plus a learned correction ``G_phi`` — the density the RealNVP flow induces
+over ``x_bar`` via the standard normalizing-flow change-of-variables identity, using a standard normal latent
+(``z_bar ~ N(0, I)``, R14 sec. 3.2: "the flow model f_phi is leveraged to map a zero-mean initial distribution
+z_bar ~ N(0, I)"). ``Q`` is *not* trained and carries no parameters; only ``G_phi`` (the flow) has weights. R14's own
+motivation for the split (sec. 3.2) is a training-stability property: the gradient of ``log Q(x_bar)`` with respect to
+``mu_hat``/``sigma_hat`` does not depend on the flow at all, so early in training — while the flow is still close to
+its untrained identity-like state and would otherwise contribute near-useless gradient — the regression head still
+receives a clean, direct signal through ``Q``.
 
 **The loss (R14 Eq. 8, dropping the ``log s`` normalization term R14's own
 implementation drops):**
 
     L_rle = -log Q(x_bar) - log G_phi(x_bar) + log sigma_hat
 
-summed over both coordinate axes of a point (``Q`` is evaluated per axis and
-summed; ``G_phi`` already sums both axes internally, since the flow maps
-``R^2 -> R^2`` as one bijection rather than two independent 1-D ones; the
-``log sigma_hat`` correction is the log-Jacobian of the ``x_bar``
-reparameterization itself, one term per axis).
+summed over both coordinate axes of a point (``Q`` is evaluated per axis and summed; ``G_phi`` already sums both axes
+internally, since the flow maps ``R^2 -> R^2`` as one bijection rather than two independent 1-D ones; the
+``log sigma_hat`` correction is the log-Jacobian of the ``x_bar`` reparameterization itself, one term per axis).
 
-**The flow (R14 sec. 4, Appendix A Eq. 12).** ``K = 6`` stacked affine
-coupling layers over the 2-D residual: each layer holds one coordinate fixed
-and transforms the other by a scale-and-shift pair produced from the fixed
-one (Eq. 12: ``f_k(z_{k-1,0:d}, z_{k-1,d:D}) = (z_{k-1,0:d}, z_{k-1,d:D} *
-exp(g_k(z_{k-1,0:d})) + h_k(z_{k-1,0:d}))``, ``D = 2, d = 1``), with the
-transformed/fixed coordinate alternating every layer — RealNVP's own
-standard construction (Dinh et al., cited by R14), not a detail R14 restates,
-since a coupling stack that never alternates could never move one of its two
-coordinates at all and would not be a valid bijection over R^2. Each layer's
-``(g_k, h_k)`` conditioner is R14's stated default: 3 fully-connected layers
-of 64 units, every one followed by a Leaky-ReLU (R14 sec. 4: "Lfc=3 and Nn=64
-by default... Each fully-connected layer is followed by a Leaky-RELU"),
-mapping the one conditioning scalar to the transformed coordinate's
-``(log_scale, shift)`` pair. R14's sentence says *each* fully-connected layer, and
-this module reads it literally: the final ``Linear(64, 2)`` carries a Leaky-ReLU
-too, so both emitted quantities are pre-squashed — ``shift`` is effectively
-non-negative up to the leak, and ``log_scale = scale * tanh(raw)`` inherits the
-same asymmetry. **This literal reading is an assumption, not a transcription**
-(A74; the module has carried the activation since WP-125, and the row was minted
-when the audit asked what backed it). An output projection is not a hidden layer,
-and a flow whose job
-is to learn the *shape* of a residual density starts structurally biased when its
-head is one-sided. R14 states the conditioner's depth and width but neither its
-figure nor its appendix distinguishes hidden layers from the output projection, so
-the sentence admits both readings and the paper does not settle it. What would
-settle it here is the paired same-seed run the register asks for: the pose smoke
-recipe trained twice at identical seed, with and without the trailing activation,
-compared on the WP-125 acceptance metric. That run is a work package of its own —
-a behaviour change to a landed loss whose RLE-versus-Laplace-NLL comparison is the
-thing it would move — and is deliberately **not** made here; only the reading is
-recorded, so the next reader inherits an open question rather than a silent choice.
+**The flow (R14 sec. 4, Appendix A Eq. 12).** ``K = 6`` stacked affine coupling layers over the 2-D residual: each
+layer holds one coordinate fixed and transforms the other by a scale-and-shift pair produced from the fixed one
+(Eq. 12: ``f_k(z_{k-1,0:d}, z_{k-1,d:D}) = (z_{k-1,0:d}, z_{k-1,d:D} *
+exp(g_k(z_{k-1,0:d})) + h_k(z_{k-1,0:d}))``, ``D = 2, d = 1``), with the transformed/fixed coordinate alternating
+every layer — RealNVP's own standard construction (Dinh et al., cited by R14), not a detail R14 restates, since a
+coupling stack that never alternates could never move one of its two coordinates at all and would not be a valid
+bijection over R^2. Each layer's ``(g_k, h_k)`` conditioner is R14's stated default: 3 fully-connected layers of 64
+units, every one followed by a Leaky-ReLU (R14 sec. 4: "Lfc=3 and Nn=64 by default... Each fully-connected layer is
+followed by a Leaky-RELU"), mapping the one conditioning scalar to the transformed coordinate's
+``(log_scale, shift)`` pair. R14's sentence says *each* fully-connected layer, and this module reads it literally: the
+final ``Linear(64, 2)`` carries a Leaky-ReLU too, so both emitted quantities are pre-squashed — ``shift`` is
+effectively non-negative up to the leak, and ``log_scale = scale * tanh(raw)`` inherits the same asymmetry. **This
+literal reading is an assumption, not a transcription** (A74; the module has carried the activation since WP-125, and
+the row was minted when the audit asked what backed it). An output projection is not a hidden layer, and a flow whose
+job is to learn the *shape* of a residual density starts structurally biased when its head is one-sided. R14 states
+the conditioner's depth and width but neither its figure nor its appendix distinguishes hidden layers from the output
+projection, so the sentence admits both readings and the paper does not settle it. What would settle it here is the
+paired same-seed run the register asks for: the pose smoke recipe trained twice at identical seed, with and without the
+trailing activation, compared on the WP-125 acceptance metric. That run is a work package of its own — a behaviour
+change to a landed loss whose RLE-versus-Laplace-NLL comparison is the thing it would move — and is deliberately
+**not** made here; only the reading is recorded, so the next reader inherits an open question rather than a silent
+choice.
 
-The log-scale leaves that conditioner through a
-**tanh times a learned scale**, which is RealNVP's own parameterization of
-``s`` and is given there as a stability measure ("To compute the scaling
-functions s, we use a hyperbolic tangent function multiplied by a learned
-scale", Dinh et al. sec. 4); A72 records what a raw linear log-scale cost when
-this loss was first composed into a training run.
+The log-scale leaves that conditioner through a **tanh times a learned scale**, which is RealNVP's own parameterization
+of ``s`` and is given there as a stability measure ("To compute the scaling functions s, we use a hyperbolic tangent
+function multiplied by a learned scale", Dinh et al. sec. 4); A72 records what a raw linear log-scale cost when this
+loss was first composed into a training run.
 
-**sigma_hat (R14 sec. 3.3, resolving A65's deferred question):** "The
-deviation sigma_hat_i is predicted with a sigmoid function. Hence we have
-sigma_hat_i in (0, 1)." The keypoint head's raw sigma output
-(:class:`~lucid_yolo.models.heads.detect.DualDetectionHead`, WP-122) is
-therefore passed through :func:`torch.sigmoid` here, in the loss, rather than
-in the head — matching A23's precedent of normalizing a raw head output at
-the point that consumes it, not at the point that emits it.
+**sigma_hat (R14 sec. 3.3, resolving A65's deferred question):** "The deviation sigma_hat_i is predicted with a sigmoid
+function. Hence we have sigma_hat_i in (0, 1)." The keypoint head's raw sigma output
+(:class:`~lucid_yolo.models.heads.detect.DualDetectionHead`, WP-122) is therefore passed through :func:`torch.sigmoid`
+here, in the loss, rather than in the head — matching A23's precedent of normalizing a raw head output at the point that
+consumes it, not at the point that emits it.
 
-**Visibility masking (A66).** COCO's ``v = 0`` means no annotation exists at
-all (WP-121); training against it would optimize toward a coordinate that is
-not ground truth. ``v = 1``/``v = 2`` (occluded-but-labeled / visible) both
-carry a real, human-placed coordinate and both contribute — occlusion is
-exactly the case a regression model must learn to infer from context, and
-COCO's own OKS evaluation protocol (R12) already scores against ``v >= 1``
-ground truth regardless of visibility, so training against the same set the
-metric scores against is the consistent reading rather than a narrower one
-this project invented.
+**Visibility masking (A66).** COCO's ``v = 0`` means no annotation exists at all (WP-121); training against it would
+optimize toward a coordinate that is not ground truth. ``v = 1``/``v = 2`` (occluded-but-labeled / visible) both carry
+a real, human-placed coordinate and both contribute — occlusion is exactly the case a regression model must learn to
+infer from context, and COCO's own OKS evaluation protocol (R12) already scores against ``v >= 1`` ground truth
+regardless of visibility, so training against the same set the metric scores against is the consistent reading rather
+than a narrower one this project invented.
 
-**Where this sits in R1 (read 2026-09-17, D22).** R1 sec. 3.4.2 is YOLO26's own
-pose section and composes exactly this term into its objective: "a parallel
-sigma branch predicts per-axis uncertainty sigma = (sigma_x, sigma_y) in (0, 1)^2",
-the residual is normalized as ``eps = (x_hat - x*) / sigma`` (R1 Eq. 10, the
-``x_bar`` above), and "a shared RealNVP normalizing flow estimates log phi(eps)".
-R1 prints the loss (Eq. 11) as ``log sigma - log phi(eps) + log(2 sigma) + |eps|``
-— the bracketed pair being the Laplace NLL written in the *un-normalized* frame,
-which carries its own ``log sigma`` — so ``sigma`` enters twice per axis where
-R14 Eq. 8, transcribed here, evaluates the base density on the normalized residual
-and carries ``log sigma_hat`` once. The two differ by a ``1/sigma`` gradient on
-every scale; which R1 means is not settled by its text, and this module keeps
-R14's form until a paired run measures the other (A76, roadmap WP-181). The OKS
-term R1 composes beside this one is :class:`~lucid_yolo.losses.oks_loss.OKSLoss`
-(A75).
+**Where this sits in R1 (read 2026-09-17, D22).** R1 sec. 3.4.2 is YOLO26's own pose section and composes exactly this
+term into its objective: "a parallel sigma branch predicts per-axis uncertainty sigma = (sigma_x, sigma_y) in
+(0, 1)^2", the residual is normalized as ``eps = (x_hat - x*) / sigma`` (R1 Eq. 10, the ``x_bar`` above), and "a shared
+RealNVP normalizing flow estimates log phi(eps)". R1 prints the loss (Eq. 11) as
+``log sigma - log phi(eps) + log(2 sigma) + |eps|`` — the bracketed pair being the Laplace NLL written in the
+*un-normalized* frame, which carries its own ``log sigma`` — so ``sigma`` enters twice per axis where R14 Eq. 8,
+transcribed here, evaluates the base density on the normalized residual and carries ``log sigma_hat`` once. The two
+differ by a ``1/sigma`` gradient on every scale; which R1 means is not settled by its text, and this module keeps R14's
+form until a paired run measures the other (A76, roadmap WP-181). The OKS term R1 composes beside this one is
+:class:`~lucid_yolo.losses.oks_loss.OKSLoss` (A75).
 
-No detection-repository code of any kind was consulted while writing this
-module — implemented directly from R14's equations and its own citation of
-RealNVP (Dinh et al.), per AGENTS.md sec. 6 and sec. 7.
+No detection-repository code of any kind was consulted while writing this module — implemented directly from R14's
+equations and its own citation of RealNVP (Dinh et al.), per AGENTS.md sec. 6 and sec. 7.
 
 Provenance: R14 (Eq. 5, 7, 8, sec. 3.2, sec. 3.3, sec. 4, Appendix A Eq. 12), R12 (visibility semantics),
 R1 sec. 3.4.2, Eq. 10-11 (the composition this term belongs to).
@@ -135,27 +104,24 @@ __all__ = ["RLELoss"]
 _FLOW_COUPLING_LAYERS = 6
 #: Conditioner hidden width (R14 sec. 4: "Nn=64 by default").
 _CONDITIONER_HIDDEN = 64
-#: Scale of the fixed, untrained base density Q (a standardized unit Laplace;
-#: sigma_hat already carries the residual's scale, so Q itself needs none).
+#: Scale of the fixed, untrained base density Q (a standardized unit Laplace; sigma_hat already carries the
+#: residual's scale, so Q itself needs none).
 _BASE_LAPLACE_SCALE = 1.0
-#: Minimum sigma_hat used only to keep the reparameterization's division finite
-#: at the sigmoid's asymptote; sigma_hat in (0, 1) never reaches this in
-#: practice, and the floor changes no in-range value.
+#: Minimum sigma_hat used only to keep the reparameterization's division finite at the sigmoid's asymptote; sigma_hat
+#: in (0, 1) never reaches this in practice, and the floor changes no in-range value.
 _MIN_SIGMA = 1e-6
 
 
 class _CouplingConditioner(nn.Module):
     """The ``(g_k, h_k)`` pair: 3 FC/Leaky-ReLU layers mapping one scalar to (log_scale, shift).
 
-    R14 sec. 4's stated default conditioner shape, shared by every coupling
-    layer's own independent instance (parameters are not tied across layers).
+    R14 sec. 4's stated default conditioner shape, shared by every coupling layer's own independent instance
+    (parameters are not tied across layers).
 
-    The trailing ``LeakyReLU`` after the output ``Linear(64, 2)`` is the literal
-    reading of R14's "Each fully-connected layer is followed by a Leaky-RELU" and
-    is a registered assumption, not a transcription — it pre-squashes both emitted
-    quantities. The module docstring carries the argument on both sides and the
-    paired same-seed run that would settle it; this note exists so the activation
-    is not mistaken for an accident and quietly deleted.
+    The trailing ``LeakyReLU`` after the output ``Linear(64, 2)`` is the literal reading of R14's "Each fully-connected
+    layer is followed by a Leaky-RELU" and is a registered assumption, not a transcription — it pre-squashes both
+    emitted quantities. The module docstring carries the argument on both sides and the paired same-seed run that would
+    settle it; this note exists so the activation is not mistaken for an accident and quietly deleted.
 
     Examples:
         ```pycon
@@ -178,31 +144,28 @@ class _CouplingConditioner(nn.Module):
             nn.Linear(_CONDITIONER_HIDDEN, 2),
             nn.LeakyReLU(),
         )
-        #: RealNVP's "learned scale" multiplying the tanh — see :meth:`forward`. One
-        #: scalar per layer, initialized to 1 so the layer starts able to express a
-        #: log-scale in ``(-1, 1)`` and grows the range only if the data pay for it.
+        #: RealNVP's "learned scale" multiplying the tanh — see :meth:`forward`. One scalar per layer, initialized
+        #: to 1 so the layer starts able to express a log-scale in ``(-1, 1)`` and grows the range only if the data
+        #: pay for it.
         self.scale = nn.Parameter(torch.ones(()))
 
     def forward(self, conditioning: Tensor) -> tuple[Tensor, Tensor]:
         """Map the conditioning scalar to a ``(log_scale, shift)`` pair.
 
-        The log-scale is emitted **through a tanh times a learned scale**, which is
-        RealNVP's own parameterization of ``s`` and is stated as a stability measure:
-        "To compute the scaling functions s, we use a hyperbolic tangent function
-        multiplied by a learned scale" (Dinh et al., sec. 4 — the same construction
-        R14 Appendix A Eq. 12 cites rather than restates). A raw linear log-scale is
-        not a simplification of that; it is a different layer, and A72 records what it
-        cost here — the stack multiplies ``exp(log_scale)`` six times, so an
-        unbounded log-scale compounds, and a measured residual of 27 reached the
-        latent as ``4e11`` and the loss as ``7e22`` before the run went non-finite.
+        The log-scale is emitted **through a tanh times a learned scale**, which is RealNVP's own parameterization of
+        ``s`` and is stated as a stability measure: "To compute the scaling functions s, we use a hyperbolic tangent
+        function multiplied by a learned scale" (Dinh et al., sec. 4 — the same construction R14 Appendix A Eq. 12 cites
+        rather than restates). A raw linear log-scale is not a simplification of that; it is a different layer, and A72
+        records what it cost here — the stack multiplies ``exp(log_scale)`` six times, so an unbounded log-scale
+        compounds, and a measured residual of 27 reached the latent as ``4e11`` and the loss as ``7e22`` before the run
+        went non-finite.
 
         Args:
             conditioning: The fixed coordinate, shape ``(..., 1)``.
 
         Returns:
-            A ``(log_scale, shift)`` pair, each shape ``(...,)``. Only the log-scale
-            is bounded: the shift is additive, compounds linearly rather than
-            multiplicatively, and is not what the paper stabilizes.
+            A ``(log_scale, shift)`` pair, each shape ``(...,)``. Only the log-scale is bounded: the shift is additive,
+            compounds linearly rather than multiplicatively, and is not what the paper stabilizes.
         """
         raw = self.net(conditioning)
         return self.scale * torch.tanh(raw[..., 0]), raw[..., 1]
@@ -211,17 +174,15 @@ class _CouplingConditioner(nn.Module):
 class _AffineCoupling(nn.Module):
     """One RealNVP affine coupling layer over a 2-D residual (R14 Appendix A Eq. 12).
 
-    Holds one coordinate fixed and scales-and-shifts the other, conditioned on
-    the fixed one. :meth:`synthesize` is the generative direction
-    (``z -> x``, forward); :meth:`invert` is its closed-form inverse
-    (``x -> z``), which is what density evaluation needs — RealNVP's defining
-    property is that both directions are available without solving anything.
+    Holds one coordinate fixed and scales-and-shifts the other, conditioned on the fixed one. :meth:`synthesize` is the
+    generative direction (``z -> x``, forward); :meth:`invert` is its closed-form inverse (``x -> z``), which is what
+    density evaluation needs — RealNVP's defining property is that both directions are available without solving
+    anything.
 
     Args:
-        transform_index: Which coordinate (``0`` or ``1``) this layer
-            transforms; the other is the conditioning input. Alternating this
-            across the stack is what lets a 2-D coupling stack move both
-            coordinates overall (standard RealNVP construction).
+        transform_index: Which coordinate (``0`` or ``1``) this layer transforms; the other is the conditioning input.
+            Alternating this across the stack is what lets a 2-D coupling stack move both coordinates overall (standard
+            RealNVP construction).
 
     Examples:
         ```pycon
@@ -277,10 +238,9 @@ class _AffineCoupling(nn.Module):
             x: Input of shape ``(..., 2)``.
 
         Returns:
-            ``(z, log_det)``: the recovered pair, shape ``(..., 2)``, and this
-            layer's inverse log-determinant contribution, shape ``(...,)``
-            (the negation of :meth:`synthesize`'s, since inverting an
-            ``exp(log_scale)`` scaling divides rather than multiplies).
+            ``(z, log_det)``: the recovered pair, shape ``(..., 2)``, and this layer's inverse log-determinant
+            contribution, shape ``(...,)`` (the negation of :meth:`synthesize`'s, since inverting an ``exp(log_scale)``
+            scaling divides rather than multiplies).
         """
         fixed = x[..., self.condition_index]
         moving = x[..., self.transform_index]
@@ -297,11 +257,10 @@ class _AffineCoupling(nn.Module):
 class _RealNVPFlow(nn.Module):
     """The stacked ``K``-layer RealNVP flow with a standard-normal latent base.
 
-    :meth:`log_density` is :math:`\\log G_\\phi(\\bar{x})`: the flow-induced
-    density of the standardized residual, via the change-of-variables
-    identity ``log G_phi(x) = log p_z(f_phi^{-1}(x)) + log|det d f_phi^{-1} /
-    dx|`` (R14 sec. 3.2), computed as a sum of per-layer inverse log-determinants
-    plus the standard-normal base log-density at the recovered latent.
+    :meth:`log_density` is :math:`\\log G_\\phi(\\bar{x})`: the flow-induced density of the standardized residual, via
+    the change-of-variables identity ``log G_phi(x) = log p_z(f_phi^{-1}(x)) + log|det d f_phi^{-1} /
+    dx|`` (R14 sec. 3.2), computed as a sum of per-layer inverse log-determinants plus the standard-normal base
+    log-density at the recovered latent.
 
     Examples:
         ```pycon
@@ -399,21 +358,17 @@ class _RealNVPFlow(nn.Module):
 def _select_visible(mu_hat: Tensor, sigma_raw: Tensor, mu_gt: Tensor, visibility: Tensor) -> tuple[Tensor, Tensor]:
     """Flatten ``(N, K, 2)`` point tensors to ``(V, 2)`` rows of *labelled* points only.
 
-    The masking A66 describes, applied to the **inputs** rather than to the reduction.
-    Selecting afterwards makes the loss *value* right and everything else wrong: an
-    unlabelled point's coordinate is not ground truth and may be anything at all, and
-    until it was dropped here every one of them was still divided by ``sigma_hat``,
-    pushed through the flow, and evaluated under a density — so a single non-finite
-    unlabelled annotation produced ``NaN`` gradients on the shared flow weights and on
-    every visible point's own ``mu_hat``, while the reported loss stayed healthy and the
-    masked value stayed exactly correct. With :mod:`torch.distributions`' argument
-    validation left at its default the same input does not even get that far: the base
-    density rejects the non-finite residual and a masked-out annotation raises
-    :class:`ValueError` out of the loss.
+    The masking A66 describes, applied to the **inputs** rather than to the reduction. Selecting afterwards makes the
+    loss *value* right and everything else wrong: an unlabelled point's coordinate is not ground truth and may be
+    anything at all, and until it was dropped here every one of them was still divided by ``sigma_hat``, pushed through
+    the flow, and evaluated under a density — so a single non-finite unlabelled annotation produced ``NaN`` gradients on
+    the shared flow weights and on every visible point's own ``mu_hat``, while the reported loss stayed healthy and the
+    masked value stayed exactly correct. With :mod:`torch.distributions`' argument validation left at its default the
+    same input does not even get that far: the base density rejects the non-finite residual and a masked-out annotation
+    raises :class:`ValueError` out of the loss.
 
-    Selecting first is also cheaper — the flow runs on the labelled fraction — and makes
-    the guarantee structural: a ``v == 0`` row is not part of the graph, so no gradient
-    can reach it and none can leave it.
+    Selecting first is also cheaper — the flow runs on the labelled fraction — and makes the guarantee structural: a
+    ``v == 0`` row is not part of the graph, so no gradient can reach it and none can leave it.
 
     Args:
         mu_hat: Predicted point coordinates, shape ``(N, K, 2)``.
@@ -422,10 +377,9 @@ def _select_visible(mu_hat: Tensor, sigma_raw: Tensor, mu_gt: Tensor, visibility
         visibility: COCO-style visibility, shape ``(N, K)``; ``v > 0`` is kept (A66).
 
     Returns:
-        ``(residual_inputs, sigma_hat)``: the ``(V, 2)`` ground-truth-minus-prediction
-        offsets of the labelled points, and their ``(V, 2)`` sigmoid-activated,
-        floor-clamped scales. ``V`` is ``0`` when nothing is labelled, and both tensors
-        stay attached to their arguments' graphs.
+        ``(residual_inputs, sigma_hat)``: the ``(V, 2)`` ground-truth-minus-prediction offsets of the labelled points,
+        and their ``(V, 2)`` sigmoid-activated, floor-clamped scales. ``V`` is ``0`` when nothing is labelled, and both
+        tensors stay attached to their arguments' graphs.
 
     Examples:
         ```pycon
@@ -450,11 +404,9 @@ def _select_visible(mu_hat: Tensor, sigma_raw: Tensor, mu_gt: Tensor, visibility
 def _reduce_selected(per_point: Tensor) -> Tensor:
     """Mean an already-selected per-point loss, or a finite zero if nothing was selected.
 
-    Mirrors :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s
-    zero-positives handling: a sum divided by ``max(count, 1)`` stays finite
-    and attached to ``per_point``'s graph rather than producing a ``NaN``
-    ``0 / 0`` mean. The selection itself happened in :func:`_select_visible`,
-    before any arithmetic — this only divides.
+    Mirrors :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s zero-positives handling: a sum divided by
+    ``max(count, 1)`` stays finite and attached to ``per_point``'s graph rather than producing a ``NaN`` ``0 / 0`` mean.
+    The selection itself happened in :func:`_select_visible`, before any arithmetic — this only divides.
 
     Args:
         per_point: Per-point loss values of the labelled points, shape ``(V,)``.
@@ -478,18 +430,14 @@ def _reduce_selected(per_point: Tensor) -> Tensor:
 class RLELoss(nn.Module):
     """Residual log-likelihood loss over keypoint predictions (R14 Eq. 8).
 
-    Unlike every other loss in :mod:`lucid_yolo.losses` (all parameter-free
-    pure functions over already-produced network outputs), RLE's flow
-    :math:`G_\\phi` carries trainable weights of its own (R14 sec. 4) — it is
-    not part of the keypoint head (WP-122 emits only ``mu_hat``/``sigma_raw``)
-    but it must still be optimized, checkpointed, and device-placed alongside
-    the rest of the model. An :class:`nn.Module` that a
-    :class:`~pytorch_lightning.LightningModule` registers as a submodule
-    (``self.rle_loss = RLELoss()``) is what makes ``.parameters()`` and
-    ``state_dict()`` pick the flow up automatically; a bare function hiding a
-    lazily-built global instance would not be discoverable by an optimizer at
-    all, and would violate this project's own prohibition on global mutable
-    state.
+    Unlike every other loss in :mod:`lucid_yolo.losses` (all parameter-free pure functions over already-produced network
+    outputs), RLE's flow :math:`G_\\phi` carries trainable weights of its own (R14 sec. 4) — it is not part of the
+    keypoint head (WP-122 emits only ``mu_hat``/``sigma_raw``) but it must still be optimized, checkpointed, and
+    device-placed alongside the rest of the model. An :class:`nn.Module` that a
+    :class:`~pytorch_lightning.LightningModule` registers as a submodule (``self.rle_loss = RLELoss()``) is what makes
+    ``.parameters()`` and ``state_dict()`` pick the flow up automatically; a bare function hiding a lazily-built global
+    instance would not be discoverable by an optimizer at all, and would violate this project's own prohibition on
+    global mutable state.
 
     Examples:
         ```pycon
@@ -517,41 +465,29 @@ class RLELoss(nn.Module):
         """Compute the masked mean RLE loss.
 
         Args:
-            mu_hat: Predicted point coordinates, shape ``(N, K, 2)`` — the
-                decoded output of
-                :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints`
-                for the positive instances an assigner has already selected,
-                mirroring
-                :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s
-                already-gathered-positives convention. **In a normalized
-                frame, not input pixels** (A71): ``sigma_hat`` is bounded
-                into ``(0, 1)`` by R14's own sigmoid, so a residual it can
-                scale is one whose errors are ``O(1)``. Callers map both
-                point arguments through
-                :func:`~lucid_yolo.ptl.module.normalize_keypoints_to_box`
-                first; passing pixels drives the flow non-finite rather than
-                merely training badly.
-            sigma_raw: Raw, unactivated per-axis uncertainty, shape
-                ``(N, K, 2)``
-                (:class:`~lucid_yolo.models.heads.detect.DualDetectionHead`'s
-                ``keypoint_sigma`` output, WP-122, A65). Passed through
-                :func:`torch.sigmoid` here, per R14 sec. 3.3.
-            mu_gt: Ground-truth point coordinates, shape ``(N, K, 2)``, in
-                the same normalized frame as ``mu_hat`` (A71).
-            visibility: COCO-style visibility, shape ``(N, K)`` int64
-                (WP-121's ``Targets.keypoint_vis``). Points with ``v == 0``
-                do not contribute (A66); ``v >= 1`` do, regardless of
-                occlusion. The exclusion is applied by :func:`_select_visible`
-                **before** any arithmetic, so an unlabelled point's coordinate
-                is never divided, never entered into the flow and never
-                evaluated under a density — whatever it holds, including a
-                non-finite placeholder, it can neither perturb a gradient nor
-                raise out of the base distribution's argument validation.
+            mu_hat: Predicted point coordinates, shape ``(N, K, 2)`` — the decoded output of
+                :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` for the positive instances an assigner has
+                already selected, mirroring :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s
+                already-gathered-positives convention. **In a normalized frame, not input pixels** (A71): ``sigma_hat``
+                is bounded into ``(0, 1)`` by R14's own sigmoid, so a residual it can scale is one whose errors are
+                ``O(1)``. Callers map both point arguments through
+                :func:`~lucid_yolo.ptl.module.normalize_keypoints_to_box` first; passing pixels drives the flow
+                non-finite rather than merely training badly.
+            sigma_raw: Raw, unactivated per-axis uncertainty, shape ``(N, K, 2)``
+                (:class:`~lucid_yolo.models.heads.detect.DualDetectionHead`'s ``keypoint_sigma`` output, WP-122, A65).
+                Passed through :func:`torch.sigmoid` here, per R14 sec. 3.3.
+            mu_gt: Ground-truth point coordinates, shape ``(N, K, 2)``, in the same normalized frame as ``mu_hat``
+                (A71).
+            visibility: COCO-style visibility, shape ``(N, K)`` int64 (WP-121's ``Targets.keypoint_vis``). Points with
+                ``v == 0`` do not contribute (A66); ``v >= 1`` do, regardless of occlusion. The exclusion is applied by
+                :func:`_select_visible` **before** any arithmetic, so an unlabelled point's coordinate is never divided,
+                never entered into the flow and never evaluated under a density — whatever it holds, including a
+                non-finite placeholder, it can neither perturb a gradient nor raise out of the base distribution's
+                argument validation.
 
         Returns:
-            A scalar (zero-dimensional) tensor: the mean per-point, per-axis
-            loss over every visible point. A finite zero, still attached to
-            ``mu_hat`` and ``sigma_raw``'s graphs, when no point is visible.
+            A scalar (zero-dimensional) tensor: the mean per-point, per-axis loss over every visible point. A finite
+            zero, still attached to ``mu_hat`` and ``sigma_raw``'s graphs, when no point is visible.
         """
         offset, sigma_hat = _select_visible(mu_hat, sigma_raw, mu_gt, visibility)  # both (V, 2)
         return _reduce_selected(self._per_point(offset, sigma_hat))
@@ -634,8 +570,8 @@ class RLELoss(nn.Module):
         )
 
 
-# These built-in stages have no cross-row operation. Snapshot identities so replacing
-# a class method later cannot silently turn the batching certificate into a new policy.
+# These built-in stages have no cross-row operation. Snapshot identities so replacing a class method later cannot
+# silently turn the batching certificate into a new policy.
 _PAIR_METHODS: dict[type[nn.Module], tuple[tuple[str, Callable[..., object]], ...]] = {
     cls: tuple((name, getattr(cls, name)) for name in (*names, "__call__", "_call_impl"))
     for cls, names in (

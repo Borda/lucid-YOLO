@@ -148,10 +148,9 @@ def test_oriented_adapter_preserves_fields() -> None:
 def test_oriented_default_and_cpu_fallback(stage: str) -> None:
     """Enabling the existing flag changes no checkpoint keys and stays native without CUDA.
 
-    Every Lightning stage sets the module up, and only ``fit`` trains, so only ``fit``
-    names the ignored flag: an evaluation run reporting a replay it never would use is
-    noise, and a CPU setup that turned recording on would be a silent regression. The
-    recorder entry point raises if anything reaches it, so the CPU setup is proven inert.
+    Every Lightning stage sets the module up, and only ``fit`` trains, so only ``fit`` names the ignored flag: an
+    evaluation run reporting a replay it never would use is noise, and a CPU setup that turned recording on would be a
+    silent regression. The recorder entry point raises if anything reaches it, so the CPU setup is proven inert.
     """
     native, replayed = _oriented(), _oriented(capture_network=True)
     assert native.state_dict().keys() == replayed.state_dict().keys()
@@ -172,8 +171,8 @@ def test_oriented_default_and_cpu_fallback(stage: str) -> None:
 def test_oriented_cli_accepts_network_replay() -> None:
     """The packaged oriented recipe builds the flag, keeps rotated-target transport and passes the replay guard.
 
-    A shipped setting that tripped the guard would leave every user of the recipe on the
-    eager path with only a retirement warning to show for it.
+    A shipped setting that tripped the guard would leave every user of the recipe on the eager path with only a
+    retirement warning to show for it.
     """
     cli = DetectionCLI(
         DetectionLitModule,
@@ -209,10 +208,9 @@ def test_oriented_trainer_preserves_native_state(
 ) -> None:
     """Actual replay survives EMA validation and preserves empty-target gradients and temporary fallback.
 
-    Both accumulation settings record and replay; accumulation 2 also carries live gradients
-    into each second replay. A replaying arm that never records names exactly one cause, the
-    precision policy, so a retirement for an unrelated cause cannot satisfy the count while
-    hiding the regression behind it.
+    Both accumulation settings record and replay; accumulation 2 also carries live gradients into each second
+    replay. A replaying arm that never records names exactly one cause, the precision policy, so a retirement for an
+    unrelated cause cannot satisfy the count while hiding the regression behind it.
     """
     torch.manual_seed(42)
     batches = _batches(layout)
@@ -323,10 +321,9 @@ def test_oriented_classification_override_stays_native(monkeypatch: pytest.Monke
 def test_oriented_loss_setting_change_keeps_replay(monkeypatch: pytest.MonkeyPatch) -> None:
     """A scalar loss setting outside the network recording leaves oriented replay eligible.
 
-    The oriented loss always runs eagerly after the recorded network, so an assigner epsilon
-    the detection loss recording refuses cannot change which outputs carry gradients. Both
-    halves are asserted: the loss certificate still refuses the value, and the network
-    guard does not inherit that refusal.
+    The oriented loss always runs eagerly after the recorded network, so an assigner epsilon the detection loss
+    recording refuses cannot change which outputs carry gradients. Both halves are asserted: the loss certificate still
+    refuses the value, and the network guard does not inherit that refusal.
     """
     model = _oriented(capture_network=True)
     monkeypatch.setattr(model.loss.o2m_assigner, "eps", 1e-40)
@@ -389,10 +386,9 @@ def _override_objective(model: DetectionLitModule) -> None:
 def test_oriented_routing_dispatches_full_network_to_recorder() -> None:
     """An unbroken oriented module hands all three stages to the oriented recorder and returns its output.
 
-    The CUDA-only route cannot execute on CPU runners, so images spoof ``is_cuda`` and the
-    recorder is replaced: what is pinned is the dispatch itself, the oriented entry point
-    with the complete stage tuple and the module as its eager fallback, never the
-    detection route, and no retirement warning.
+    The CUDA-only route cannot execute on CPU runners, so images spoof ``is_cuda`` and the recorder is replaced: what
+    is pinned is the dispatch itself, the oriented entry point with the complete stage tuple and the module as its
+    eager fallback, never the detection route, and no retirement warning.
     """
     model = _routed_oriented()
     images = _cuda_flagged_images()
@@ -412,9 +408,9 @@ def test_oriented_routing_dispatches_full_network_to_recorder() -> None:
 def test_oriented_routing_leaves_cpu_images_native() -> None:
     """Images that are not on CUDA never reach the oriented recorder, however many gates pass.
 
-    Every other training-time gate is satisfied, so the image residency check alone
-    keeps the route native: the recorder is never called, no retirement is warned, and
-    all six fields equal the module's own eager forward byte for byte.
+    Every other training-time gate is satisfied, so the image residency check alone keeps the route native: the
+    recorder is never called, no retirement is warned, and all six fields equal the module's own eager forward
+    byte for byte.
     """
     model = _routed_oriented()
     images = torch.rand(2, 3, 64, 64)
@@ -443,8 +439,8 @@ def test_oriented_routing_retires_then_runs_native(
 ) -> None:
     """A broken oriented contract retires the recording once and returns the full native call.
 
-    An overridden consumer retires before the recorder is reached at all, and the output
-    is the module's own forward, run exactly once.
+    An overridden consumer retires before the recorder is reached at all, and the output is the module's own forward,
+    run exactly once.
     """
     model = _routed_oriented(accumulation)
     mutate(model)
@@ -477,9 +473,9 @@ class _ClassificationOnly(DetectionLitModule):
 def test_oriented_subclass_override_stays_native() -> None:
     """A consumer overridden in a subclass retires replay, as an instance attribute does.
 
-    The guard unwraps bound methods through ``__func__`` before comparing them. A subclass
-    method is a bound method whose function is not the native one, the path the
-    instance-level lambdas above never reach; this case runs it without a GPU.
+    The guard unwraps bound methods through ``__func__`` before comparing them. A subclass method is a bound method
+    whose function is not the native one, the path the instance-level lambdas above never reach; this case runs it
+    without a GPU.
     """
     model = _ClassificationOnly(0.34, 0.25, 64, 2, task="obb", capture_network=True)
     assert _oriented_replay_breach(model) == "the native oriented objective is overridden"
@@ -489,8 +485,8 @@ def test_oriented_subclass_override_stays_native() -> None:
 def test_oriented_override_keeps_absent_angle_gradients(graph_recordings: MagicMock) -> None:
     """The public trainer fallback skips angle state instead of materializing zero gradients.
 
-    The replaying arm retires once, and for the overridden objective specifically: a
-    retirement for any other cause would leave the same absent gradients behind it.
+    The replaying arm retires once, and for the overridden objective specifically: a retirement for any other cause
+    would leave the same absent gradients behind it.
     """
     batches = _batches("uniform")
     initial = _oriented().state_dict()

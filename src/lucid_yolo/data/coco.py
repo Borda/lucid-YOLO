@@ -1,14 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """COCO-format detection/segmentation dataset and the scale-aware policy (WP-014).
 
-:class:`CocoDetectionDataset` reads a COCO *instances* JSON once, indexes its
-annotations by image id, and yields ``(image, Targets)`` pairs consumed by the
-Phase 1 augmentation pipeline. It is deliberately a *thin* reader: image decoding
-goes through :func:`torchvision.io.read_image` (torchvision is a core dependency,
-blueprint sec. 5.9), boxes are converted from COCO ``xywh`` to the project's
-``xyxy`` convention, category ids are remapped to a contiguous ``int64`` label
-space, and each annotation's first segmentation ring — when present — is parsed
-into a ``(P, 2)`` float32 polygon.
+:class:`CocoDetectionDataset` reads a COCO *instances* JSON once, indexes its annotations by image id, and yields
+``(image, Targets)`` pairs consumed by the Phase 1 augmentation pipeline. It is deliberately a *thin* reader: image
+decoding goes through :func:`torchvision.io.read_image` (torchvision is a core dependency, blueprint sec. 5.9), boxes
+are converted from COCO ``xywh`` to the project's ``xyxy`` convention, category ids are remapped to a contiguous
+``int64`` label space, and each annotation's first segmentation ring — when present — is parsed into a ``(P, 2)``
+float32 polygon.
 
 Which ring, and where the box comes from (WP-014, M-38):
     A COCO ``segmentation`` may carry **several** rings for one object — a lobe
@@ -18,64 +16,49 @@ Which ring, and where the box comes from (WP-014, M-38):
     double the object's count at the metric) nor concatenable onto the first (the
     joining edge is a boundary the object does not have).
 
-    So that the retained ring and the box describe *the same* thing, the box is
-    then **derived from that ring** — its envelope — exactly as the oriented path
-    below derives ``boxes`` from the quad rather than reading COCO's ``bbox``.
-    The rule is per image, because ``polygons`` is per image: when every instance
-    of an image keeps a ring, every one of that image's boxes is its own ring's
-    envelope; when any instance has no ring at all, the image's ``polygons``
-    collapse to ``[]`` (there is no mask supervision to stay in lock-step with)
-    and every box is COCO's ``bbox``, which is the field a detection reading wants.
-    Nothing mixes the two sources within one image.
+    So that the retained ring and the box describe *the same* thing, the box is then **derived from that ring** — its
+    envelope — exactly as the oriented path below derives ``boxes`` from the quad rather than reading COCO's ``bbox``.
+    The rule is per image, because ``polygons`` is per image: when every instance of an image keeps a ring, every one
+    of that image's boxes is its own ring's envelope; when any instance has no ring at all, the image's ``polygons``
+    collapse to ``[]`` (there is no mask supervision to stay in lock-step with) and every box is COCO's ``bbox``,
+    which is the field a detection reading wants. Nothing mixes the two sources within one image.
 
-    A ring-derived box is deliberately **not** clamped to the image bounds, again
-    following :func:`_oriented_targets`: clamping would move the box off the ring
-    it was just derived from, which is the desync this rule exists to remove. A
-    ``bbox``-derived box is clamped, as it always was — there is no ring for it to
-    contradict.
+    A ring-derived box is deliberately **not** clamped to the image bounds, again following :func:`_oriented_targets`:
+    clamping would move the box off the ring it was just derived from, which is the desync this rule exists to
+    remove. A ``bbox``-derived box is clamped, as it always was — there is no ring for it to contradict.
 
 Degenerate instances (M-38's sibling, L-30):
-    An instance whose final box has zero width or zero height is dropped at read
-    time, on every reading mode. COCO carries such annotations, and the clamp in
-    :func:`_xywh_to_xyxy` makes more of them out of boxes that lie outside the
-    canvas. They were previously kept, which put the *validation* protocol at odds
-    with the train pipeline — ``instance_keep_mask`` (``data/affine.py``,
-    ``data/mosaic.py``) drops them there, and nothing dropped them on the val path,
-    so the two disagreed about what counts as an instance. Dropping at the read
-    means neither path ever sees one: they are not scored, and they are not
-    trained on.
+    An instance whose final box has zero width or zero height is dropped at read time, on every reading mode. COCO
+    carries such annotations, and the clamp in :func:`_xywh_to_xyxy` makes more of them out of boxes that lie outside
+    the canvas. They were previously kept, which put the *validation* protocol at odds with the train pipeline —
+    ``instance_keep_mask`` (``data/affine.py``, ``data/mosaic.py``) drops them there, and nothing dropped them on
+    the val path, so the two disagreed about what counts as an instance. Dropping at the read means neither path ever
+    sees one: they are not scored, and they are not trained on.
 
 Crowd / RLE policy:
-    COCO carries two kinds of ``segmentation``: a list of flat polygon rings
-    (``[[x, y, x, y, ...], ...]``) for ordinary instances, and a run-length dict
-    for crowd regions. ``iscrowd=1`` annotations, and any ``segmentation`` value
-    that is *present but unusable* (an RLE dict, an empty list, or a ring with
-    fewer than three points), are always **skipped**, in every reading mode —
-    neither is ever a real countable instance. A ``segmentation`` key that is
-    **absent entirely** is different (WP-121b): it is fatal only for an oriented
-    reading, which has no other source for the rotated box; a plain or keypoints
-    reading keeps the instance, and :meth:`CocoDetectionDataset._build_targets`
-    collapses the whole image's ``polygons`` to ``[]`` the moment any one instance
-    lacks a ring — so :class:`~lucid_yolo.data.targets.Targets` still sees a
-    consistent "one ring per box" set or an empty set, never a mix.
+    COCO carries two kinds of ``segmentation``: a list of flat polygon rings (``[[x, y, x, y, ...], ...]``) for
+    ordinary instances, and a run-length dict for crowd regions. ``iscrowd=1`` annotations, and any ``segmentation``
+    value that is *present but unusable* (an RLE dict, an empty list, or a ring with fewer than three points), are
+    always **skipped**, in every reading mode — neither is ever a real countable instance. A ``segmentation`` key
+    that is **absent entirely** is different (WP-121b): it is fatal only for an oriented reading, which has no other
+    source for the rotated box; a plain or keypoints reading keeps the instance, and
+    :meth:`CocoDetectionDataset._build_targets` collapses the whole image's ``polygons`` to ``[]`` the moment any one
+    instance lacks a ring — so :class:`~lucid_yolo.data.targets.Targets` still sees a consistent "one ring per box"
+    set or an empty set, never a mix.
 
 Oriented reading (``oriented=True``, WP-088):
-    A COCO file written for an oriented task carries each object's rotated box as a
-    **four-point** ``segmentation`` ring — the same quadrilateral encoding DOTA's
-    eight-coordinate label lines use (R18), in COCO's container. Under ``oriented``
-    every ring is fitted to a canonical long-edge box by
-    :func:`~lucid_yolo.data.rotated_geom.polygons_to_rboxes` and the axis-aligned
-    ``boxes`` are recomputed as the **envelope of that same ring** rather than read
-    from the ``bbox`` field, so ``boxes[i]`` and ``rboxes[i]`` describe one object by
-    construction — the instance-axis invariant :mod:`lucid_yolo.data.dota` states and
-    every rotated transform (WP-058) relies on. A ring that is not a quadrilateral
-    raises: it is an annotation this reader cannot turn into a rotated box, and
-    dropping it silently would shrink the dataset without saying so.
+    A COCO file written for an oriented task carries each object's rotated box as a **four-point** ``segmentation``
+    ring — the same quadrilateral encoding DOTA's eight-coordinate label lines use (R18), in COCO's container. Under
+    ``oriented`` every ring is fitted to a canonical long-edge box by
+    :func:`~lucid_yolo.data.rotated_geom.polygons_to_rboxes` and the axis-aligned ``boxes`` are recomputed as the
+    **envelope of that same ring** rather than read from the ``bbox`` field, so ``boxes[i]`` and ``rboxes[i]`` describe
+    one object by construction — the instance-axis invariant :mod:`lucid_yolo.data.dota` states and every rotated
+    transform (WP-058) relies on. A ring that is not a quadrilateral raises: it is an annotation this reader cannot
+    turn into a rotated box, and dropping it silently would shrink the dataset without saying so.
 
-    ``polygons`` is left empty on this path, exactly as in
-    :func:`~lucid_yolo.data.dota.dota_targets`: the quad is already carried by
-    ``rboxes`` up to the rectangle fit, and a second copy is one more modality every
-    warp would have to keep consistent for no reader.
+    ``polygons`` is left empty on this path, exactly as in :func:`~lucid_yolo.data.dota.dota_targets`: the quad is
+    already carried by ``rboxes`` up to the rectangle fit, and a second copy is one more modality every warp would
+    have to keep consistent for no reader.
 
 Keypoint reading (``keypoints=True``, WP-121):
     Each retained annotation's flat COCO ``keypoints`` field is split into
@@ -83,30 +66,25 @@ Keypoint reading (``keypoints=True``, WP-121):
     same instance axis as boxes and labels. Visibility is carried through
     unchanged; its training-time meaning is left to ``docs/ASSUMPTIONS.md``.
 
-    The reader also publishes :attr:`CocoDetectionDataset.keypoint_flip_pairs`, the
-    left/right swap a horizontal mirror must apply, derived from the category's own
-    ``keypoints`` names. A64 requires exactly this: the pairing is anatomical, so it
-    belongs to whichever dataset supplies the K points and not to the mirror transform,
-    which is K-generic and could not know it. Naming the sides is how a COCO file states
-    the pairing, so reading the names is reading the schema — no per-dataset constant
-    lives here. A schema with no sided name yields ``None``, which the flip reads as
-    "mirror the coordinates, swap nothing".
+    The reader also publishes :attr:`CocoDetectionDataset.keypoint_flip_pairs`, the left/right swap a horizontal
+    mirror must apply, derived from the category's own ``keypoints`` names. A64 requires exactly this: the pairing is
+    anatomical, so it belongs to whichever dataset supplies the K points and not to the mirror transform, which is
+    K-generic and could not know it. Naming the sides is how a COCO file states the pairing, so reading the names is
+    reading the schema — no per-dataset constant lives here. A schema with no sided name yields ``None``, which the
+    flip reads as "mirror the coordinates, swap nothing".
 
 The ``difficult`` key (A51, A53, WP-094):
-    An annotation may carry a ``difficult`` flag, which this reader forwards onto the
-    A51 channel of :class:`~lucid_yolo.data.targets.Targets`. It is not part of the COCO
-    schema — it is R18's per-instance flag, written by the tiled-layout build
-    (``lucid-data build-tiles``) because tiling *creates* difficult instances that
-    exist in no label file (A39). Absent, every instance reads non-difficult, so an
-    ordinary COCO file behaves exactly as before. The flag is carried on both readings,
-    oriented and axis-aligned, since it says something about the annotation rather than
-    about the box modality; A48 is what eventually acts on it, at the metric.
+    An annotation may carry a ``difficult`` flag, which this reader forwards onto the A51 channel of
+    :class:`~lucid_yolo.data.targets.Targets`. It is not part of the COCO schema — it is R18's per-instance flag,
+    written by the tiled-layout build (``lucid-data build-tiles``) because tiling *creates* difficult instances that
+    exist in no label file (A39). Absent, every instance reads non-difficult, so an ordinary COCO file behaves
+    exactly as before. The flag is carried on both readings, oriented and axis-aligned, since it says something about
+    the annotation rather than about the box modality; A48 is what eventually acts on it, at the metric.
 
-:func:`build_scale_policy` returns the size-aware augmentation strengths of
-[R1] Table S3 (blueprint sec. 5.9): the ``n`` recipe is mildest and larger
-variants grow stronger. The exact per-variant tuples are this project's reading
-of that table; the acceptance gate is smoke-tier *behaviour* (the augmentation
-pipeline runs and stays geometrically consistent), not the literal constants.
+:func:`build_scale_policy` returns the size-aware augmentation strengths of [R1] Table S3 (blueprint sec. 5.9): the
+``n`` recipe is mildest and larger variants grow stronger. The exact per-variant tuples are this project's reading
+of that table; the acceptance gate is smoke-tier *behaviour* (the augmentation pipeline runs and stays geometrically
+consistent), not the literal constants.
 """
 
 from __future__ import annotations
@@ -165,11 +143,10 @@ _SCALE_POLICY: dict[str, dict[str, float]] = {
 def build_scale_policy(variant: str) -> dict[str, float]:
     """Return the size-aware augmentation strengths for a model ``variant``.
 
-    The values transcribe [R1] Table S3 (blueprint sec. 5.9): the ``n`` variant is
-    mildest (``scale`` 0.5, no mixup, light copy-paste) and larger variants grow
-    stronger, up to ``x`` (``scale`` 0.9, ``mixup`` 0.2, ``copy_paste`` 0.6). The
-    exact tuples are this project's reading of that table; the gate is smoke-tier
-    behaviour, not the literal constants.
+    The values transcribe [R1] Table S3 (blueprint sec. 5.9): the ``n`` variant is mildest (``scale`` 0.5, no mixup,
+    light copy-paste) and larger variants grow stronger, up to ``x`` (``scale`` 0.9, ``mixup`` 0.2, ``copy_paste``
+    0.6). The exact tuples are this project's reading of that table; the gate is smoke-tier behaviour, not the
+    literal constants.
 
     Args:
         variant: One of ``"n"``, ``"s"``, ``"m"``, ``"l"``, ``"x"``.
@@ -217,41 +194,32 @@ class _ImageRecord:
 class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     """COCO-format detection/segmentation dataset yielding ``(image, Targets)``.
 
-    The instances JSON is parsed once at construction: category ids are remapped
-    to contiguous ``int64`` labels (the mapping is exposed as
-    :attr:`category_id_to_label` / :attr:`label_to_category_id`) and annotations
-    are grouped by image id. Each ``__getitem__`` decodes its image to a CHW
-    float32 tensor in ``[0, 1]`` and returns the targets built at construction:
-    one ``xyxy`` box per kept annotation, and its first segmentation ring as a
-    ``(P, 2)`` polygon. Crowd (``iscrowd=1``) and non-polygon (RLE / empty /
-    degenerate) annotations are skipped, so a retained image carries one ring per
-    box or an empty target set.
+    The instances JSON is parsed once at construction: category ids are remapped to contiguous ``int64`` labels (the
+    mapping is exposed as :attr:`category_id_to_label` / :attr:`label_to_category_id`) and annotations are grouped by
+    image id. Each ``__getitem__`` decodes its image to a CHW float32 tensor in ``[0, 1]`` and returns the targets
+    built at construction: one ``xyxy`` box per kept annotation, and its first segmentation ring as a ``(P, 2)``
+    polygon. Crowd (``iscrowd=1``) and non-polygon (RLE / empty / degenerate) annotations are skipped, so a retained
+    image carries one ring per box or an empty target set.
 
-    Where each box comes from is stated once, in the module docstring: an image
-    whose instances all keep a ring gets ring-envelope boxes, so box and mask
-    describe one object; an image with any ringless instance carries no polygons
-    and gets COCO's ``bbox``, clamped to the image bounds. Either way an instance
-    whose box ends up zero-width or zero-height is dropped, matching what the
-    train pipeline's ``instance_keep_mask`` does to one.
+    Where each box comes from is stated once, in the module docstring: an image whose instances all keep a ring gets
+    ring-envelope boxes, so box and mask describe one object; an image with any ringless instance carries no polygons
+    and gets COCO's ``bbox``, clamped to the image bounds. Either way an instance whose box ends up zero-width or
+    zero-height is dropped, matching what the train pipeline's ``instance_keep_mask`` does to one.
 
-    An optional single-image ``transforms`` (any
-    :class:`~lucid_yolo.data.transforms.GeometricTransform`, e.g.
-    :class:`~lucid_yolo.data.letterbox.Letterbox` for validation) is applied to each
-    sample before it is returned. Multi-image assemblies (mosaic, mixup,
-    copy-paste) are composed at the datamodule level, not here.
+    An optional single-image ``transforms`` (any :class:`~lucid_yolo.data.transforms.GeometricTransform`, e.g.
+    :class:`~lucid_yolo.data.letterbox.Letterbox` for validation) is applied to each sample before it is returned.
+    Multi-image assemblies (mosaic, mixup, copy-paste) are composed at the datamodule level, not here.
 
     Args:
         images_dir: Directory holding the image files named by the annotations.
         annotation_file: Path to the COCO ``instances_*.json`` file.
         transforms: Optional per-image geometric transform applied to every
             sample. Defaults to ``None`` (raw decoded sample).
-        oriented: Read each annotation's four-point ring as a rotated box (WP-088;
-            see the module docstring). ``False`` (the default) leaves the reader,
-            and every target it has ever produced, exactly as it was.
-        keypoints: Parse each retained annotation's COCO ``keypoints`` field into
-            the WP-120 ``Targets.keypoints`` / ``keypoint_vis`` channels. ``False``
-            (the default) leaves the reader, and every target it has ever produced,
-            exactly as it was.
+        oriented: Read each annotation's four-point ring as a rotated box (WP-088; see the module docstring).
+            ``False`` (the default) leaves the reader, and every target it has ever produced, exactly as it was.
+        keypoints: Parse each retained annotation's COCO ``keypoints`` field into the WP-120 ``Targets.keypoints`` /
+            ``keypoint_vis`` channels. ``False`` (the default) leaves the reader, and every target it has ever
+            produced, exactly as it was.
         cache_images: Decode every image once at construction and retain the RGB
             tensors in memory (:meth:`cache_images`, without its progress report) —
             ``uint8`` for an 8-bit source, ``uint16`` for a 16-bit PNG, which so takes
@@ -291,19 +259,16 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         with annotation_file.open(encoding="utf-8") as handle:
             payload = json.load(handle)
         self.category_id_to_label, self.label_to_category_id = _build_category_maps(payload["categories"])
-        # Derived only under `keypoints=True`. The pairing is strict — it raises on a
-        # half-named side — and a detection or segmentation run has no use for it, so
-        # deriving it unconditionally would let a schema flaw irrelevant to that run stop
-        # it. Gated, the strictness lands exactly on the runs that mirror points.
+        # Derived only under `keypoints=True`. The pairing is strict — it raises on a half-named side — and a detection
+        # or segmentation run has no use for it, so deriving it unconditionally would let a schema flaw irrelevant to
+        # that run stop it. Gated, the strictness lands exactly on the runs that mirror points.
         self.keypoint_flip_pairs = _build_keypoint_flip_pairs(payload["categories"]) if self._keypoints else None
         self._images = _build_image_records(payload["images"])
         self._image_cache: dict[str, Tensor] | None = None
-        # Targets are precomputed ONCE here and the raw annotation dicts dropped
-        # (WP-073). Keeping the parsed JSON alive — millions of tiny Python
-        # objects for a train-scale split — makes every DataLoader worker's
-        # refcount traffic materialize copy-on-write pages until the host OOMs
-        # over long runs; tensor-backed Targets keep the coordinate data in
-        # buffers a fork never copies.
+        # Targets are precomputed ONCE here and the raw annotation dicts dropped (WP-073). Keeping the parsed JSON
+        # alive — millions of tiny Python objects for a train-scale split — makes every DataLoader worker's refcount
+        # traffic materialize copy-on-write pages until the host OOMs over long runs; tensor-backed Targets keep the
+        # coordinate data in buffers a fork never copies.
         anns_by_image = _group_annotations(payload["annotations"])
         self._targets = [self._build_targets(anns_by_image.get(record.image_id, ()), record) for record in self._images]
         if cache_images:
@@ -316,10 +281,9 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     def cache_images(self, *, progress: bool = False) -> None:
         """Decode every distinct image file once and keep it for every later draw.
 
-        ``cache_images=True`` at construction calls this; a reader built without the flag
-        can call it later to the same effect. A second call is a no-op, and the cache is
-        installed only once every file has decoded, so a failure part-way leaves the
-        reader uncached rather than half-filled.
+        ``cache_images=True`` at construction calls this; a reader built without the flag can call it later to the
+        same effect. A second call is a no-op, and the cache is installed only once every file has decoded, so a
+        failure part-way leaves the reader uncached rather than half-filled.
 
         Records are deduplicated by ``file_name`` exactly as the annotation file spells it,
         with no path normalisation: two records naming ``a.png`` share one decoded tensor,
@@ -378,14 +342,11 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     def image_ids(self) -> tuple[int, ...]:
         """The COCO image id of each loader position, in ``__getitem__`` order.
 
-        Published because a consumer that pairs this dataset's positions with
-        anything read off the *same* annotation file — the whole-image tile merge
-        (:mod:`lucid_yolo.eval.tile_merge`) pairing a tile to its window, the COCO
-        scorer naming the image an accumulated detection belongs to — otherwise has
-        to infer the identity from the annotations that landed at a position. Two
-        tiles carrying byte-identical annotation sets are indistinguishable that
-        way and are not indistinguishable by id, so the pairing can be asserted
-        rather than argued.
+        Published because a consumer that pairs this dataset's positions with anything read off the *same* annotation
+        file — the whole-image tile merge (:mod:`lucid_yolo.eval.tile_merge`) pairing a tile to its window, the COCO
+        scorer naming the image an accumulated detection belongs to — otherwise has to infer the identity from the
+        annotations that landed at a position. Two tiles carrying byte-identical annotation sets are indistinguishable
+        that way and are not indistinguishable by id, so the pairing can be asserted rather than argued.
 
         Returns:
             One id per position, ascending: records are sorted by image id at
@@ -417,10 +378,9 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     def file_names(self) -> tuple[str, ...]:
         """The image file name of each loader position, in ``__getitem__`` order.
 
-        The companion of :attr:`image_ids` for a consumer that arrives with a file
-        rather than an id — a figure drawn over ``000007.jpg`` needs that image's
-        labels, and the file name is the one key both the picture on disk and the
-        annotation record share (WP-189).
+        The companion of :attr:`image_ids` for a consumer that arrives with a file rather than an id — a figure drawn
+        over ``000007.jpg`` needs that image's labels, and the file name is the one key both the picture on disk and
+        the annotation record share (WP-189).
 
         Returns:
             One name per position, as the JSON spells it, aligned with :attr:`image_ids`.
@@ -450,9 +410,8 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     def targets_at(self, index: int) -> Targets:
         """Return position ``index``'s targets without decoding its image.
 
-        :meth:`__getitem__` decodes the picture and applies ``transforms``; a consumer
-        that wants the labels alone — to draw them over an image it reads itself, or to
-        count instances — gets the precomputed, untransformed
+        :meth:`__getitem__` decodes the picture and applies ``transforms``; a consumer that wants the labels alone —
+        to draw them over an image it reads itself, or to count instances — gets the precomputed, untransformed
         :class:`~lucid_yolo.data.targets.Targets` here at no decode (WP-189).
 
         Args:
@@ -488,9 +447,8 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
                 ``0..len-1`` order at construction).
 
         Returns:
-            A CHW float32 image in ``[0, 1]`` and its :class:`~lucid_yolo.data.targets.Targets`
-            (``xyxy`` boxes, contiguous ``int64`` labels, one polygon ring per box),
-            after the optional ``transforms``.
+            A CHW float32 image in ``[0, 1]`` and its :class:`~lucid_yolo.data.targets.Targets` (``xyxy`` boxes,
+            contiguous ``int64`` labels, one polygon ring per box), after the optional ``transforms``.
         """
         record = self._images[index]
         image = self._load_image(record.file_name)
@@ -532,12 +490,10 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     def _build_targets(self, annotations: Sequence[dict[str, object]], record: _ImageRecord) -> Targets:
         """Assemble the :class:`~lucid_yolo.data.targets.Targets` for one image.
 
-        Every kept annotation contributes one entry to each per-instance channel, in
-        annotation order. The image's geometry is then resolved once by
-        :func:`_resolve_geometry`, which decides whether the boxes come from the rings
-        or from COCO's ``bbox`` and drops the degenerate ones; whatever it drops is
-        dropped from the label, difficult and keypoint channels here, so every channel
-        keeps the same instance axis.
+        Every kept annotation contributes one entry to each per-instance channel, in annotation order. The image's
+        geometry is then resolved once by :func:`_resolve_geometry`, which decides whether the boxes come from the
+        rings or from COCO's ``bbox`` and drops the degenerate ones; whatever it drops is dropped from the label,
+        difficult and keypoint channels here, so every channel keeps the same instance axis.
 
         Args:
             annotations: This image's annotations, in the file's own order.
@@ -642,25 +598,19 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     ) -> tuple[list[float], int, Tensor | None, bool] | None:
         """Parse one annotation into ``(xyxy_box, label, ring, difficult)`` or ``None`` to skip.
 
-        Crowd annotations are always skipped (returning ``None``), and so is a
-        ``segmentation`` value that is *present but unusable* — an RLE dict, an
-        empty list, or a ring with fewer than three points — in every reading
-        mode: that is never a real countable instance (WP-014's original
-        crowd/RLE policy, unchanged). A ``segmentation`` key that is absent
-        entirely is different: it is fatal only for an oriented reading
-        (WP-121b), which has no other source for the rotated box; a plain or
-        keypoints reading keeps the instance with ``ring=None`` instead — see
-        :meth:`_build_targets`, which collapses the whole image's ``polygons`` to
-        ``[]`` when any instance lacks one, matching
-        :class:`~lucid_yolo.data.targets.Targets`'s 0-or-N contract. The
-        ``difficult`` flag defaults to ``False``, which is what every file that
-        does not carry R18's flag means (A51).
+        Crowd annotations are always skipped (returning ``None``), and so is a ``segmentation`` value that is
+        *present but unusable* — an RLE dict, an empty list, or a ring with fewer than three points — in every reading
+        mode: that is never a real countable instance (WP-014's original crowd/RLE policy, unchanged). A
+        ``segmentation`` key that is absent entirely is different: it is fatal only for an oriented reading
+        (WP-121b), which has no other source for the rotated box; a plain or keypoints reading keeps the instance
+        with ``ring=None`` instead — see :meth:`_build_targets`, which collapses the whole image's ``polygons`` to
+        ``[]`` when any instance lacks one, matching :class:`~lucid_yolo.data.targets.Targets`'s 0-or-N contract. The
+        ``difficult`` flag defaults to ``False``, which is what every file that does not carry R18's flag means (A51).
 
-        The box returned here is COCO's ``bbox``. It is not necessarily the box the
-        instance ends up with: :func:`_resolve_geometry` replaces it with the ring's
-        envelope on an image whose rings all survive, and drops the instance outright
-        when the box it settles on has no extent. Deciding either here is impossible —
-        both are properties of the image's whole instance set, not of one annotation.
+        The box returned here is COCO's ``bbox``. It is not necessarily the box the instance ends up with:
+        :func:`_resolve_geometry` replaces it with the ring's envelope on an image whose rings all survive, and drops
+        the instance outright when the box it settles on has no extent. Deciding either here is impossible — both are
+        properties of the image's whole instance set, not of one annotation.
         """
         if int(cast("int", ann.get("iscrowd", 0))) == 1:
             return None
@@ -677,19 +627,16 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
 def parse_coco_keypoints(keypoints: object, file_name: str) -> tuple[Tensor, Tensor]:
     """Split a flat COCO keypoint list into coordinates and visibility.
 
-    Public because the evaluation reader
-    (:func:`~lucid_yolo.eval.annotations.annotations_to_target`) parses the same
-    field off the same file format. One parser rather than two: a second copy
-    would be free to disagree about the triplet stride or the visibility dtype,
-    and a training run and its own acceptance score would then read different
+    Public because the evaluation reader (:func:`~lucid_yolo.eval.annotations.annotations_to_target`) parses the same
+    field off the same file format. One parser rather than two: a second copy would be free to disagree about the
+    triplet stride or the visibility dtype, and a training run and its own acceptance score would then read different
     ground truth from one annotation file.
 
     Args:
-        keypoints: Flat ``[x, y, v, ...]`` annotation value. An annotation carrying no
-            ``keypoints`` field at all arrives as ``None`` and is rejected by the same
-            named error as a malformed one — a keypoint run given a file whose
-            annotations have no points needs to be told which file and which image,
-            not handed a bare ``KeyError`` from a subscript (L-29).
+        keypoints: Flat ``[x, y, v, ...]`` annotation value. An annotation carrying no ``keypoints`` field at all
+            arrives as ``None`` and is rejected by the same named error as a malformed one — a keypoint run given a
+            file whose annotations have no points needs to be told which file and which image, not handed a bare
+            ``KeyError`` from a subscript (L-29).
         file_name: Image file name, named when the flat length is invalid.
 
     Returns:
@@ -728,18 +675,15 @@ def _resolve_geometry(
 
     Two coupled rules, both stated in the module docstring:
 
-    * **Where the boxes come from** (M-38). An image whose instances *all* kept a ring
-      is an image with mask supervision, and its boxes are those rings' envelopes, so
-      ``boxes[i]`` and ``polygons[i]`` describe the same thing even when the annotation
-      carried further rings this reader discarded. An image where any instance kept no
-      ring has no ``polygons`` at all — :class:`~lucid_yolo.data.targets.Targets` holds
-      0 or N of them, never a mix — so its boxes are COCO's own ``bbox``, already
-      clamped to the canvas by :func:`_xywh_to_xyxy`. Ring envelopes are left unclamped
-      on purpose: a clamp would move the box off the ring it was just derived from.
-    * **What a degenerate instance is** (L-30). A final box with zero width or zero
-      height bounds nothing, whichever source it came from. It is dropped here, at the
-      read, so the val protocol and the train pipeline's ``instance_keep_mask`` agree
-      about what an instance is.
+    * **Where the boxes come from** (M-38). An image whose instances *all* kept a ring is an image with mask
+      supervision, and its boxes are those rings' envelopes, so ``boxes[i]`` and ``polygons[i]`` describe the same
+      thing even when the annotation carried further rings this reader discarded. An image where any instance kept no
+      ring has no ``polygons`` at all — :class:`~lucid_yolo.data.targets.Targets` holds 0 or N of them, never a mix —
+      so its boxes are COCO's own ``bbox``, already clamped to the canvas by :func:`_xywh_to_xyxy`. Ring envelopes
+      are left unclamped on purpose: a clamp would move the box off the ring it was just derived from.
+    * **What a degenerate instance is** (L-30). A final box with zero width or zero height bounds nothing, whichever
+      source it came from. It is dropped here, at the read, so the val protocol and the train pipeline's
+      ``instance_keep_mask`` agree about what an instance is.
 
     Args:
         raw_boxes: One clamped ``xyxy`` ``bbox`` per parsed instance, in order.
@@ -785,11 +729,10 @@ def _oriented_targets(
 ) -> Targets:
     """Fit one image's quadrilateral rings to rotated boxes and their shared envelopes.
 
-    Both axis-aligned and rotated boxes are derived from the *same* ring, which is what
-    makes ``boxes[i]`` and ``rboxes[i]`` provably one object rather than two annotations
-    that happen to be listed in the same order. Reading ``boxes`` from COCO's ``bbox``
-    field instead would pair the rotated fit with whatever the writer chose to put there
-    — on the generated oriented slice that is measurably not the quad's envelope.
+    Both axis-aligned and rotated boxes are derived from the *same* ring, which is what makes ``boxes[i]`` and
+    ``rboxes[i]`` provably one object rather than two annotations that happen to be listed in the same order. Reading
+    ``boxes`` from COCO's ``bbox`` field instead would pair the rotated fit with whatever the writer chose to put
+    there — on the generated oriented slice that is measurably not the quad's envelope.
 
     Args:
         rings: One ``(P, 2)`` ring per instance, in annotation order.
@@ -848,11 +791,10 @@ def _build_category_maps(categories: list[dict[str, object]]) -> tuple[dict[int,
 def _split_side(name: str) -> tuple[str, str] | None:
     """Split a keypoint name into its ``(stem, side)``, or ``None`` if it names no side.
 
-    Both spellings in circulation are accepted, because both are in the files this
-    project actually reads: R12's human pose prefixes (``left_eye``), and R21's symbol
-    family suffixes (``flank_left``). Matching is case-insensitive; a name that carries
-    no side affix at all (``nose``, ``center``) lies on the mirror axis and returns
-    ``None``.
+    Both spellings in circulation are accepted, because both are in the files this project actually reads: R12's
+    human pose prefixes (``left_eye``), and R21's symbol family suffixes (``flank_left``). Matching is
+    case-insensitive; a name that carries no side affix at all (``nose``, ``center``) lies on the mirror axis and
+    returns ``None``.
 
     Args:
         name: One entry of a category's ``keypoints`` name list.
@@ -879,15 +821,13 @@ def _split_side(name: str) -> tuple[str, str] | None:
 def _pairs_from_names(names: list[str]) -> list[tuple[int, int]] | None:
     """Derive the mirror swap from one category's keypoint names (A64).
 
-    A64 requires the left/right pairing to come from whichever dataset supplies the K
-    points, never from a constant inside the flip transform: the pairing is anatomical,
-    not geometric, so only the annotation schema knows it. These names are that schema's
-    statement of it, and pairing them is reading it rather than assuming it.
+    A64 requires the left/right pairing to come from whichever dataset supplies the K points, never from a constant
+    inside the flip transform: the pairing is anatomical, not geometric, so only the annotation schema knows it. These
+    names are that schema's statement of it, and pairing them is reading it rather than assuming it.
 
-    Every mismatch raises instead of guessing. A name that says ``left`` with no ``right``
-    to match is a schema this function cannot read, and the failure mode of guessing is
-    the exact one A64 exists to prevent — a mirrored sample supervising ``flank_left``
-    toward the point ``flank_right`` occupies, which no shape check and no gate reports.
+    Every mismatch raises instead of guessing. A name that says ``left`` with no ``right`` to match is a schema this
+    function cannot read, and the failure mode of guessing is the exact one A64 exists to prevent — a mirrored sample
+    supervising ``flank_left`` toward the point ``flank_right`` occupies, which no shape check and no gate reports.
 
     Args:
         names: The category's ``keypoints`` names, in point-index order.
@@ -938,14 +878,12 @@ def _build_keypoint_flip_pairs(categories: list[dict[str, object]]) -> list[tupl
         categories: The COCO ``categories`` entries.
 
     Returns:
-        The pairs :class:`~lucid_yolo.data.augment.HorizontalFlip` should swap, or ``None``
-        when no category declares keypoint names (nothing to read a pairing from, so
-        "mirror coordinates only" stands).
+        The pairs :class:`~lucid_yolo.data.augment.HorizontalFlip` should swap, or ``None`` when no category declares
+        keypoint names (nothing to read a pairing from, so "mirror coordinates only" stands).
 
     Raises:
-        ValueError: If two categories declare different keypoint name lists — one
-            permutation cannot serve two schemas, and picking either silently would
-            mis-mirror the other's instances.
+        ValueError: If two categories declare different keypoint name lists — one permutation cannot serve two
+            schemas, and picking either silently would mis-mirror the other's instances.
 
     Examples:
         ```pycon
@@ -1014,12 +952,10 @@ def _group_annotations(annotations: list[dict[str, object]]) -> dict[int, list[d
 def _parse_ring(segmentation: object) -> Tensor | None:
     """Parse a COCO ``segmentation`` field into a ``(P, 2)`` float32 ring or ``None``.
 
-    Only the first polygon ring of an ordinary (list-typed) segmentation is
-    returned; the module docstring states why a multi-ring annotation cannot keep
-    more than one, and :func:`_resolve_geometry` is what then derives the box from
-    the ring kept here so the two describe the same lobe. RLE dicts, empty lists
-    and rings with fewer than three points yield ``None`` so the caller skips the
-    annotation.
+    Only the first polygon ring of an ordinary (list-typed) segmentation is returned; the module docstring states why
+    a multi-ring annotation cannot keep more than one, and :func:`_resolve_geometry` is what then derives the box
+    from the ring kept here so the two describe the same lobe. RLE dicts, empty lists and rings with fewer than
+    three points yield ``None`` so the caller skips the annotation.
 
     Args:
         segmentation: The annotation's ``segmentation`` value.
@@ -1041,9 +977,8 @@ def _parse_ring(segmentation: object) -> Tensor | None:
 def _xywh_to_xyxy(bbox: list[float], height: int, width: int) -> list[float]:
     """Convert a COCO ``xywh`` box to ``xyxy``, clamped to the image bounds.
 
-    The clamp can flatten a box: one lying wholly outside the canvas, or touching an
-    edge, comes back with zero width or zero height. :func:`_resolve_geometry` drops
-    such a box rather than letting it reach a target set (L-30).
+    The clamp can flatten a box: one lying wholly outside the canvas, or touching an edge, comes back with zero width
+    or zero height. :func:`_resolve_geometry` drops such a box rather than letting it reach a target set (L-30).
 
     Args:
         bbox: The COCO ``[x, y, w, h]`` box in pixels.

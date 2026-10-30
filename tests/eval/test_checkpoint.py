@@ -1,22 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the loader every acceptance script reads a checkpoint through (WP-095, WP-174, WP-171).
 
-Two surfaces of one module, each previously unexecuted: the EMA overlay that decides
-which weights a published number was measured with, and the device resolution that
-decides where it was measured. ``TestPickDevice`` and the availability case at the end
-belong to WP-171; everything above them to WP-174.
+Two surfaces of one module, each previously unexecuted: the EMA overlay that decides which weights a published number
+was measured with, and the device resolution that decides where it was measured. ``TestPickDevice`` and the
+availability case at the end belong to WP-171; everything above them to WP-174.
 
-:func:`~lucid_yolo.eval.checkpoint.load_eval_module` is the one door ``lucid-eval``,
-``lucid-predict`` and the export path all read a checkpoint through, and ``--ema`` is on by
-default, so ``_overlay_ema`` decides which weights every published number was measured
-with. It had no test of its own: the module sat at 47% with the whole overlay unexecuted.
+:func:`~lucid_yolo.eval.checkpoint.load_eval_module` is the one door ``lucid-eval``, ``lucid-predict`` and the export
+path all read a checkpoint through, and ``--ema`` is on by default, so ``_overlay_ema`` decides which weights every
+published number was measured with. It had no test of its own: the module sat at 47% with the whole overlay
+unexecuted.
 
-Nothing here needs a checkpoint file. The payload ``torch.load`` returns is a plain dict,
-so it is built by hand — which is what makes the awkward shapes reachable at all: a
-callback key that is not the literal class name, two entries that both claim to be the EMA
-one, a shadow that covers most of the module. Each of those is a checkpoint a real
-training run can write, and each used to resolve into either a silently wrong overlay or a
-bare ``KeyError`` raised after the module had already been mutated.
+Nothing here needs a checkpoint file. The payload ``torch.load`` returns is a plain dict, so it is built by hand —
+which is what makes the awkward shapes reachable at all: a callback key that is not the literal class name, two entries
+that both claim to be the EMA one, a shadow that covers most of the module. Each of those is a checkpoint a real
+training run can write, and each used to resolve into either a silently wrong overlay or a bare ``KeyError`` raised
+after the module had already been mutated.
 
 The three claims under test:
 
@@ -36,6 +34,7 @@ import os
 import pickle
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -46,6 +45,7 @@ from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+    from unittest.mock import MagicMock
 
     from torch import Tensor
 
@@ -53,13 +53,13 @@ if TYPE_CHECKING:
 _EPOCH = 3
 _GLOBAL_STEP = 120
 
-#: The value every shadow tensor is planted at: not a plausible initialization, so a
-#: tensor still holding its raw value after an overlay is visible rather than arguable.
+#: The value every shadow tensor is planted at: not a plausible initialization, so a tensor still holding its raw value
+#: after an overlay is visible rather than arguable.
 _SHADOW_VALUE = 0.5
 
-#: A ``state_key`` Lightning writes for a *parametrized* callback — the class name
-#: followed by its arguments. This is the shape that used to pass the substring match and
-#: then fail the literal-name lookup, after the overlay had already been applied.
+#: A ``state_key`` Lightning writes for a *parametrized* callback — the class name followed by its arguments. This is
+#: the shape that used to pass the substring match and then fail the literal-name lookup, after the overlay had already
+#: been applied.
 _PARAMETRIZED_KEY = "EMACallback{'decay': 0.9999, 'update_every': 1}"
 
 #: Update count carried beside the shadow, read back through the resolved key.
@@ -69,9 +69,9 @@ _NUM_UPDATES = 37
 def _module() -> DetectionLitModule:
     """Return a tiny detection module: floating-point parameters, buffers, and an int buffer.
 
-    Batch-norm is what makes this fixture worth building rather than faking — it supplies
-    floating-point buffers (``running_mean``, ``running_var``) that a parameters-only
-    overlay would miss, and an integer ``num_batches_tracked`` the shadow must *not* carry.
+    Batch-norm is what makes this fixture worth building rather than faking — it supplies floating-point buffers
+    (``running_mean``, ``running_var``) that a parameters-only overlay would miss, and an integer
+    ``num_batches_tracked`` the shadow must *not* carry.
 
     Returns:
         The module, untrained and in eval mode.
@@ -89,9 +89,8 @@ def _module() -> DetectionLitModule:
 def _full_shadow(module: torch.nn.Module, value: float = _SHADOW_VALUE) -> dict[str, Tensor]:
     """Build the shadow ``EMACallback`` would write: every floating-point tensor, at ``value``.
 
-    Integer buffers are excluded, exactly as the writing side excludes them — an
-    exponential average of a step counter is meaningless — so this is the *complete*
-    shadow the overlay must accept without complaint.
+    Integer buffers are excluded, exactly as the writing side excludes them — an exponential average of a step counter
+    is meaningless — so this is the *complete* shadow the overlay must accept without complaint.
 
     Args:
         module: The module whose tensors are shadowed.
@@ -117,8 +116,8 @@ def _payload(shadow: dict[str, Tensor] | None, state_key: str = "EMACallback") -
 
     Args:
         shadow: The shadow mapping, or ``None`` for a checkpoint that carries none.
-        state_key: The ``callbacks`` key the entry is filed under. Defaults to the bare
-            class name, which is what an unparametrized callback writes.
+        state_key: The ``callbacks`` key the entry is filed under. Defaults to the bare class name, which is what an
+            unparametrized callback writes.
 
     Returns:
         A checkpoint payload holding exactly the keys the overlay reads.
@@ -156,9 +155,9 @@ def _float_snapshot(module: torch.nn.Module) -> dict[str, Tensor]:
 def _checkpoint_dict(module: DetectionLitModule, **extra: object) -> dict[str, object]:
     """Build the checkpoint dict Lightning writes, with ``extra`` keys added or replaced.
 
-    One statement of what a saved checkpoint looks like, so a test that plants something
-    unusual in one differs from the ordinary case by exactly the thing it planted — and a
-    test that *removes* a key removes it from a dict that was otherwise well-formed.
+    One statement of what a saved checkpoint looks like, so a test that plants something unusual in one differs from the
+    ordinary case by exactly the thing it planted — and a test that *removes* a key removes it from a dict that was
+    otherwise well-formed.
 
     Args:
         module: The module whose weights and hyper-parameters are saved.
@@ -218,9 +217,9 @@ def test_invalid_ema_shadow_names_checkpoint(tmp_path: Path, shadow_kind: str) -
 def test_unresolvable_ema_entry_names_checkpoint(tmp_path: Path, callbacks: dict[str, object], phrase: str) -> None:
     """A missing or ambiguous EMA callback entry is refused naming the file it was read from.
 
-    Both refusals fire while resolving the callback key, before any shadow is read, so a
-    checkpoint whose entries carry nothing else is enough; the path is the one passed to
-    the loader, which is what an operator holding several runs' checkpoints acts on.
+    Both refusals fire while resolving the callback key, before any shadow is read, so a checkpoint whose entries carry
+    nothing else is enough; the path is the one passed to the loader, which is what an operator holding several runs'
+    checkpoints acts on.
     """
     path = tmp_path / "unresolvable-ema.ckpt"
     torch.save(_checkpoint_dict(_module(), callbacks=callbacks), path)
@@ -235,11 +234,10 @@ def test_unresolvable_ema_entry_names_checkpoint(tmp_path: Path, callbacks: dict
 class _CreatesADirectoryWhenReconstructed:
     """A harmless planted object whose *reconstruction* is visible on the filesystem.
 
-    Restricted loading refuses the ``os.makedirs`` global while reading the pickle stream,
-    before any reducer is called — so the directory existing afterwards is proof that the
-    file was deserialized without that restriction. Creating a directory under ``tmp_path``
-    is the mildest side effect that can be asserted on; what is under test is that *a*
-    reducer ran at all, not what this particular one does.
+    Restricted loading refuses the ``os.makedirs`` global while reading the pickle stream, before any reducer is
+    called — so the directory existing afterwards is proof that the file was deserialized without that restriction.
+    Creating a directory under ``tmp_path`` is the mildest side effect that can be asserted on; what is under test is
+    that *a* reducer ran at all, not what this particular one does.
     """
 
     def __init__(self, marker: Path) -> None:
@@ -254,10 +252,9 @@ class _CreatesADirectoryWhenReconstructed:
 def torch_defaults_to_unrestricted(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Present :func:`torch.load`'s pre-2.6 default, which the declared ``torch>=2.4`` floor permits.
 
-    Torch 2.6 changed the default of ``weights_only`` from ``False`` to ``True``. On any
-    supported install below that, an unpassed ``weights_only`` — and the explicit ``None``
-    Lightning forwards — still resolves to *unrestricted* loading. This shim reproduces
-    that one resolution and delegates everything else to the real function, which is what
+    Torch 2.6 changed the default of ``weights_only`` from ``False`` to ``True``. On any supported install below that,
+    an unpassed ``weights_only`` — and the explicit ``None`` Lightning forwards — still resolves to *unrestricted*
+    loading. This shim reproduces that one resolution and delegates everything else to the real function, which is what
     makes the ordering of the two reads observable on a machine running a newer torch.
     """
     real_load = torch.load
@@ -277,10 +274,9 @@ class TestOverlayEma:
     def test_every_floating_point_tensor_takes_shadows_value(self) -> None:
         """A complete shadow lands on parameters and float buffers alike, leaving counters alone.
 
-        The buffers are the half a parameters-only overlay silently misses: batch-norm
-        statistics that stay raw while the weights are EMA produce a number that is neither
-        of the two claims the report can make. The integer ``num_batches_tracked`` must be
-        untouched for the same reason it is never shadowed.
+        The buffers are the half a parameters-only overlay silently misses: batch-norm statistics that stay raw while
+        the weights are EMA produce a number that is neither of the two claims the report can make. The integer
+        ``num_batches_tracked`` must be untouched for the same reason it is never shadowed.
         """
         module = _module()
         integer_buffers = {
@@ -301,10 +297,9 @@ class TestOverlayEma:
     def test_parametrized_state_key_resolved_and_handed_back(self) -> None:
         """A key carrying the callback's arguments resolves, and the overlay names it to its caller.
 
-        Returning the resolved key is the whole fix: the caller's ``num_updates`` lookup
-        reads this entry rather than a literal ``"EMACallback"`` that is not present, which
-        is how a parametrized callback's checkpoint used to raise a bare ``KeyError`` with
-        the module already overlaid.
+        Returning the resolved key is the whole fix: the caller's ``num_updates`` lookup reads this entry rather than a
+        literal ``"EMACallback"`` that is not present, which is how a parametrized callback's checkpoint used to raise
+        a bare ``KeyError`` with the module already overlaid.
         """
         module = _module()
 
@@ -323,9 +318,8 @@ class TestOverlayEma:
     ) -> None:
         """A shadow that is missing or empty refuses, because raw numbers are a different claim.
 
-        "The EMA numbers" and "the raw numbers" are separate statements about a run, and
-        quietly reporting the second under the first name is unfalsifiable — nothing
-        downstream can tell which it received.
+        "The EMA numbers" and "the raw numbers" are separate statements about a run, and quietly reporting the second
+        under the first name is unfalsifiable — nothing downstream can tell which it received.
         """
         module = _module()
 
@@ -335,9 +329,8 @@ class TestOverlayEma:
     def test_no_entry_naming_callback_raises_and_lists_what_there(self) -> None:
         """A checkpoint saved without the EMA callback names the callbacks it does carry.
 
-        The remedy differs by cause — a run trained without the callback needs ``--no-ema``,
-        a renamed callback needs the loader taught about it — so the message has to carry
-        enough to tell them apart.
+        The remedy differs by cause — a run trained without the callback needs ``--no-ema``, a renamed callback needs
+        the loader taught about it — so the message has to carry enough to tell them apart.
         """
         module = _module()
 
@@ -347,10 +340,9 @@ class TestOverlayEma:
     def test_two_entries_naming_callback_raise_rather_than_last_one_winning(self) -> None:
         """Two EMA-ish entries are ambiguous, and ambiguity is refused, not resolved by order.
 
-        The previous loop kept overwriting ``shadow`` as it walked the dict, so whichever
-        entry came last silently won. Dict order is insertion order, which here means
-        callback registration order — not a fact anyone reading the report could see, and
-        not a basis for choosing which weights the numbers describe.
+        The previous loop kept overwriting ``shadow`` as it walked the dict, so whichever entry came last silently won.
+        Dict order is insertion order, which here means callback registration order — not a fact anyone reading the
+        report could see, and not a basis for choosing which weights the numbers describe.
         """
         module = _module()
         shadow = _full_shadow(module)
@@ -367,11 +359,10 @@ class TestOverlayEma:
     def test_partial_shadow_names_what_missing_and_leaves_module_untouched(self) -> None:
         """A shadow short of one tensor refuses **before** copying, so no half-overlaid module exists.
 
-        This is the failure the old code could not report at all: it copied the shadow's own
-        keys, so any module tensor the shadow lacked simply kept its raw value and the run
-        reported a mixture under the EMA name. Checking coverage after the copy would name
-        the problem but leave the module in the state the message says is invalid, so the
-        order matters as much as the check — the snapshot comparison is what pins it.
+        This is the failure the old code could not report at all: it copied the shadow's own keys, so any module tensor
+        the shadow lacked simply kept its raw value and the run reported a mixture under the EMA name. Checking
+        coverage after the copy would name the problem but leave the module in the state the message says is invalid,
+        so the order matters as much as the check — the snapshot comparison is what pins it.
         """
         module = _module()
         shadow = _full_shadow(module)
@@ -394,12 +385,10 @@ class TestLoadEvalModuleWithEma:
     def test_parametrized_callback_key_survives_whole_load(self, tmp_path: Path) -> None:
         """``--ema`` on a checkpoint whose callback carries arguments loads and reports its counter.
 
-        The end-to-end shape of the WP-174 defect. The substring match accepted this
-        checkpoint and the overlay ran; the ``num_updates`` lookup then went to a literal
-        ``"EMACallback"`` that is not a key of this dict and raised ``KeyError`` — an
-        unhandled crash, from an operator's point of view, on a checkpoint that is entirely
-        well-formed. ``ema_updates`` reaching the provenance dict is what says both lookups
-        landed on the same entry.
+        The end-to-end shape of the WP-174 defect. The substring match accepted this checkpoint and the overlay ran; the
+        ``num_updates`` lookup then went to a literal ``"EMACallback"`` that is not a key of this dict and raised
+        ``KeyError`` — an unhandled crash, from an operator's point of view, on a checkpoint that is entirely
+        well-formed. ``ema_updates`` reaching the provenance dict is what says both lookups landed on the same entry.
         """
         module = _module()
         path = tmp_path / "ema.ckpt"
@@ -422,10 +411,10 @@ class TestCheckpointTrust:
     def test_disallowed_object_refused_before_reducer_runs(self, tmp_path: Path) -> None:
         """A planted object that restricted loading rejects is never reconstructed.
 
-        The acceptance check for the trust boundary as it stands on the installed stack:
-        the checkpoint carries an object whose reconstruction creates a directory, and that
-        directory must not exist after the refusal. The exception alone would not settle
-        it — an error raised *after* the reducer ran is a compromise that reported itself.
+        The acceptance check for the trust boundary as it stands on the installed stack: the checkpoint carries an
+        object whose reconstruction creates a directory, and that directory must not exist after the refusal. The
+        exception alone would not settle it — an error raised *after* the reducer ran is a compromise that reported
+        itself.
         """
         marker = tmp_path / "reducer-ran"
         path = tmp_path / "planted.ckpt"
@@ -440,11 +429,10 @@ class TestCheckpointTrust:
     def test_refusal_holds_where_torch_defaults_to_unrestricted_loading(self, tmp_path: Path) -> None:
         """On the declared ``torch>=2.4`` floor the restricted read still happens first.
 
-        This is the case the installed torch hides. Below 2.6 an unpassed ``weights_only``
-        means unrestricted loading, and Lightning forwards ``None`` rather than deciding —
-        so a loader that hands the file to Lightning *first* runs the planted reducer and
-        only then raises from the read beside it, having already lost. Both orders raise;
-        the directory is the only thing that tells them apart.
+        This is the case the installed torch hides. Below 2.6 an unpassed ``weights_only`` means unrestricted loading,
+        and Lightning forwards ``None`` rather than deciding — so a loader that hands the file to Lightning *first* runs
+        the planted reducer and only then raises from the read beside it, having already lost. Both orders raise; the
+        directory is the only thing that tells them apart.
         """
         marker = tmp_path / "reducer-ran"
         path = tmp_path / "planted.ckpt"
@@ -458,9 +446,8 @@ class TestCheckpointTrust:
     def test_ordinary_checkpoint_loads_through_gate(self, tmp_path: Path) -> None:
         """A checkpoint carrying nothing unusual loads and reports its provenance.
 
-        The half of the acceptance check a loader that refused everything would also pass.
-        ``lucid-eval`` reads every real checkpoint through this call, so the gate is only
-        worth having if the ordinary case is unchanged by it.
+        The half of the acceptance check a loader that refused everything would also pass. ``lucid-eval`` reads every
+        real checkpoint through this call, so the gate is only worth having if the ordinary case is unchanged by it.
         """
         path = tmp_path / "plain.ckpt"
         torch.save(_checkpoint_dict(_module()), path)
@@ -470,34 +457,27 @@ class TestCheckpointTrust:
         assert info == {"checkpoint": str(path), "epoch": _EPOCH, "global_step": _GLOBAL_STEP, "ema": False}
         assert not loaded.training
 
-    def test_file_deserialized_once_and_restricted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @patch.object(torch, "load", wraps=torch.load)
+    def test_file_deserialized_once_and_restricted(self, counting_load: MagicMock, tmp_path: Path) -> None:
         """The checkpoint is read by one restricted ``torch.load`` and never handed on.
 
-        Lightning's ``load_from_checkpoint`` reads through ``torch.load`` too, so a loader
-        that built the module that way would show a second call here -- the double read
-        that cost twice the peak host memory and let a file replaced between the reads be
-        checked in one form and loaded in another.
+        Lightning's ``load_from_checkpoint`` reads through ``torch.load`` too, so a loader that built the module that
+        way would show a second call here -- the double read that cost twice the peak host memory and let a file
+        replaced between the reads be checked in one form and loaded in another.
         """
         path = tmp_path / "plain.ckpt"
         torch.save(_checkpoint_dict(_module()), path)
-        reads: list[object] = []
-        real_load = torch.load
-
-        def counting_load(*args: Any, **kwargs: Any) -> Any:
-            reads.append(kwargs.get("weights_only"))
-            return real_load(*args, **kwargs)
-
-        monkeypatch.setattr(torch, "load", counting_load)
+        counting_load.reset_mock()
 
         loader.load_eval_module(path, use_ema=False)
 
-        assert reads == [True]
+        assert [call.kwargs.get("weights_only") for call in counting_load.call_args_list] == [True]
 
     def test_weights_match_lightning_loader(self, tmp_path: Path) -> None:
         """The module built from the payload holds what ``load_from_checkpoint`` builds.
 
-        Same hyper-parameters, same tensors: building from the one read changes how many
-        times the file is deserialized, not what comes out of it.
+        Same hyper-parameters, same tensors: building from the one read changes how many times the file is
+        deserialized, not what comes out of it.
         """
         module = _module()
         path = tmp_path / "plain.ckpt"
@@ -520,10 +500,9 @@ class TestMalformedCheckpointsAreNamed:
     def test_missing_provenance_key_names_itself_and_file(self, tmp_path: Path, missing: str) -> None:
         """A checkpoint short of a provenance key raises ``ValueError`` naming it, not ``KeyError``.
 
-        ``lucid-eval`` and ``lucid-predict`` hand whatever this raises straight to an
-        operator. ``KeyError: 'epoch'`` names the dict lookup that failed and nothing about
-        which file is wrong or what to do about it, and it was outside the documented
-        ``Raises`` contract, which covered only the EMA refusals.
+        ``lucid-eval`` and ``lucid-predict`` hand whatever this raises straight to an operator. ``KeyError: 'epoch'``
+        names the dict lookup that failed and nothing about which file is wrong or what to do about it, and it was
+        outside the documented ``Raises`` contract, which covered only the EMA refusals.
         """
         path = tmp_path / "truncated.ckpt"
         checkpoint = _checkpoint_dict(_module())
@@ -538,9 +517,9 @@ class TestMalformedCheckpointsAreNamed:
     def test_shadow_without_update_counter_names_entry(self, tmp_path: Path) -> None:
         """An EMA entry carrying a shadow but no ``num_updates`` is named rather than raising ``KeyError``.
 
-        The counter is read out of the same entry the shadow came from, *after* the overlay
-        has been applied — the second half of the WP-174 failure shape: a checkpoint that
-        passes the overlay and then dies on a raw index, with the module already mutated.
+        The counter is read out of the same entry the shadow came from, *after* the overlay has been applied — the
+        second half of the WP-174 failure shape: a checkpoint that passes the overlay and then dies on a raw index, with
+        the module already mutated.
         """
         module = _module()
         path = tmp_path / "no-counter.ckpt"
@@ -583,11 +562,10 @@ class TestPickDevice:
     def test_named_backend_machine_lacks_refused(self, requested: str) -> None:
         """The refusal names the request and what this machine does have.
 
-        Both halves are asserted because both are what the caller needs: the request
-        tells them which flag was wrong, and the alternatives tell them what to write
-        instead — a fact no stack trace from inside ``.to(device)`` carries. The indexed
-        spelling is included because availability is a property of the backend rather
-        than of the ordinal, and ``torch.device("cuda:1").type`` is ``"cuda"``.
+        Both halves are asserted because both are what the caller needs: the request tells them which flag was wrong,
+        and the alternatives tell them what to write instead — a fact no stack trace from inside ``.to(device)``
+        carries. The indexed spelling is included because availability is a property of the backend rather than of the
+        ordinal, and ``torch.device("cuda:1").type`` is ``"cuda"``.
         """
         with pytest.raises(ValueError, match="device") as refusal:
             pick_device(requested)
@@ -599,9 +577,8 @@ class TestPickDevice:
     def test_named_backend_present_passed_through(self) -> None:
         """A request the machine can satisfy still wins over the auto-resolution.
 
-        The check is availability, not agreement: an operator naming a device is stating
-        a requirement, exactly as ``eval_backend="hotcoco"`` does, and this asserts the
-        guard did not turn that into a preference.
+        The check is availability, not agreement: an operator naming a device is stating a requirement, exactly as
+        ``eval_backend="hotcoco"`` does, and this asserts the guard did not turn that into a preference.
         """
         assert pick_device("cuda") == torch.device("cuda")
 
@@ -614,8 +591,8 @@ class TestPickDevice:
     def test_auto_falls_back_to_cpu(self) -> None:
         """``auto`` answers rather than raising when no accelerator is present.
 
-        The guard sits on the explicit branch only, and this is the assertion that says
-        so: a run that names nothing must keep starting on whatever the machine has.
+        The guard sits on the explicit branch only, and this is the assertion that says so: a run that names nothing
+        must keep starting on whatever the machine has.
         """
         assert pick_device("auto") == torch.device("cpu")
 
@@ -624,10 +601,9 @@ class TestPickDevice:
 def test_alternatives_offered_ones_would_be_accepted() -> None:
     """Every name the refusal offers is a name :func:`pick_device` takes.
 
-    The message is only useful if its list is a list of *working* commands, so this
-    asserts the two agree rather than assuming they do: each offered spelling is fed back
-    in, and ``auto`` — which is a resolution rather than a device — is the one that must
-    be handled as such.
+    The message is only useful if its list is a list of *working* commands, so this asserts the two agree rather than
+    assuming they do: each offered spelling is fed back in, and ``auto`` — which is a resolution rather than a device —
+    is the one that must be handled as such.
     """
     offered = available_devices()
 

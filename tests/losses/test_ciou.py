@@ -1,25 +1,31 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for the Complete-IoU loss (WP-024).
 
-Covers a hand-derived closed-form value, the identity and far-apart boundary
-cases, the aspect-ratio ordering property, gradient finiteness for normal and
-degenerate boxes, and batched/empty shape handling. The math is transcribed
-from R10 (arXiv:1911.08287); expected values are derived by hand in the test
-comments rather than lifted from any reference implementation.
+Covers a hand-derived closed-form value, the identity and far-apart boundary cases, the aspect-ratio ordering property,
+gradient finiteness for normal and degenerate boxes, and batched/empty shape handling. The math is transcribed from R10
+(arXiv:1911.08287); expected values are derived by hand in the test comments rather than lifted from any reference
+implementation.
 
-Three later groups pin what the values alone cannot: the ``atan2`` origin guard
-(A10), which is version-dependent behaviour no gradient assertion can observe on
-one installed Torch; the safeguard-parameter validation (M-23); and the stated
-float32 coordinate range (L-12), which is documented rather than enforced.
+Three later groups pin what the values alone cannot: the ``atan2`` origin guard (A10), which is version-dependent
+behaviour no gradient assertion can observe on one installed Torch; the safeguard-parameter validation (M-23); and the
+stated float32 coordinate range (L-12), which is documented rather than enforced.
 """
 
+from __future__ import annotations
+
 import math
+from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 import torch
 
 from lucid_yolo.losses import box_iou_aligned, ciou_loss, complete_iou
 from lucid_yolo.losses.ciou import _aspect_angle
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from unittest.mock import MagicMock
 
 
 def test_against_closed_form() -> None:
@@ -80,9 +86,8 @@ def test_disjoint_far_boxes_go_negative() -> None:
 def test_matching_aspect_ratio_scores_higher() -> None:
     """Same IoU and centers: the matching-aspect pair scores strictly higher.
 
-    Both candidate preds share the target's center and the same IoU with it
-    (equal area, fully contained, symmetric about the center); only the aspect
-    ratio differs, so CIoU must rank the aspect-matched candidate above the
+    Both candidate preds share the target's center and the same IoU with it (equal area, fully contained, symmetric
+    about the center); only the aspect ratio differs, so CIoU must rank the aspect-matched candidate above the
     aspect-mismatched one via the ``alpha * v`` term.
     """
     target = torch.tensor([[-2.0, -1.0, 2.0, 1.0]])  # w=4, h=2, center (0, 0)
@@ -128,24 +133,22 @@ def test_batched_and_empty_shapes() -> None:
 class TestDegenerateGradientMagnitude:
     """Degenerate boxes take a *bounded* gradient, not merely a finite one (WP-170).
 
-    ``test_gradients_finite_normal_and_degenerate`` above asserts only
-    ``isfinite``, which the aspect term satisfied while backpropagating 3.0e5
-    from a collapsed box: ``atan(w / (h + eps))`` is finite at ``h = 0`` but its
-    derivative there is ``1 / eps``. Finiteness is therefore the wrong predicate
-    for this input class, and these tests pin the magnitude instead.
+    ``test_gradients_finite_normal_and_degenerate`` above asserts only ``isfinite``, which the aspect term satisfied
+    while backpropagating 3.0e5 from a collapsed box: ``atan(w / (h + eps))`` is finite at ``h = 0`` but its derivative
+    there is ``1 / eps``. Finiteness is therefore the wrong predicate for this input class, and these tests pin the
+    magnitude instead.
     """
 
-    #: Gradient magnitude a degenerate box must stay under. Two orders above the
-    #: ~1e-1 a well-formed pair produces here and two below the 3.0e5 the guarded
-    #: ratio produced, so it separates the two regimes without pinning an exact value.
+    #: Gradient magnitude a degenerate box must stay under. Two orders above the ~1e-1 a well-formed pair produces here
+    #: and two below the 3.0e5 the guarded ratio produced, so it separates the two regimes without pinning an exact
+    #: value.
     GRADIENT_BOUND = 1.0e3
 
     def test_collapsed_box_gradient_bounded(self) -> None:
         """A zero-area prediction backpropagates a small gradient, not a 1/eps spike.
 
-        The measured regression: against this target, ``[5, 5, 5, 5]`` gave
-        ``dL/dx1 = 301186.5`` through ``atan(w / (h + eps))``, and ``0.0``
-        through ``atan2(w, h)``.
+        The measured regression: against this target, ``[5, 5, 5, 5]`` gave ``dL/dx1 = 301186.5`` through
+        ``atan(w / (h + eps))``, and ``0.0`` through ``atan2(w, h)``.
         """
         target = torch.tensor([[0.0, 0.0, 10.0, 20.0]])
         pred = torch.tensor([[5.0, 5.0, 5.0, 5.0]], requires_grad=True)
@@ -159,9 +162,8 @@ class TestDegenerateGradientMagnitude:
     def test_thin_box_not_spike_as_height_vanishes(self) -> None:
         """The bound holds as ``h`` is driven to zero, not only exactly at it.
 
-        ``1 / (h + eps)`` grows without bound as ``h`` shrinks, so a test sitting
-        only on ``h == 0`` could be satisfied by a special case there. Each row
-        below has a real width and a height stepping down to zero.
+        ``1 / (h + eps)`` grows without bound as ``h`` shrinks, so a test sitting only on ``h == 0`` could be satisfied
+        by a special case there. Each row below has a real width and a height stepping down to zero.
         """
         heights = [1.0, 1e-2, 1e-4, 1e-6, 0.0]
         pred = torch.tensor([[0.0, 0.0, 4.0, h] for h in heights], requires_grad=True)
@@ -176,9 +178,8 @@ class TestDegenerateGradientMagnitude:
     def test_inverted_box_gradient_dead_by_design(self) -> None:
         """An inverted box takes exactly zero gradient on the inverted axis.
 
-        Documented behaviour rather than an accident (``losses/ciou.py`` module
-        docstring): the clamped extents make CIoU blind to a box that names no
-        region, and un-inverting it is the decode boundary's job, not this loss's.
+        Documented behaviour rather than an accident (``losses/ciou.py`` module docstring): the clamped extents make
+        CIoU blind to a box that names no region, and un-inverting it is the decode boundary's job, not this loss's.
         Pinned so that a future change to the clamp cannot alter it silently.
         """
         target = torch.tensor([[0.0, 0.0, 10.0, 20.0]])
@@ -193,8 +194,8 @@ class TestDegenerateGradientMagnitude:
     def test_well_formed_pair_keeps_informative_gradient(self) -> None:
         """The bound above is not satisfied by zeroing everything.
 
-        Guards the obvious wrong fix -- clamping the aspect term away entirely --
-        by asserting a normal overlapping pair still moves.
+        Guards the obvious wrong fix -- clamping the aspect term away entirely -- by asserting a normal overlapping
+        pair still moves.
         """
         target = torch.tensor([[0.0, 0.0, 10.0, 20.0]])
         pred = torch.tensor([[1.0, 1.0, 9.0, 19.0]], requires_grad=True)
@@ -209,66 +210,62 @@ class TestDegenerateGradientMagnitude:
 class TestAtan2OriginGuard:
     """The zero pair never reaches ``atan2``, on any Torch in the declared range (A10).
 
-    WP-170's finite-gradient guarantee was measured on Torch 2.13, whose ``atan2``
-    backward special-cases the origin and returns zero partials. Torch 2.4 — the
-    floor ``pyproject.toml`` declares — divides by ``w^2 + h^2`` with no such guard
-    and returns ``NaN`` for the same pair. Because only one end of that range is
-    ever installed, an assertion on the gradient cannot see the difference: these
-    tests assert the *call* instead, which is version-independent, and pin the
-    guard as a no-op everywhere else.
+    WP-170's finite-gradient guarantee was measured on Torch 2.13, whose ``atan2`` backward special-cases the origin and
+    returns zero partials. Torch 2.4 — the floor ``pyproject.toml`` declares — divides by ``w^2 + h^2`` with no such
+    guard and returns ``NaN`` for the same pair. Because only one end of that range is ever installed, an assertion on
+    the gradient cannot see the difference: these tests assert the *call* instead, which is version-independent, and pin
+    the guard as a no-op everywhere else.
     """
 
     @staticmethod
-    def _recording_atan2(seen: list[tuple[float, float]]):
-        """Wrap ``torch.atan2``, recording every argument pair it is handed."""
-        real = torch.atan2
+    def _handed_pairs(spy: MagicMock) -> list[tuple[float, float]]:
+        """Return every ``(width, height)`` pair a spy standing in for ``torch.atan2`` was called with.
 
-        def spy(width: torch.Tensor, height: torch.Tensor) -> torch.Tensor:
+        Examples:
+            >>> from unittest.mock import MagicMock
+            >>> spy = MagicMock()
+            >>> _ = spy(torch.tensor([3.0, 0.0]), torch.tensor([4.0, 0.0]))
+            >>> TestAtan2OriginGuard._handed_pairs(spy)
+            [(3.0, 4.0), (0.0, 0.0)]
+        """
+        pairs: list[tuple[float, float]] = []
+        for call in spy.call_args_list:
+            width, height = call.args
             broadcast = torch.broadcast_tensors(width.detach(), height.detach())
-            pairs = torch.stack(broadcast, dim=-1).reshape(-1, 2)
-            seen.extend((float(w), float(h)) for w, h in pairs)
-            return real(width, height)
+            pairs.extend((float(w), float(h)) for w, h in torch.stack(broadcast, dim=-1).reshape(-1, 2))
+        return pairs
 
-        return spy
+    @pytest.mark.parametrize(
+        ("pred", "target"),
+        [
+            pytest.param([5.0, 5.0, 5.0, 5.0], [0.0, 0.0, 10.0, 20.0], id="collapsed-prediction"),
+            pytest.param([0.0, 0.0, 4.0, 2.0], [1.0, 1.0, 1.0, 1.0], id="zero-size-target"),
+            pytest.param([10.0, 10.0, 0.0, 0.0], [0.0, 0.0, 10.0, 20.0], id="inverted-prediction"),
+        ],
+    )
+    @patch.object(torch, "atan2", wraps=torch.atan2)
+    def test_degenerate_box_never_hands_atan2_origin(
+        self, atan2_spy: MagicMock, pred: list[float], target: list[float]
+    ) -> None:
+        """The zero pair is substituted before the ``atan2`` call, whichever side of the aspect term it arrives on.
 
-    def test_collapsed_prediction_never_hands_atan2_origin(self, monkeypatch) -> None:
-        """The pair the module's own doctest produces is substituted before the call."""
-        seen: list[tuple[float, float]] = []
-        monkeypatch.setattr(torch, "atan2", self._recording_atan2(seen))
+        Three ways to reach the origin: a collapsed prediction (the pair the module's own doctest produces), a
+        zero-area ground truth (the target side is guarded too), and an inverted prediction, whose extents clamp to zero
+        and so arrive at the aspect term as the origin.
+        """
+        pred_boxes = torch.tensor([pred], requires_grad=True)
 
-        pred = torch.tensor([[5.0, 5.0, 5.0, 5.0]], requires_grad=True)
-        ciou_loss(pred, torch.tensor([[0.0, 0.0, 10.0, 20.0]])).sum().backward()
+        ciou_loss(pred_boxes, torch.tensor([target])).sum().backward()
 
-        assert seen, "atan2 was never called; the test no longer exercises the aspect term"
-        assert (0.0, 0.0) not in seen
-
-    def test_zero_size_target_never_hands_atan2_origin(self, monkeypatch) -> None:
-        """The target side is guarded too: a zero-area ground truth reaches the same term."""
-        seen: list[tuple[float, float]] = []
-        monkeypatch.setattr(torch, "atan2", self._recording_atan2(seen))
-
-        pred = torch.tensor([[0.0, 0.0, 4.0, 2.0]], requires_grad=True)
-        ciou_loss(pred, torch.tensor([[1.0, 1.0, 1.0, 1.0]])).sum().backward()
-
-        assert seen
-        assert (0.0, 0.0) not in seen
-
-    def test_inverted_prediction_never_hands_atan2_origin(self, monkeypatch) -> None:
-        """Inverted extents clamp to zero, so they arrive at the aspect term as the origin."""
-        seen: list[tuple[float, float]] = []
-        monkeypatch.setattr(torch, "atan2", self._recording_atan2(seen))
-
-        pred = torch.tensor([[10.0, 10.0, 0.0, 0.0]], requires_grad=True)
-        ciou_loss(pred, torch.tensor([[0.0, 0.0, 10.0, 20.0]])).sum().backward()
-
-        assert seen
-        assert (0.0, 0.0) not in seen
+        handed = self._handed_pairs(atan2_spy)
+        assert handed, "atan2 was never called; the test no longer exercises the aspect term"
+        assert (0.0, 0.0) not in handed
 
     def test_guard_bit_identical_to_bare_atan2_away_from_origin(self) -> None:
         """Value *and* gradient match the unguarded call exactly, not to a tolerance.
 
-        This is what makes the guard safe to add to a landed loss: every pair that
-        is not exactly ``(0, 0)`` takes the same arithmetic it always did.
+        This is what makes the guard safe to add to a landed loss: every pair that is not exactly ``(0, 0)`` takes the
+        same arithmetic it always did.
         """
         torch.manual_seed(0)
         sides = torch.rand(256, 2) * 100.0 + 1e-3
@@ -312,12 +309,20 @@ class TestSafeguardParameterValidation:
     """``eps`` is rejected at the values that disable the guard it exists to be (M-23)."""
 
     @pytest.mark.parametrize("bad", [0.0, -1e-7, float("nan"), float("inf"), float("-inf")])
-    def test_disabling_eps_refused_by_name(self, bad: float) -> None:
+    @pytest.mark.parametrize(
+        "loss",
+        [
+            pytest.param(box_iou_aligned, id="box_iou_aligned"),
+            pytest.param(complete_iou, id="complete_iou"),
+            pytest.param(ciou_loss, id="ciou_loss"),
+        ],
+    )
+    def test_disabling_eps_refused_by_name(self, loss: Callable[..., torch.Tensor], bad: float) -> None:
         """Zero, negative and non-finite epsilons all raise, and the message names the parameter."""
         boxes = torch.tensor([[0.0, 0.0, 2.0, 2.0]])
-        for loss in (box_iou_aligned, complete_iou, ciou_loss):
-            with pytest.raises(ValueError, match="eps must be finite and > 0"):
-                loss(boxes, boxes, eps=bad)
+
+        with pytest.raises(ValueError, match="eps must be finite and > 0"):
+            loss(boxes, boxes, eps=bad)
 
     def test_usable_eps_accepted(self) -> None:
         """The check refuses only the disabling values; a smaller working eps still passes."""
@@ -328,13 +333,19 @@ class TestSafeguardParameterValidation:
 class TestCoordinateRange:
     """The documented float32 coordinate ceiling, pinned from both sides (L-12).
 
-    The module states a range rather than enforcing one -- validating a tensor
-    would cost a device sync per batch in the training hot path -- so these tests
-    are what keeps the stated range honest as the arithmetic changes.
+    The module states a range rather than enforcing one -- validating a tensor would cost a device sync per batch in the
+    training hot path -- so these tests are what keeps the stated range honest as the arithmetic changes.
     """
 
     @staticmethod
     def _loss_and_grad(coordinate: float) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the CIoU loss and its prediction gradient for a square box against a half-size one.
+
+        Examples:
+            >>> loss, grad = TestCoordinateRange._loss_and_grad(10.0)
+            >>> loss.shape, grad.shape
+            (torch.Size([1]), torch.Size([1, 4]))
+        """
         pred = torch.tensor([[0.0, 0.0, coordinate, coordinate]], requires_grad=True)
         target = torch.tensor([[0.0, 0.0, coordinate / 2, coordinate / 2]])
         loss = ciou_loss(pred, target)
@@ -352,9 +363,8 @@ class TestCoordinateRange:
     def test_at_documented_edge_squared_terms_overflow(self) -> None:
         """1e20 is the measured failure the docstring names; it is pinned, not fixed.
 
-        Squaring 1e20 gives 1e40 against float32's 3.4e38 ceiling, so the areas and
-        the enclosing diagonal saturate to ``Inf`` and the loss reduces to ``NaN``.
-        If a future change makes this finite, the documented range is wrong and
+        Squaring 1e20 gives 1e40 against float32's 3.4e38 ceiling, so the areas and the enclosing diagonal saturate to
+        ``Inf`` and the loss reduces to ``NaN``. If a future change makes this finite, the documented range is wrong and
         should be widened -- which is the point of asserting it.
         """
         loss, grad = self._loss_and_grad(1.0e20)

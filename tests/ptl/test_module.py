@@ -1,23 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the detection LightningModule and its helpers (WP-034).
 
-Covers the DoD ``test_training_step`` (a forward + dual loss over a synthetic
-batch returns a finite scalar carrying gradients and logs every per-component
-term), the :func:`~lucid_yolo.ptl.module.pad_targets` ragged-to-dense contract
-(including empty and all-empty batches), ``configure_optimizers`` building a
-:class:`~lucid_yolo.optim.musgd.MuSGD` over every parameter, the constant-LR /
-automatic-optimization wiring proved by a ``fast_dev_run`` Lightning smoke run,
-the ``alpha`` delegation seam (WP-035), and the task conditioning: an invalid
-task is rejected, the ``_task_extra_loss`` stub is an inert zero for every task,
-and a ``segment`` module trains identically to a ``detect`` module. ``setup``'s
+Covers the DoD ``test_training_step`` (a forward + dual loss over a synthetic batch returns a finite scalar carrying
+gradients and logs every per-component term), the :func:`~lucid_yolo.ptl.module.pad_targets` ragged-to-dense contract
+(including empty and all-empty batches), ``configure_optimizers`` building a :class:`~lucid_yolo.optim.musgd.MuSGD`
+over every parameter, the constant-LR / automatic-optimization wiring proved by a ``fast_dev_run`` Lightning smoke run,
+the ``alpha`` delegation seam (WP-035), and the task conditioning: an invalid task is rejected, the ``_task_extra_loss``
+stub is an inert zero for every task, and a ``segment`` module trains identically to a ``detect`` module. ``setup``'s
 warning for an opted-in recording it cannot activate names the line that called it.
 
-The module is built at n-scale multipliers with a low channel cap and a 160-px
-input so the real backbone/neck/head stack runs in a couple of seconds on CPU.
-Batches are synthetic tensors plus hand-built :class:`~lucid_yolo.data.targets.Targets`
-(no dataset fixture needed). Direct ``training_step`` calls monkeypatch
-``module.log`` because Lightning's ``self.log`` requires trainer attachment; the
-``fast_dev_run`` test exercises the real logging path.
+The module is built at n-scale multipliers with a low channel cap and a 160-px input so the real backbone/neck/head
+stack runs in a couple of seconds on CPU. Batches are synthetic tensors plus hand-built
+:class:`~lucid_yolo.data.targets.Targets` (no dataset fixture needed). Direct ``training_step`` calls monkeypatch
+``module.log`` because Lightning's ``self.log`` requires trainer attachment; the ``fast_dev_run`` test exercises the
+real logging path.
 """
 
 from __future__ import annotations
@@ -255,10 +251,9 @@ def test_invalid_task_raises() -> None:
 def test_task_extra_loss_inert_zero_for_detection() -> None:
     """The task extra-loss dispatch returns a zero scalar for the one task with no extra term.
 
-    ``segment`` and ``obb`` are excluded: WP-087 and WP-088 made their contributions
-    live, and ``test_seg_training.py`` / ``test_obb_training.py`` cover them. Detection
-    is the task whose total must stay *exactly* the dual detection loss, so the zero is
-    asserted rather than assumed.
+    ``segment`` and ``obb`` are excluded: WP-087 and WP-088 made their contributions live, and ``test_seg_training.py``
+    / ``test_obb_training.py`` cover them. Detection is the task whose total must stay *exactly* the dual detection
+    loss, so the zero is asserted rather than assumed.
     """
     module = tiny_module(task="detect")
     images, targets = _synthetic_batch()
@@ -288,12 +283,10 @@ def test_task_extra_loss_inert_zero_for_detection() -> None:
 def test_segment_task_with_zero_gains_trains_identically_to_detect() -> None:
     """With both segmentation gains at zero, a segment module reproduces the detection loss bit for bit.
 
-    A ``segment`` module carries the head's mask coefficient stems and the three
-    prototype/auxiliary branches, so its state dict is a strict superset of the
-    ``detect`` one — hence ``strict=False``. Zeroing only the two WP-087 gains
-    must leave *nothing* else different: any segmentation quantity that reached
-    the detection terms by another route — a shared forward that mutates them, a
-    re-run assignment — would break this equality while the ordinary gains hid it
+    A ``segment`` module carries the head's mask coefficient stems and the three prototype/auxiliary branches, so its
+    state dict is a strict superset of the ``detect`` one — hence ``strict=False``. Zeroing only the two WP-087 gains
+    must leave *nothing* else different: any segmentation quantity that reached the detection terms by another route —
+    a shared forward that mutates them, a re-run assignment — would break this equality while the ordinary gains hid it
     inside a larger total.
     """
     detect = tiny_module(task="detect")
@@ -370,11 +363,9 @@ def test_compile_step_leaves_state_dict_keys_unchanged() -> None:
 def test_alpha_tensor_device_follows_what_can_hold_float64(device: str, expected: str) -> None:
     """The 0-d ``float64`` branch weight lands on ``device``, except MPS, where it stays on the host.
 
-    ``torch.tensor(..., dtype=float64, device="mps")`` raises ``TypeError`` -- the MPS
-    framework has no double -- which made every MPS training step fail at the first
-    loss after WP-184 moved the weight from a Python float to a tensor input. A 0-d CPU
-    tensor multiplies a device tensor through scalar promotion, so the host is the
-    answer for MPS.
+    ``torch.tensor(..., dtype=float64, device="mps")`` raises ``TypeError`` -- the MPS framework has no double -- which
+    made every MPS training step fail at the first loss after WP-184 moved the weight from a Python float to a tensor
+    input. A 0-d CPU tensor multiplies a device tensor through scalar promotion, so the host is the answer for MPS.
     """
     module = tiny_module()
 
@@ -410,10 +401,9 @@ def test_compile_step_on_cpu_trainer_warns_once_and_stays_eager(monkeypatch: pyt
 def test_ignored_capture_warning_names_setup_caller(flag: str) -> None:
     """An opted-in recording ``setup`` cannot activate warns at the line that called ``setup``.
 
-    The activation check runs in a helper one frame below ``setup``, so its ``stacklevel``
-    has to skip that frame too: pointing into the module instead would break a user's
-    warning filter keyed on their own calling module. A detached module is never on
-    CUDA, so either flag warns at ``fit``.
+    The activation check runs in a helper one frame below ``setup``, so its ``stacklevel`` has to skip that frame too:
+    pointing into the module instead would break a user's warning filter keyed on their own calling module. A detached
+    module is never on CUDA, so either flag warns at ``fit``.
     """
     module = tiny_module(**{flag: True})
 
@@ -427,11 +417,10 @@ def test_ignored_capture_warning_names_setup_caller(flag: str) -> None:
 def test_ignored_capture_clears_activation_before_warning(flag: str) -> None:
     """A recording ``setup`` refuses is switched off even when its warning is raised as an error.
 
-    A module reused across trainers can arrive at ``setup`` with the flag still on from a
-    run that activated it. The activation is decided and stored before the warning is
-    emitted, so a filter promoting that warning to an exception cannot leave the stale
-    ``True`` behind for the next step to record under. A detached module is never on
-    CUDA, so either flag is refused at ``fit``.
+    A module reused across trainers can arrive at ``setup`` with the flag still on from a run that activated it. The
+    activation is decided and stored before the warning is emitted, so a filter promoting that warning to an exception
+    cannot leave the stale ``True`` behind for the next step to record under. A detached module is never on CUDA, so
+    either flag is refused at ``fit``.
     """
     module = tiny_module(**{flag: True})
     setattr(module, f"_{flag}_active", True)
@@ -518,43 +507,30 @@ def _guarded_module(task: str) -> DetectionLitModule:
 class TestDistributedValidationGuard:
     """Every task accepts multi-process validation with gathered epoch metrics."""
 
-    @pytest.mark.parametrize("task", [pytest.param("obb", id="obb"), pytest.param("keypoints", id="keypoints")])
-    @pytest.mark.parametrize("stage", [pytest.param("fit", id="fit"), pytest.param("validate", id="validate")])
-    def test_accepts_multi_process_runs(self, task: str, stage: str) -> None:
-        """Both fit and standalone validation accept the distributed scorer."""
-        module = _guarded_module(task)
-        module._trainer = MagicMock(spec=Trainer, world_size=2)
-
-        module.setup(stage)
-
     @pytest.mark.parametrize(
-        "task",
+        ("task", "world_size", "stage"),
         [
-            pytest.param("detect", id="detect"),
-            pytest.param("segment", id="segment"),
-            pytest.param("obb", id="obb"),
-            pytest.param("keypoints", id="keypoints"),
+            # Both fit and standalone validation accept the distributed scorer.
+            pytest.param("obb", 2, "fit", id="obb-fit-two-processes"),
+            pytest.param("obb", 2, "validate", id="obb-validate-two-processes"),
+            pytest.param("keypoints", 2, "fit", id="keypoints-fit-two-processes"),
+            pytest.param("keypoints", 2, "validate", id="keypoints-validate-two-processes"),
+            # Every task sets up normally on one process, so the guard costs accepted runs nothing.
+            pytest.param("detect", 1, "fit", id="detect-fit-one-process"),
+            pytest.param("segment", 1, "fit", id="segment-fit-one-process"),
+            pytest.param("obb", 1, "fit", id="obb-fit-one-process"),
+            pytest.param("keypoints", 1, "fit", id="keypoints-fit-one-process"),
+            # Multi-process detect/segment runs are untouched: torchmetrics gathers for them.
+            pytest.param("detect", 4, "fit", id="detect-fit-four-processes"),
+            pytest.param("segment", 4, "fit", id="segment-fit-four-processes"),
+            # Prediction runs no validation protocol, so it keeps the multi-process path open.
+            pytest.param("obb", 2, "predict", id="obb-predict-two-processes"),
+            pytest.param("keypoints", 2, "predict", id="keypoints-predict-two-processes"),
         ],
     )
-    def test_accepts_single_process_runs(self, task: str) -> None:
-        """Every task sets up normally on one process, so the guard costs accepted runs nothing."""
+    def test_setup_accepts_run(self, task: str, world_size: int, stage: str) -> None:
+        """Setup raises nothing for any accepted task, process count and stage combination."""
         module = _guarded_module(task)
-        module._trainer = MagicMock(spec=Trainer, world_size=1)
+        module._trainer = MagicMock(spec=Trainer, world_size=world_size)
 
-        module.setup("fit")
-
-    @pytest.mark.parametrize("task", [pytest.param("detect", id="detect"), pytest.param("segment", id="segment")])
-    def test_leaves_gathering_tasks_free_to_scale(self, task: str) -> None:
-        """A multi-process ``detect``/``segment`` run is untouched: torchmetrics gathers for it."""
-        module = _guarded_module(task)
-        module._trainer = MagicMock(spec=Trainer, world_size=4)
-
-        module.setup("fit")
-
-    @pytest.mark.parametrize("task", [pytest.param("obb", id="obb"), pytest.param("keypoints", id="keypoints")])
-    def test_predict_stage_exempt(self, task: str) -> None:
-        """Prediction runs no validation protocol, so it keeps the multi-process path open."""
-        module = _guarded_module(task)
-        module._trainer = MagicMock(spec=Trainer, world_size=2)
-
-        module.setup("predict")
+        module.setup(stage)

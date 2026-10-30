@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gates for WP-048-051 prototype fusion, generation, and assembly.
 
-Covers the literal Eq. 8 sum, including the unprojected ``X_1`` identity path,
-target-size nearest-neighbour upsampling, and independent coarse-level
-projections. Also covers the Eq. 9 raw prototype stack and the Eq. 7 linear mask
-assembly; the mask losses themselves remain outside this module's scope.
+Covers the literal Eq. 8 sum, including the unprojected ``X_1`` identity path, target-size nearest-neighbour
+upsampling, and independent coarse-level projections. Also covers the Eq. 9 raw prototype stack and the Eq. 7 linear
+mask assembly; the mask losses themselves remain outside this module's scope.
 """
 
 from __future__ import annotations
@@ -88,8 +87,10 @@ def test_fusion_output_matches_x1_shape_and_channel_contract() -> None:
 @pytest.mark.parametrize(
     "spatial_sizes",
     [
-        ((12, 20), (6, 10), (3, 5)),  # 96x160 input: non-square feature maps.
-        ((13, 21), (7, 11), (4, 6)),  # Odd P3 size: fixed scale factors cannot align.
+        # 96x160 input: non-square feature maps.
+        pytest.param(((12, 20), (6, 10), (3, 5)), id="non-square"),
+        # Odd P3 size: fixed scale factors cannot align.
+        pytest.param(((13, 21), (7, 11), (4, 6)), id="odd-p3"),
     ],
 )
 def test_fusion_uses_x1_target_size(
@@ -118,8 +119,10 @@ def test_coarse_level_projections_disjoint() -> None:
 @pytest.mark.parametrize(
     ("p3_size", "prototype_size"),
     [
-        ((80, 80), (160, 160)),  # 640-pixel input: P3 at stride 8 (A15).
-        ((13, 21), (26, 42)),  # Odd, non-square P3 still doubles structurally.
+        # 640-pixel input: P3 at stride 8 (A15).
+        pytest.param((80, 80), (160, 160), id="640px-p3"),
+        # Odd, non-square P3 still doubles structurally.
+        pytest.param((13, 21), (26, 42), id="odd-non-square-p3"),
     ],
 )
 def test_proto_resolution(
@@ -178,10 +181,9 @@ def test_proto_upsample_precedes_final_spatial_conv() -> None:
 def test_proto_grid_refined_after_upsampling() -> None:
     """A spatial unit runs at proto resolution, so output is not a bare 2x upsample.
 
-    Complements the structural order check with an observable consequence: if the
-    upsample were the last spatial operation, every 2x2 output block would be
-    constant, because nearest interpolation replicates each source pixel. A 3x3
-    convolution at the proto grid breaks that replication.
+    Complements the structural order check with an observable consequence: if the upsample were the last spatial
+    operation, every 2x2 output block would be constant, because nearest interpolation replicates each source pixel. A
+    3x3 convolution at the proto grid breaks that replication.
     """
     torch.manual_seed(0)
     prototypes = ProtoNet(_CHANNELS[0], num_prototypes=4).eval()
@@ -207,17 +209,16 @@ def test_fusion_and_protonet_run_from_neck_feature_triple() -> None:
 
 
 class TestAssembleMasks:
-    """Tests for ``assemble_masks`` (Eq.
+    """Tests for ``assemble_masks``, the linear mask assembly of Eq.
 
-    7).
+    7.
     """
 
     def test_shape_contract(self) -> None:
         """(B, N, K) coefficients against (B, K, H, W) prototypes give (B, N, H, W).
 
-        Catches a transposed einsum subscript: several wrong contractions still
-        produce a well-formed tensor, and only an N != K != H != W shape separates
-        them from the intended one.
+        Catches a transposed einsum subscript: several wrong contractions still produce a well-formed tensor, and only
+        an N != K != H != W shape separates them from the intended one.
         """
         prototypes = torch.randn(2, 5, 7, 11)
         coefficients = torch.randn(2, 3, 5)
@@ -229,8 +230,8 @@ class TestAssembleMasks:
     def test_matches_explicit_weighted_sum(self) -> None:
         """Each output map equals the hand-built sum of c_ik * P_k over all K prototypes.
 
-        Pins Eq. 7 as a plain linear combination: a stray activation, normalization,
-        or crop would break the exact per-instance sum this rebuilds by hand.
+        Pins Eq. 7 as a plain linear combination: a stray activation, normalization, or crop would break the exact
+        per-instance sum this rebuilds by hand.
         """
         prototypes = torch.randn(1, 4, 3, 5)
         coefficients = torch.randn(1, 2, 4)
@@ -244,8 +245,8 @@ class TestAssembleMasks:
     def test_one_hot_selects_single_prototype(self) -> None:
         """A one-hot coefficient vector reproduces exactly the prototype it selects.
 
-        Catches a contraction that averages over K or that indexes the wrong axis:
-        both keep the output shape but neither returns the selected map untouched.
+        Catches a contraction that averages over K or that indexes the wrong axis: both keep the output shape but
+        neither returns the selected map untouched.
         """
         prototypes = torch.randn(1, 4, 3, 5)
         coefficients = torch.zeros(1, 1, 4)

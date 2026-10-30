@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Probabilistic-IoU (ProbIoU) rotated-box regression loss (WP-059, A19, A41).
 
-Transcribed by hand from R17 (arXiv:2106.06072) for the long-edge rotated boxes
-``(cx, cy, w, h, theta)`` WP-055 establishes. This is the rotated sibling of
-:mod:`lucid_yolo.losses.ciou`: same paired-rows contract, same epsilon discipline, and
-the same refusal to let a degenerate box produce a ``NaN``.
+Transcribed by hand from R17 (arXiv:2106.06072) for the long-edge rotated boxes ``(cx, cy, w, h, theta)`` WP-055
+establishes. This is the rotated sibling of :mod:`lucid_yolo.losses.ciou`: same paired-rows contract, same epsilon
+discipline, and the same refusal to let a degenerate box produce a ``NaN``.
 
 Each box becomes a Gaussian whose covariance is R17's uniform-density second moment,
 ``Sigma = R diag(w^2/12, h^2/12) R^T``, i.e. with ``a' = w^2/12`` and ``b' = h^2/12``::
@@ -21,20 +20,17 @@ The two Gaussians are compared by their Bhattacharyya distance ``B_D = B1 + B2``
     B2 = (1/2) ln( [ (a1+a2)(b1+b2) - (c1+c2)^2 ]
                    / [ 4 sqrt( (a1 b1 - c1^2)(a2 b2 - c2^2) ) ] )
 
-whence the Bhattacharyya coefficient ``B_C = exp(-B_D)``, the Hellinger distance
-``H_D = sqrt(1 - B_C)`` in ``[0, 1]``, and ``ProbIoU = 1 - H_D``. R17 proposes two
-losses and suggests starting training with the second and switching to the first:
-``L1 = H_D = 1 - ProbIoU`` on ``[0, 1]``, and ``L2 = B_D`` on ``[0, inf)``, which has no
-vanishing gradient. Both are exposed here (:func:`probiou_hellinger_loss`,
-:func:`probiou_bhattacharyya_loss`); which one the oriented training path selects is
-WP-088's choice, not this module's.
+whence the Bhattacharyya coefficient ``B_C = exp(-B_D)``, the Hellinger distance ``H_D = sqrt(1 - B_C)`` in
+``[0, 1]``, and ``ProbIoU = 1 - H_D``. R17 proposes two losses and suggests starting training with the second and
+switching to the first: ``L1 = H_D = 1 - ProbIoU`` on ``[0, 1]``, and ``L2 = B_D`` on ``[0, inf)``, which has no
+vanishing gradient. Both are exposed here (:func:`probiou_hellinger_loss`, :func:`probiou_bhattacharyya_loss`); which
+one the oriented training path selects is WP-088's choice, not this module's.
 
 Numerics
-    The formulas above are *evaluated* differently than they are written, because as
-    written they cancel. ``(a1+a2)(b1+b2) - (c1+c2)^2`` is the determinant of the summed
-    covariance, and for a thin box the two products agree to several digits before the
-    subtraction; ``B1``'s numerator is a positive-definite quadratic form assembled from
-    a signed cross term the same way. The identities that remove both subtractions:
+    The formulas above are *evaluated* differently than they are written, because as written they cancel.
+    ``(a1+a2)(b1+b2) - (c1+c2)^2`` is the determinant of the summed covariance, and for a thin box the two products
+    agree to several digits before the subtraction; ``B1``'s numerator is a positive-definite quadratic form assembled
+    from a signed cross term the same way. The identities that remove both subtractions:
 
     - The 2x2 adjugate is **linear**, so ``adj(Sigma1 + Sigma2) = adj(Sigma1) +
       adj(Sigma2)``, and ``B1``'s numerator — which is exactly ``d^T adj(Sigma1+Sigma2)
@@ -48,72 +44,56 @@ Numerics
       ``e = [ (w1 h1 - w2 h2)^2 + (w1 h2 - w2 h1)^2 cos^2(dtheta)
       + (w1 w2 - h1 h2)^2 sin^2(dtheta) ] / (4 w1 h1 w2 h2)``.
 
-    Every accumulation is now a sum of like-signed terms. What that buys, measured in
-    float32 against a float64 evaluation of the literal form above
-    (``tests/losses/test_probiou.py`` pins the agreement):
+    Every accumulation is now a sum of like-signed terms. What that buys, measured in float32 against a float64
+    evaluation of the literal form above (``tests/losses/test_probiou.py`` pins the agreement):
 
-    - ProbIoU is exactly scale invariant — the same pair scaled from 1e3 to 1e6 px gives
-      bit-comparable results — so sheer magnitude is not the problem WP-057's shoelace
-      had. **Aspect ratio** is, and it is a conditioning property of the formula rather
-      than a precision shortfall of any one implementation: as a box thins, the two
-      products whose difference is the summed-covariance determinant approach each other,
-      so the *written* expression loses relative accuracy no matter how carefully it is
-      evaluated at a given precision. The rearrangement above removes this project's
-      exposure by never forming that difference; it does not make the published form
-      well-conditioned, so a re-derivation, a port, or a comparison against a literal
-      implementation inherits the numbers below in full. Over a randomized 1024 px sweep the form here holds
-      1.7e-6 to 2.9e-6 relative at every ratio from 1:1 to 1000:1, while the literal one
-      goes 1.5e-5 at 1:1, 2.2e-5 at 10:1, 1.6e-3 at 100:1, and at 1000:1 returns ``NaN``
-      for part of the sweep, its summed determinant having cancelled to a negative value
-      before the logarithm. DOTA's bridges and harbours are the boxes that reach those
-      ratios.
-    - The converged regime is where it decides the loss. For 20:1 boxes differing by 1e-4
-      of their own size, the literal float32 ``B_D`` is off by 377% and its ``L1`` by
-      2.2e-3 in absolute terms; the form used here holds ``L1`` to 3.2e-6.
-    - ``B_D >= 0`` holds by construction (a ratio of positive sums plus a ``log1p`` of a
-      non-negative quantity), so ``1 - B_C`` never goes negative and the square root is
-      always real.
-    - Identity is exact rather than approximate: every squared difference above vanishes
-      bit for bit when a box is compared with itself, so ``B_D`` is exactly ``0`` and
-      ``ProbIoU`` exactly ``1``.
+    - ProbIoU is exactly scale invariant — the same pair scaled from 1e3 to 1e6 px gives bit-comparable results — so
+      sheer magnitude is not the problem WP-057's shoelace had. **Aspect ratio** is, and it is a conditioning property
+      of the formula rather than a precision shortfall of any one implementation: as a box thins, the two products
+      whose difference is the summed-covariance determinant approach each other, so the *written* expression loses
+      relative accuracy no matter how carefully it is evaluated at a given precision. The rearrangement above removes
+      this project's exposure by never forming that difference; it does not make the published form well-conditioned,
+      so a re-derivation, a port, or a comparison against a literal implementation inherits the numbers below in full.
+      Over a randomized 1024 px sweep the form here holds 1.7e-6 to 2.9e-6 relative at every ratio from 1:1 to 1000:1,
+      while the literal one goes 1.5e-5 at 1:1, 2.2e-5 at 10:1, 1.6e-3 at 100:1, and at 1000:1 returns ``NaN`` for part
+      of the sweep, its summed determinant having cancelled to a negative value before the logarithm. DOTA's bridges
+      and harbours are the boxes that reach those ratios.
+    - The converged regime is where it decides the loss. For 20:1 boxes differing by 1e-4 of their own size, the
+      literal float32 ``B_D`` is off by 377% and its ``L1`` by 2.2e-3 in absolute terms; the form used here holds
+      ``L1`` to 3.2e-6.
+    - ``B_D >= 0`` holds by construction (a ratio of positive sums plus a ``log1p`` of a non-negative quantity), so
+      ``1 - B_C`` never goes negative and the square root is always real.
+    - Identity is exact rather than approximate: every squared difference above vanishes bit for bit when a box is
+      compared with itself, so ``B_D`` is exactly ``0`` and ``ProbIoU`` exactly ``1``.
 
-    The obvious alternative — float64 internals cast back out, this repository's habit
-    for geometry (``data/affine.py``, ``eval/segment_decode.py``) — is not available: a
-    regression loss runs on the training device, and D12c puts training on Apple MPS,
-    which has no float64. Working precision therefore follows the input dtype **at
-    float32 and above**, and the algebra is what makes float32 sufficient. Head-room is
-    ample either way: the widest intermediate is a product of four sides, so float32
-    saturates only beyond ~1e9 px.
+    The obvious alternative — float64 internals cast back out, this repository's habit for geometry
+    (``data/affine.py``, ``eval/segment_decode.py``) — is not available: a regression loss runs on the training device,
+    and D12c puts training on Apple MPS, which has no float64. Working precision therefore follows the input dtype **at
+    float32 and above**, and the algebra is what makes float32 sufficient. Head-room is ample either way: the widest
+    intermediate is a product of four sides, so float32 saturates only beyond ~1e9 px.
 
-    Below float32 the algebra is not enough, so :func:`_working_dtype` raises the working
-    precision to float32 and the result is cast back to the caller's dtype. The head-room
-    argument is what fails first: float16 saturates at 65504, and the ``excess`` above is
-    a sum of squared side-products over a product of four sides, so a merely *finite*
-    degenerate pair — a 1e-3 px box against a 20x3 one — overflows its numerator to
-    ``Inf`` and reports an infinite ``B_D`` for two boxes that are simply far apart. The
-    Hellinger branch fails second and more quietly: the ``sqrt`` derivative at the
-    radicand floor is ~5e9, which is itself ``Inf`` in float16, so a *coincident* pair —
-    the case :data:`_RADICAND_FLOOR` exists to keep differentiable — backpropagated
-    ``NaN``. bfloat16 has float32's exponent range and so overflows neither, but its
-    8-bit mantissa loses the cancellation-free form's whole point. Since the promotion is
-    a no-op cast for float32 and float64 inputs, it changes no value any current caller
-    computes; a true ``B_D`` above 65504 still returns ``Inf`` in float16, which is an
-    honest overflow of the dtype the caller asked for rather than an artefact of the
-    intermediate arithmetic.
+    Below float32 the algebra is not enough, so :func:`_working_dtype` raises the working precision to float32 and the
+    result is cast back to the caller's dtype. The head-room argument is what fails first: float16 saturates at 65504,
+    and the ``excess`` above is a sum of squared side-products over a product of four sides, so a merely *finite*
+    degenerate pair — a 1e-3 px box against a 20x3 one — overflows its numerator to ``Inf`` and reports an infinite
+    ``B_D`` for two boxes that are simply far apart. The Hellinger branch fails second and more quietly: the ``sqrt``
+    derivative at the radicand floor is ~5e9, which is itself ``Inf`` in float16, so a *coincident* pair — the case
+    :data:`_RADICAND_FLOOR` exists to keep differentiable — backpropagated ``NaN``. bfloat16 has float32's exponent
+    range and so overflows neither, but its 8-bit mantissa loses the cancellation-free form's whole point. Since the
+    promotion is a no-op cast for float32 and float64 inputs, it changes no value any current caller computes; a true
+    ``B_D`` above 65504 still returns ``Inf`` in float16, which is an honest overflow of the dtype the caller asked for
+    rather than an artefact of the intermediate arithmetic.
 
-    ``1 - B_C`` is computed as ``-expm1(-B_D)``: at ``B_D = 1e-8`` the naive difference
-    returns exactly ``0`` in float32, which would report a 1e-4 Hellinger distance as
-    perfect overlap.
+    ``1 - B_C`` is computed as ``-expm1(-B_D)``: at ``B_D = 1e-8`` the naive difference returns exactly ``0`` in
+    float32, which would report a 1e-4 Hellinger distance as perfect overlap.
 
 Degenerate boxes (A41)
-    Both denominators vanish for a zero-area box, so sides are floored at ``min_side``,
-    1e-4 in whatever coordinate frame the caller works in. ``B_D`` depends on that floor
-    only logarithmically — one decade of floor moves it by ``ln 10`` — so the value is
-    not load-bearing; it is chosen an order of magnitude at a time. Below ~1e-10 the
-    product of four floored sides underflows float32 and a degenerate-against-degenerate
-    pair returns ``NaN``, and above ~1e-3 the floor would start to distort genuinely
-    small boxes in a normalized frame. A clamped side has zero gradient, which is the
-    intended behaviour: the loss does not chase a box that has collapsed.
+    Both denominators vanish for a zero-area box, so sides are floored at ``min_side``, 1e-4 in whatever coordinate
+    frame the caller works in. ``B_D`` depends on that floor only logarithmically — one decade of floor moves it by
+    ``ln 10`` — so the value is not load-bearing; it is chosen an order of magnitude at a time. Below ~1e-10 the
+    product of four floored sides underflows float32 and a degenerate-against-degenerate pair returns ``NaN``, and
+    above ~1e-3 the floor would start to distort genuinely small boxes in a normalized frame. A clamped side has zero
+    gradient, which is the intended behaviour: the loss does not chase a box that has collapsed.
 """
 
 import math
@@ -125,29 +105,26 @@ from torch import Tensor
 _RBOX_DIM = 5
 #: Default floor on box sides, in the caller's coordinate frame (A41).
 _MIN_SIDE: float = 1e-4
-#: Floor inside the Hellinger square root. ``sqrt`` has an infinite derivative at zero,
-#: so a coincident pair would backpropagate ``0 * inf = NaN``; clamping the radicand
-#: keeps the local derivative finite while the clamp itself zeroes the gradient there.
-#: A coincident pair takes the exact-zero branch and never sees it; the smallest non-zero
-#: ``B_D`` a float32 pair can produce is of order 1e-13, so the floor binds only in
-#: float64 and only for pairs already indistinguishable at that dtype's resolution.
+#: Floor inside the Hellinger square root. ``sqrt`` has an infinite derivative at zero, so a coincident pair would
+#: backpropagate ``0 * inf = NaN``; clamping the radicand keeps the local derivative finite while the clamp itself
+#: zeroes the gradient there. A coincident pair takes the exact-zero branch and never sees it; the smallest non-zero
+#: ``B_D`` a float32 pair can produce is of order 1e-13, so the floor binds only in float64 and only for pairs already
+#: indistinguishable at that dtype's resolution.
 _RADICAND_FLOOR: float = 1e-20
 
 
 def _check_min_side(min_side: float) -> None:
     """Reject a ``min_side`` that would disable the A41 floor (M-23).
 
-    The floor is the only thing standing between a zero-area box and the vanishing
-    denominators the module docstring describes. ``min_side = 0`` therefore removes
-    the safeguard entirely and a degenerate pair returns ``NaN``; a negative floor
-    never binds at all, since :meth:`~torch.Tensor.clamp` leaves every non-negative
-    side untouched; and a non-finite one turns every box in the batch degenerate.
-    All three are accepted silently by ``clamp`` itself, so the check is here.
+    The floor is the only thing standing between a zero-area box and the vanishing denominators the module docstring
+    describes. ``min_side = 0`` therefore removes the safeguard entirely and a degenerate pair returns ``NaN``; a
+    negative floor never binds at all, since :meth:`~torch.Tensor.clamp` leaves every non-negative side untouched; and a
+    non-finite one turns every box in the batch degenerate. All three are accepted silently by ``clamp`` itself, so the
+    check is here.
 
-    The *upper* end is left to the caller's judgement rather than enforced: the A41
-    argument gives ~1e-10 and ~1e-3 as the outer bounds of a sensible frame, but
-    both depend on the coordinate frame the caller works in, which this function
-    cannot see.
+    The *upper* end is left to the caller's judgement rather than enforced: the A41 argument gives ~1e-10 and ~1e-3 as
+    the outer bounds of a sensible frame, but both depend on the coordinate frame the caller works in, which this
+    function cannot see.
 
     Args:
         min_side: The candidate side floor.
@@ -173,20 +150,17 @@ def _check_min_side(min_side: float) -> None:
 def probiou_bhattacharyya_loss(pred: Tensor, target: Tensor, min_side: float = _MIN_SIDE) -> Tensor:
     """Bhattacharyya distance ``B_D`` between aligned pairs of rotated boxes (R17's L2).
 
-    R17's unbounded loss: zero for coincident boxes and growing without bound as they
-    separate, which is the property the paper credits with not vanishing far from the
-    target. Evaluated through the cancellation-free identities in the module docstring,
-    so the result is non-negative by construction and exactly ``0`` for a box against
-    itself.
+    R17's unbounded loss: zero for coincident boxes and growing without bound as they separate, which is the property
+    the paper credits with not vanishing far from the target. Evaluated through the cancellation-free identities in the
+    module docstring, so the result is non-negative by construction and exactly ``0`` for a box against itself.
 
     Args:
-        pred: Predicted boxes of shape ``(..., 5)``, ``(cx, cy, w, h, theta)`` with
-            ``theta`` in radians. Any leading shape broadcasts against ``target``.
+        pred: Predicted boxes of shape ``(..., 5)``, ``(cx, cy, w, h, theta)`` with ``theta`` in radians. Any leading
+            shape broadcasts against ``target``.
         target: Target boxes of shape ``(..., 5)``, same convention.
-        min_side: Floor applied to ``w`` and ``h`` before they become variances (A41);
-            keeps a zero-area box finite instead of dividing by zero. Must be finite
-            and strictly positive; ``0`` or a negative floor never binds and restores
-            the division by zero it exists to prevent (M-23).
+        min_side: Floor applied to ``w`` and ``h`` before they become variances (A41); keeps a zero-area box finite
+            instead of dividing by zero. Must be finite and strictly positive; ``0`` or a negative floor never binds
+            and restores the division by zero it exists to prevent (M-23).
 
     Returns:
         ``B_D`` per pair, shaped like the broadcast of the two inputs without their last
@@ -217,8 +191,7 @@ def probiou_bhattacharyya_loss(pred: Tensor, target: Tensor, min_side: float = _
     p_cx, p_cy, p_w, p_h, p_theta = _unpack(pred, min_side)
     t_cx, t_cy, t_w, t_h, t_theta = _unpack(target, min_side)
 
-    # Variances along each box's own long (w) and short (h) axes: R17's uniform-density
-    # second moment for a rectangle.
+    # Variances along each box's own long (w) and short (h) axes: R17's uniform-density second moment for a rectangle.
     p_var_w, p_var_h = p_w * p_w / 12, p_h * p_h / 12
     t_var_w, t_var_h = t_w * t_w / 12, t_h * t_h / 12
 
@@ -229,9 +202,9 @@ def probiou_bhattacharyya_loss(pred: Tensor, target: Tensor, min_side: float = _
     centre_term = _centre_term(
         p_cx - t_cx, p_cy - t_cy, (p_theta, p_var_w, p_var_h), (t_theta, t_var_w, t_var_h), cos_sq, sin_sq
     )
-    # det(Sigma1 + Sigma2) relative to 4 sqrt(det Sigma1 det Sigma2), minus one: the ratio
-    # inside R17's B2 logarithm, written so that it is a sum of squares over a product of
-    # sides and therefore exactly zero when the two covariances agree.
+    # det(Sigma1 + Sigma2) relative to 4 sqrt(det Sigma1 det Sigma2), minus one: the ratio inside R17's B2 logarithm,
+    # written so that it is a sum of squares over a product of sides and therefore exactly zero when the two
+    # covariances agree.
     excess = (
         (p_w * p_h - t_w * t_h) ** 2 + (p_w * t_h - t_w * p_h) ** 2 * cos_sq + (p_w * t_w - p_h * t_h) ** 2 * sin_sq
     ) / (4 * p_w * p_h * t_w * t_h)
@@ -241,10 +214,9 @@ def probiou_bhattacharyya_loss(pred: Tensor, target: Tensor, min_side: float = _
 def probabilistic_iou(pred: Tensor, target: Tensor, min_side: float = _MIN_SIDE) -> Tensor:
     """ProbIoU similarity ``1 - H_D`` between aligned pairs of rotated boxes.
 
-    R17's Gaussian-overlap analogue of IoU: ``1`` for coincident boxes, decaying towards
-    ``0`` as they separate in position, size or orientation. It is a Hellinger-distance
-    similarity between two Gaussians, **not** the overlap area of two rectangles — R17
-    claims no equality with the polygon IoU, which is WP-063's subject (A24).
+    R17's Gaussian-overlap analogue of IoU: ``1`` for coincident boxes, decaying towards ``0`` as they separate in
+    position, size or orientation. It is a Hellinger-distance similarity between two Gaussians, **not** the overlap area
+    of two rectangles — R17 claims no equality with the polygon IoU, which is WP-063's subject (A24).
 
     Args:
         pred: Predicted boxes of shape ``(..., 5)``, ``(cx, cy, w, h, theta)``.
@@ -277,11 +249,10 @@ def probabilistic_iou(pred: Tensor, target: Tensor, min_side: float = _MIN_SIDE)
 def probiou_hellinger_loss(pred: Tensor, target: Tensor, min_side: float = _MIN_SIDE) -> Tensor:
     """Hellinger distance ``H_D = 1 - ProbIoU`` per aligned pair (R17's L1).
 
-    R17's bounded loss, and the one it suggests switching to once training has started
-    with :func:`probiou_bhattacharyya_loss`. Its derivative with respect to ``B_D`` is
-    unbounded as the boxes coincide — inherent to the square root, not to this
-    implementation — so a coincident pair is given exactly ``0`` with a zero gradient
-    rather than the ``NaN`` an unguarded ``sqrt`` backward would produce.
+    R17's bounded loss, and the one it suggests switching to once training has started with
+    :func:`probiou_bhattacharyya_loss`. Its derivative with respect to ``B_D`` is unbounded as the boxes coincide —
+    inherent to the square root, not to this implementation — so a coincident pair is given exactly ``0`` with a zero
+    gradient rather than the ``NaN`` an unguarded ``sqrt`` backward would produce.
 
     Args:
         pred: Predicted boxes of shape ``(..., 5)``, ``(cx, cy, w, h, theta)``.
@@ -307,10 +278,9 @@ def probiou_hellinger_loss(pred: Tensor, target: Tensor, min_side: float = _MIN_
 
         ```
     """
-    # The promotion has to wrap the square root as well as the covariance arithmetic, not
-    # just be inherited from the call below: the derivative of `sqrt` at _RADICAND_FLOOR is
-    # ~5e9, which is `Inf` in float16, so a coincident pair backpropagates `0 * Inf = NaN`
-    # however exactly `B_D` was computed.
+    # The promotion has to wrap the square root as well as the covariance arithmetic, not just be inherited from the
+    # call below: the derivative of `sqrt` at _RADICAND_FLOOR is ~5e9, which is `Inf` in float16, so a coincident pair
+    # backpropagates `0 * Inf = NaN` however exactly `B_D` was computed.
     out_dtype = torch.result_type(pred, target)
     work_dtype = _working_dtype(out_dtype)
     distance = probiou_bhattacharyya_loss(pred.to(work_dtype), target.to(work_dtype), min_side=min_side)
@@ -324,10 +294,9 @@ def probiou_hellinger_loss(pred: Tensor, target: Tensor, min_side: float = _MIN_
 def _working_dtype(dtype: torch.dtype) -> torch.dtype:
     """Return the precision the covariance arithmetic runs in for a given input dtype.
 
-    Identity at float32 and above — those inputs keep the exact behaviour the module
-    docstring's error tables were measured with — and float32 for the half dtypes, whose
-    exponent range (float16) or mantissa (bfloat16) the cancellation-free algebra cannot
-    compensate for on its own.
+    Identity at float32 and above — those inputs keep the exact behaviour the module docstring's error tables were
+    measured with — and float32 for the half dtypes, whose exponent range (float16) or mantissa (bfloat16) the
+    cancellation-free algebra cannot compensate for on its own.
 
     Args:
         dtype: The dtype :func:`torch.result_type` gives the two box arguments.
@@ -358,9 +327,9 @@ def _centre_term(
 ) -> Tensor:
     """Evaluate R17's ``B1`` from the centre offset resolved in each box's own frame.
 
-    The numerator is ``d^T adj(Sigma1 + Sigma2) d``; the adjugate is linear in 2x2, so it
-    splits into one non-negative contribution per box (module docstring). The denominator
-    is ``4 det(Sigma1 + Sigma2)``, expanded the same cancellation-free way.
+    The numerator is ``d^T adj(Sigma1 + Sigma2) d``; the adjugate is linear in 2x2, so it splits into one non-negative
+    contribution per box (module docstring). The denominator is ``4 det(Sigma1 + Sigma2)``, expanded the same
+    cancellation-free way.
 
     Args:
         offset_x: ``x1 - x2`` centre offset.
@@ -432,14 +401,12 @@ def _unpack(rboxes: Tensor, min_side: float) -> tuple[Tensor, Tensor, Tensor, Te
 def _check_rboxes(rboxes: Tensor, name: str) -> None:
     """Raise :class:`ValueError` unless ``rboxes`` has a trailing rotated-box dimension.
 
-    Deliberately looser than :func:`lucid_yolo.data.rotated_geom._check_2d`, which
-    requires exactly 2-D: everything here is elementwise in the leading shape, so a
-    ``(4, 1, 5)`` prediction against a ``(1, 3, 5)`` target is a well-defined pairwise
-    matrix and refusing it would be the guard inventing a restriction the arithmetic
-    does not have. The two are not a duplicate pair, whatever the shared name suggests
-    (WP-091e). Only the trailing five is structural — it is what :func:`_unpack`
-    unbinds — so that is all this asserts, and the message says ``(..., 5)`` rather
-    than naming rows the function never counts.
+    Deliberately looser than :func:`lucid_yolo.data.rotated_geom._check_2d`, which requires exactly 2-D: everything here
+    is elementwise in the leading shape, so a ``(4, 1, 5)`` prediction against a ``(1, 3, 5)`` target is a well-defined
+    pairwise matrix and refusing it would be the guard inventing a restriction the arithmetic does not have. The two are
+    not a duplicate pair, whatever the shared name suggests (WP-091e). Only the trailing five is structural — it is what
+    :func:`_unpack` unbinds — so that is all this asserts, and the message says ``(..., 5)`` rather than naming rows the
+    function never counts.
 
     Examples:
         ```pycon
