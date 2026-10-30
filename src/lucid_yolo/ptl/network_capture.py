@@ -591,8 +591,9 @@ class _NetworkCapture:
         aliases them, so the next replayed backward would overwrite it and then accumulate
         onto itself. Any ``.grad`` alive before a replay (gradient accumulation, an in-place
         ``zero_grad``, a callback keeping gradients) is copied out first. Lightning clears
-        gradients after the training step's forward, so the previous step's gradients are
-        copied too, at every accumulation setting, and ``zero_grad`` then drops the clones.
+        gradients after the training step's forward. The shared helper can omit copies
+        only inside a certified native closure that clears those same parameters before
+        backward; accumulated or observed gradients retain their copies.
 
         The copy runs at forward time, before the replay. The hold in :meth:`_await_backward`
         keeps any other replay from running between this forward and its backward, so no

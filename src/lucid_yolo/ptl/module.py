@@ -167,16 +167,24 @@ Provenance: R1 sec. 3.2, R1 Eq. 2-3, R1 Tables S2/S5. Assumptions: A8.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import inspect
 import warnings
+from types import CodeType
 from typing import TYPE_CHECKING, Any, cast
 
+import pytorch_lightning
 import torch
+from packaging.version import Version
 from pytorch_lightning import Callback, LightningModule
 from pytorch_lightning.accelerators import CUDAAccelerator
+from pytorch_lightning.core.optimizer import LightningOptimizer
+from pytorch_lightning.plugins.precision import MixedPrecision, Precision
+from pytorch_lightning.profilers import PassThroughProfiler
 from pytorch_lightning.strategies import SingleDeviceStrategy
 from torch import Tensor
+from torch.optim import optimizer as optimizer_api
 
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.decode.common import BOX_CORNERS, MAX_DETECTIONS, SCORE_COLUMN
@@ -213,6 +221,7 @@ from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
+from lucid_yolo.ptl._graph_replay import _gradients_cleared_after_forward
 from lucid_yolo.ptl._padding import (
     _BOX_DIM,
     _KEYPOINT_DIM,
@@ -257,9 +266,17 @@ if TYPE_CHECKING:
     from types import FrameType
 
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
+    from torch.optim import Optimizer
 
     from lucid_yolo.assign.tal import AssignResult
     from lucid_yolo.data.targets import Targets
+
+_automatic_api: Any = None
+with contextlib.suppress(ImportError):
+    from pytorch_lightning.loops.optimization import automatic as _automatic_api
+
+_ClosureType: Any = getattr(_automatic_api, "Closure", None)
+_AutomaticOptimizationType: Any = getattr(_automatic_api, "_AutomaticOptimization", None)
 
 __all__ = ["DetectionLitModule", "pad_keypoints", "pad_rboxes", "pad_targets"]
 
@@ -1555,6 +1572,160 @@ class DetectionLitModule(LightningModule):
         loss, _, _ = self._shared_step(batch, "train")
         return loss
 
+    def optimizer_step(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: Optimizer | LightningOptimizer,
+        optimizer_closure: Callable[[], Any] | None = None,
+    ) -> None:
+        """Omit snapshots that the native closure clears before backward.
+
+        Only detection network replay with accumulation one and the native
+        pass-through profiler qualifies. The native forward runs inside the
+        permission; zeroing, backward and subsequent
+        callbacks run outside it. Restoring the closure in ``finally`` keeps a
+        failed or reused closure from retaining the wrapper. Custom zeroing,
+        observers, strategies, precision plugins, optimizer wrappers and a
+        closure whose own ``closure`` method was replaced on the instance keep
+        the original snapshots. Lightning minors beyond the inspected 2.4-2.6
+        contract also retain them.
+        """
+        trainer = self._trainer
+        raw_optimizer = getattr(optimizer, "optimizer", optimizer)
+        if (
+            not self._capture_network_active
+            or self._task != "detect"
+            or not _ZEROING_RUNTIME_SUPPORTED
+            or type(optimizer_closure) is not _ClosureType
+            or _ClosureType.__call__ is not _NATIVE_CLOSURE_CALL
+            or _ClosureType.closure is not _NATIVE_CLOSURE_BODY  # type: ignore[union-attr]
+            or "closure" in vars(optimizer_closure)
+            or trainer is None
+            or len(trainer.optimizers) != 1
+            or raw_optimizer is not trainer.optimizers[0]
+            or (
+                raw_optimizer is not optimizer
+                and (
+                    getattr(optimizer.step, "__func__", None) is not _NATIVE_LIGHTNING_STEP or "step" in vars(optimizer)
+                )
+            )
+        ):
+            super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
+            return
+        native_closure = cast("Any", optimizer_closure)
+        step = native_closure._step_fn
+        consumed = False
+
+        def forward() -> Any:
+            nonlocal consumed
+            clearing = () if consumed else self._parameters_cleared_after_forward(optimizer_closure, step)
+            consumed = True
+            scope = _gradients_cleared_after_forward(clearing) if clearing else contextlib.nullcontext()
+            with scope:
+                return step()
+
+        native_closure._step_fn = forward
+        try:
+            super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
+        finally:
+            native_closure._step_fn = step
+
+    def _parameters_cleared_after_forward(
+        self, closure: Callable[[], Any] | None, step_fn: Callable[[], Any]
+    ) -> tuple[Tensor, ...]:
+        """Keep snapshots unless the native closure drops them without an observer.
+
+        Lightning's automatic closure runs forward, zero-grad, then backward.
+        With no accumulation or customized zeroing, copying these old gradients
+        only creates tensors the next operation discards. The live optimizer
+        groups name exactly which parameters that operation clears.
+        """
+        trainer = self._trainer
+        callbacks = getattr(trainer, "callbacks", None)
+        profiler = getattr(trainer, "profiler", None)
+        if (
+            not self._capture_network_active
+            or not _ZEROING_RUNTIME_SUPPORTED
+            or self._task != "detect"
+            or self._strategy is not _STRATEGIES[Task.DETECT]
+            or type(self) is not DetectionLitModule
+            or trainer is None
+            or not trainer.training
+            or not self.automatic_optimization
+            or trainer.accumulate_grad_batches != 1
+            or type(trainer.precision_plugin) not in (Precision, MixedPrecision)
+            or type(trainer.strategy) is not SingleDeviceStrategy
+            or trainer.strategy.model is not self
+            or type(profiler) is not PassThroughProfiler
+            or PassThroughProfiler.__getattribute__ is not object.__getattribute__
+            or any(
+                getattr(PassThroughProfiler, name, None) is not native or name in vars(profiler)
+                for name, native in _NATIVE_FORWARD_PROFILER_METHODS.items()
+            )
+            or any(
+                getattr(type(trainer.strategy), name, None) is not native or name in vars(trainer.strategy)
+                for name, native in _NATIVE_STRATEGY_METHODS.items()
+            )
+            or any(
+                getattr(type(trainer.precision_plugin), name, None) is not native
+                or name in vars(trainer.precision_plugin)
+                for name, native in _NATIVE_PRECISION_METHODS[type(trainer.precision_plugin)].items()
+            )
+            or not _native_loss(self.loss)
+            or getattr(self._objective, "__func__", None) is not _NATIVE_DETECT_OBJECTIVE
+            or any(getattr(type(self), name) is not native or name in vars(self) for name, native in _ZEROING_METHODS)
+            or self._forward_hooks
+            or self._forward_pre_hooks
+            or self._backward_hooks
+            or callbacks is None
+            or any(
+                type(callback).__getattribute__ is not _NATIVE_CALLBACK_ATTRIBUTE_ACCESS
+                or type(callback).on_before_zero_grad is not _NATIVE_CALLBACK_ZEROING
+                or "on_before_zero_grad" in vars(callback)
+                for callback in callbacks
+            )
+            or len(trainer.optimizers) != 1
+        ):
+            return ()
+        loop = getattr(getattr(trainer.fit_loop, "epoch_loop", None), "automatic_optimization", None)
+        if (
+            loop is None
+            or type(loop) is not _AutomaticOptimizationType
+            or any(
+                getattr(type(loop), name, None) is not native or name in vars(loop)
+                for name, native in _NATIVE_ZEROING_METHODS.items()
+            )
+            or loop._skip_backward
+            or type(closure) is not _ClosureType
+            or "closure" in vars(closure)
+        ):
+            return ()
+        zeroing = cast("Any", closure)._zero_grad_fn
+        step = getattr(step_fn, "func", None)
+        if (
+            zeroing is None
+            or _NATIVE_ZEROING_CODE is None
+            or getattr(zeroing, "__code__", None) is not _NATIVE_ZEROING_CODE
+            or getattr(step, "__func__", None) is not _NATIVE_TRAINING_LOOP_STEP
+            or getattr(step, "__self__", None) is not loop
+        ):
+            return ()
+        optimizer = trainer.optimizers[0]
+        bindings = dict(zip(zeroing.__code__.co_freevars, zeroing.__closure__ or (), strict=True))
+        if (
+            type(optimizer) is not MuSGD
+            or not _native_update_step(optimizer)
+            or type(optimizer).zero_grad is not _NATIVE_ZERO_GRAD
+            or "zero_grad" in vars(optimizer)
+            or "self" not in bindings
+            or bindings["self"].cell_contents is not loop
+            or "optimizer" not in bindings
+            or bindings["optimizer"].cell_contents is not optimizer
+        ):
+            return ()
+        return tuple(parameter for group in optimizer.param_groups for parameter in group["params"])
+
     def validation_step(self, batch: StepBatch, batch_idx: int) -> Tensor:
         """Run one validation step: shared forward and loss, plus the mAP update.
 
@@ -2623,3 +2794,98 @@ _EAGER_POSE_SCORING = tuple(
     (name, getattr(DetectionLitModule, name))
     for name in ("_score_branch", "_rle_on", "_oks_on", "_gather_keypoint_positives")
 )
+
+_ZEROING_METHODS = (
+    ("training_step", DetectionLitModule.training_step),
+    ("optimizer_step", DetectionLitModule.optimizer_step),
+    ("optimizer_zero_grad", LightningModule.optimizer_zero_grad),
+    ("on_before_zero_grad", LightningModule.on_before_zero_grad),
+    ("forward", DetectionLitModule.forward),
+    ("_shared_step", DetectionLitModule._shared_step),
+    ("_training_network", DetectionLitModule._training_network),
+    ("_task_extra_loss", DetectionLitModule._task_extra_loss),
+    ("_log_loss", DetectionLitModule._log_loss),
+    ("log", LightningModule.log),
+)
+_NATIVE_CALLBACK_ATTRIBUTE_ACCESS: object = object.__getattribute__
+_NATIVE_CALLBACK_ZEROING = Callback.on_before_zero_grad
+_NATIVE_LIGHTNING_STEP = LightningOptimizer.step
+_NATIVE_CLOSURE_CALL = getattr(_ClosureType, "__call__", None)  # noqa: B004 — retain the method identity
+_NATIVE_CLOSURE_BODY = getattr(_ClosureType, "closure", None)
+_NATIVE_MUSGD_STEP = MuSGD.step
+_NATIVE_ZERO_GRAD = torch.optim.Optimizer.zero_grad
+_NATIVE_DETECT_OBJECTIVE = DetectionLitModule._detect_objective
+_NATIVE_TRAINING_LOOP_STEP = getattr(_AutomaticOptimizationType, "_training_step", None)
+_ZEROING_FACTORY = getattr(_AutomaticOptimizationType, "_make_zero_grad_fn", None)
+_NATIVE_ZEROING_CODE = next(
+    (
+        value
+        for value in getattr(getattr(_ZEROING_FACTORY, "__code__", None), "co_consts", ())
+        if getattr(value, "co_name", None) == "zero_grad_fn"
+    ),
+    None,
+)
+_ZEROING_RUNTIME_SUPPORTED = Version(getattr(pytorch_lightning, "__version__", "0")).release[:2] in {
+    (2, 4),
+    (2, 5),
+    (2, 6),
+}
+_NATIVE_STRATEGY_METHODS = {
+    "training_step": getattr(SingleDeviceStrategy, "training_step", None),
+    "optimizer_step": getattr(SingleDeviceStrategy, "optimizer_step", None),
+    "post_training_step": getattr(SingleDeviceStrategy, "post_training_step", None),
+}
+_NATIVE_PRECISION_METHODS = {
+    kind: {
+        name: getattr(kind, name, None)
+        for name in ("optimizer_step", "_wrap_closure", "train_step_context", "forward_context")
+    }
+    for kind in (Precision, MixedPrecision)
+}
+_NATIVE_FORWARD_PROFILER_METHODS = {
+    name: getattr(PassThroughProfiler, name, None) for name in ("profile", "start", "stop")
+}
+_NATIVE_ZEROING_METHODS = {
+    name: getattr(_AutomaticOptimizationType, name, None) for name in ("_on_before_zero_grad", "_optimizer_zero_grad")
+}
+
+
+def _native_update_step(optimizer: MuSGD) -> bool:
+    """Recognize native profiler and scheduler wrappers without trusting custom step wrappers."""
+    root = type(optimizer).step
+    if root is not _NATIVE_MUSGD_STEP and not (
+        _NATIVE_PROFILE_CODE is not None
+        and getattr(root, "__code__", None) is _NATIVE_PROFILE_CODE
+        and getattr(root, "__wrapped__", None) is _NATIVE_MUSGD_STEP
+    ):
+        return False
+    pre_hooks = getattr(optimizer, "_optimizer_step_pre_hooks", None)
+    if pre_hooks is None or pre_hooks or getattr(optimizer_api, "_global_optimizer_pre_hooks", None) != {}:
+        return False
+    step = optimizer.step
+    if "step" not in vars(optimizer):
+        return getattr(step, "__func__", None) is root
+    if _NATIVE_SCHEDULER_CODE is None or getattr(step, "__code__", None) is not _NATIVE_SCHEDULER_CODE:
+        return False
+    cells = dict(zip(step.__code__.co_freevars, step.__closure__ or (), strict=True))
+    return (
+        "func" in cells
+        and cells["func"].cell_contents is root
+        and "opt_ref" in cells
+        and cells["opt_ref"].cell_contents() is optimizer
+    )
+
+
+_PROFILE_FACTORY = getattr(torch.optim.Optimizer, "profile_hook_step", None)
+_NATIVE_PROFILE_CODE = getattr(_PROFILE_FACTORY(_NATIVE_MUSGD_STEP), "__code__", None) if _PROFILE_FACTORY else None
+_NATIVE_SCHEDULER_CODE: CodeType | None = getattr(torch.optim.lr_scheduler.LRScheduler.__init__, "__code__", None)
+for _wrapper_name in ("patch_track_step_called", "wrap_step", "wrapper"):
+    if _NATIVE_SCHEDULER_CODE is not None:
+        _NATIVE_SCHEDULER_CODE = next(
+            (
+                value
+                for value in _NATIVE_SCHEDULER_CODE.co_consts
+                if isinstance(value, CodeType) and value.co_name == _wrapper_name
+            ),
+            None,
+        )

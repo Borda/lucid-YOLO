@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import contextlib
 import warnings
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, ClassVar, Protocol, cast
 
 import torch
@@ -35,6 +36,36 @@ if TYPE_CHECKING:
 
 #: First verified BF16 replay runtime; 2.4's path does not meet the exact eager oracle.
 BF16_REPLAY_SUPPORTED = Version(torch.__version__) >= Version("2.9")
+
+_CLEARING_GRADIENTS: ContextVar[frozenset[int]] = ContextVar("clearing_gradients", default=frozenset())
+
+
+@contextlib.contextmanager
+def _gradients_cleared_after_forward(parameters: Iterable[Tensor]) -> Iterator[None]:
+    """Scope the parameters native automatic optimization clears before backward.
+
+    The caller certifies the closure and its zero-gradient observers. Other
+    parameters keep their snapshots, including a parameter removed from the
+    optimizer's live groups. The token is reset even when the forward fails.
+
+    Examples:
+        ```pycon
+        >>> parameter = nn.Parameter(torch.ones(1))
+        >>> with _gradients_cleared_after_forward([parameter]):
+        ...     id(parameter) in _CLEARING_GRADIENTS.get()
+        True
+        >>> _CLEARING_GRADIENTS.get()
+        frozenset()
+
+        ```
+    """
+    members = tuple(parameters)
+    token = _CLEARING_GRADIENTS.set(frozenset(map(id, members)))
+    try:
+        yield
+    finally:
+        _CLEARING_GRADIENTS.reset(token)
+
 
 #: The process-wide module hook registries; any entry runs code a recording would not replay.
 _GLOBAL_HOOKS = (
@@ -216,8 +247,10 @@ def copy_out_live_gradients(parameters: Iterable[Tensor]) -> None:
     accumulate onto itself. Any ``.grad`` alive before a replay (gradient accumulation, an
     in-place ``zero_grad``, a callback keeping gradients) is copied out first. Lightning's
     automatic optimization clears gradients after the training step's forward, so the
-    previous step's gradients are still alive at this point and are copied too, at every
-    accumulation setting; the clones are then dropped by ``zero_grad``.
+    previous step's gradients are still alive at this point. Unless the caller
+    certifies a native closure that clears them before backward, those are copied
+    too. The certified scope names the optimizer's live parameters; gradients
+    outside that set retain their snapshots.
 
     The caller makes the copy at forward time, before the replay, and holds every later
     replay of the same recording until this one's backward has run. Nothing can then
@@ -235,8 +268,9 @@ def copy_out_live_gradients(parameters: Iterable[Tensor]) -> None:
 
         ```
     """
+    clearing = _CLEARING_GRADIENTS.get()
     for parameter in parameters:
-        if parameter.grad is not None:
+        if id(parameter) not in clearing and parameter.grad is not None:
             parameter.grad = parameter.grad.clone()
 
 
