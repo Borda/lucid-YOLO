@@ -25,7 +25,7 @@ import torch
 from capture_access import network_capture
 from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer
-from pytorch_lightning.accelerators import CUDAAccelerator
+from pytorch_lightning.accelerators import CUDAAccelerator, MPSAccelerator
 from pytorch_lightning.plugins.precision import MixedPrecision
 from pytorch_lightning.strategies import DDPStrategy, SingleDeviceStrategy
 from torch.utils.data import DataLoader
@@ -322,22 +322,47 @@ def test_cpu_images_bypass_recording_when_capture_is_active() -> None:
 
 
 @pytest.mark.parametrize(
-    ("strategy", "automatic_optimization"),
+    ("accelerator", "strategy", "automatic_optimization", "eligible"),
     [
-        pytest.param(DDPStrategy, True, id="distributed-strategy"),
-        pytest.param(lambda: SingleDeviceStrategy(device="cuda"), False, id="manual-optimization"),
+        pytest.param(CUDAAccelerator, DDPStrategy, True, False, id="distributed-strategy"),
+        pytest.param(CUDAAccelerator, SingleDeviceStrategy, False, False, id="manual-optimization"),
+        pytest.param(MPSAccelerator, SingleDeviceStrategy, True, False, id="mps"),
+        pytest.param(CUDAAccelerator, SingleDeviceStrategy, True, True, id="single-device-cuda"),
     ],
 )
-def test_setup_ignores_capture_outside_single_device_automatic_optimization(
-    strategy: Callable[[], object], automatic_optimization: bool
+@pytest.mark.parametrize("flag", ["capture_network", "capture_loss", "capture_gradient_norm"])
+@pytest.mark.parametrize("stage", ["fit", "validate"])
+@pytest.mark.parametrize("supported", [False, True])
+def test_setup_gates_capture_and_warns_at_fit(
+    accelerator: Callable[[], object],
+    strategy: Callable[[], object],
+    automatic_optimization: bool,
+    eligible: bool,
+    flag: str,
+    stage: str,
+    supported: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Asking for capture under DDP or manual optimization warns and leaves the module eager."""
-    model = _module(capture_network=True)
+    """Device eligibility and norm's torch gate produce separate fit-only diagnostics."""
+    monkeypatch.setattr("lucid_yolo.ptl.module._NORM_CAPTURE_SUPPORTED", supported)
+    model = _module(**{flag: True})
     model.automatic_optimization = automatic_optimization
-    model._trainer = MagicMock(spec=Trainer, accelerator=CUDAAccelerator(), strategy=strategy())
-    with pytest.warns(UserWarning, match="single-device CUDA"):
-        model.setup("fit")
-    assert not model._capture_network_active
+    model._trainer = MagicMock(spec=Trainer, accelerator=accelerator(), strategy=strategy())
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        model.setup(stage)
+    norm_requested = flag == "capture_gradient_norm"
+    assert getattr(model, f"_{flag}_active") is (eligible and (supported or not norm_requested))
+    expected = []
+    if stage == "fit":
+        if not eligible:
+            expected.append(f"{flag}=True is ignored outside single-device CUDA automatic optimization")
+        elif norm_requested and not supported:
+            expected.append(
+                f"capture_gradient_norm=True is verified only on torch>=2.9; installed torch is {torch.__version__}"
+            )
+    assert [str(warning.message) for warning in recorded] == expected
+    assert all(warning.filename == __file__ for warning in recorded)
 
 
 def test_setup_activates_capture_on_single_device_cuda_automatic_optimization() -> None:

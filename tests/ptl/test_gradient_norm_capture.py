@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import copy
+import re
 import warnings
+from collections.abc import Callable, Iterable
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 import torch
@@ -81,6 +83,42 @@ def test_cpu_refusal_is_native_and_retirement_skips_scans() -> None:
     assert not owner.retired and owner._graph is None and owner._inputs == []
 
 
+@pytest.mark.parametrize(
+    ("refusal", "reason"),
+    [
+        ("unsupported-torch", "the norm decomposition is verified only on torch>=2.9"),
+        ("clip_grad_norm_", "a PyTorch clipping implementation was customized"),
+        ("get_total_norm", "a PyTorch clipping implementation was customized"),
+        ("clip_grads_with_norm_", "a PyTorch clipping implementation was customized"),
+        ("no-gradients", "no parameter has a gradient"),
+    ],
+)
+def test_norm_refusal_retires_and_runs_native(refusal: str, reason: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each refusal reaches its diagnostic on a fresh holder and preserves native clipping."""
+    owner = _GradientNormCapture()
+    first, second = _parameters("cpu", torch.float32), _parameters("cpu", torch.float32)
+    monkeypatch.setattr(implementation, "_SUPPORTED", refusal != "unsupported-torch")
+    if refusal == "no-gradients":
+        for parameter in first + second:
+            parameter.grad = None
+    elif refusal != "unsupported-torch":
+        original = getattr(torch.nn.utils, refusal, None)
+        monkeypatch.setattr(torch.nn.utils, refusal, MagicMock(wraps=original), raising=False)
+    eager = MagicMock(side_effect=lambda: torch.nn.utils.clip_grad_norm_(first, 2.0))
+
+    with pytest.warns(UserWarning, match=re.escape(reason)) as recorded:
+        owner.run(first, 2.0, eager)
+
+    eager.assert_called_once_with()
+    assert len(recorded) == 1
+    assert owner.retired and owner._graph is None and owner._inputs == []
+    torch.nn.utils.clip_grad_norm_(second, 2.0)
+    if refusal == "no-gradients":
+        assert all(parameter.grad is None for parameter in first)
+    else:
+        _bits_equal(first, second)
+
+
 def test_copy_and_fit_boundaries_drop_norm_resources() -> None:
     """Reset, deep copy and failure release the actual holder, including a recorded signature."""
     owner = _GradientNormCapture()
@@ -149,28 +187,70 @@ def test_inherited_stock_clipping_reaches_norm_holder(plugin: Precision) -> None
 
 
 @pytest.mark.parametrize(
-    ("maximum", "algorithm"),
+    ("outcome", "maximum", "algorithm"),
     [
-        pytest.param(None, "norm", id="unset"),
-        pytest.param(0.0, "norm", id="zero"),
-        pytest.param(2.0, "value", id="value"),
+        ("unset", None, "norm"),
+        ("zero", 0, "norm"),
+        ("value", 2, "value"),
+        ("amp-scaling", 2, "norm"),
+        ("module-override", 2, "norm"),
+        ("unknown-plugin", 2, "norm"),
+        ("option-off", 2, "norm"),
+        ("capture", 2, "norm"),
     ],
 )
-def test_ineligible_clipping_warns_once_and_keeps_native_gradients(maximum: float | None, algorithm: str) -> None:
-    """Disabled or value clipping retires once per fit while preserving the native result."""
-    module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
+def test_clipping_routes_capture_and_preserves_native_gradients(
+    outcome: str, maximum: int | None, algorithm: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Clipping routes preserve native results, retire once when required, and forward capture inputs."""
+    enabled = outcome != "option-off"
+    module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=enabled)
+    plugin = MagicMock(wraps=Precision()) if outcome == "unknown-plugin" else Precision()
     module._trainer = SimpleNamespace(
-        precision_plugin=Precision(), gradient_clip_val=maximum, gradient_clip_algorithm=algorithm
+        precision_plugin=plugin, gradient_clip_val=maximum, gradient_clip_algorithm=algorithm
     )
-    module._capture_gradient_norm_active = True
+    module._capture_gradient_norm_active = enabled
     first, second = _parameters("cpu", torch.float32), _parameters("cpu", torch.float32)
     optimizer = torch.optim.SGD(first, lr=0.1)
-    with pytest.warns(UserWarning, match="clipping is disabled or not by norm") as recorded:
+    native = MagicMock(wraps=LightningModule.configure_gradient_clipping.__get__(module))
+    override = MagicMock(wraps=module.clip_gradients)
+    if outcome == "amp-scaling":
+        optimizer._step_supports_amp_scaling = True
+    elif outcome == "module-override":
+        monkeypatch.setattr(module, "clip_gradients", override)
+    elif outcome == "option-off":
+        monkeypatch.setattr(LightningModule, "configure_gradient_clipping", native)
+
+    def capture(parameters: Iterable[torch.Tensor], limit: float, eager: Callable[[], None]) -> None:
+        """Check the CPU forwarding seam, then apply native clipping through its callback."""
+        assert all(
+            actual is expected for actual, expected in zip(parameters, plugin.main_params(optimizer), strict=True)
+        )
+        assert type(limit) is float and limit == float(maximum)
+        eager()
+
+    run = MagicMock(side_effect=capture)
+    monkeypatch.setattr(module._gradient_norm_capture, "run", run)
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
         module.configure_gradient_clipping(optimizer)
         module.configure_gradient_clipping(optimizer)
-    assert len(recorded) == 1 and module._gradient_norm_capture.retired
-    if algorithm == "value":
-        torch.nn.utils.clip_grad_value_(second, maximum)
+    retired = outcome in {"unset", "zero", "value", "module-override", "unknown-plugin"}
+    assert module._gradient_norm_capture.retired is retired
+    assert len(recorded) == int(retired)
+    if retired:
+        reason = (
+            "customized clipping" if outcome in {"module-override", "unknown-plugin"} else "disabled or not by norm"
+        )
+        assert reason in str(recorded[0].message)
+    assert run.call_count == (2 if outcome == "capture" else 0)
+    assert native.call_args_list == ([call(optimizer, None, None)] * 2 if outcome == "option-off" else [])
+    assert override.call_count == (2 if outcome == "module-override" else 0)
+    for _ in range(2):
+        if algorithm == "value":
+            torch.nn.utils.clip_grad_value_(second, maximum)
+        elif maximum:
+            torch.nn.utils.clip_grad_norm_(second, maximum)
     _bits_equal(first, second)
 
 
