@@ -117,3 +117,12 @@ BF16_REPLAY_EXPECTED = Version(torch.__version__) >= Version("2.9")
 skip_unless_bf16_replay = pytest.mark.skipif(
     not BF16_REPLAY_EXPECTED, reason="BF16 replay requires the verified torch 2.9 runtime"
 )
+
+#: Independent expectation for the norm decomposition's torch 2.9 runtime gate.
+#: ``test_norm_replay_gate_tracks_torch_2_9`` detects changes to the production threshold.
+NORM_REPLAY_EXPECTED = Version(torch.__version__) >= Version("2.9")
+
+#: Skips norm recordings on supported runtimes without the verified decomposition.
+skip_unless_norm_replay = pytest.mark.skipif(
+    not NORM_REPLAY_EXPECTED, reason="gradient-norm replay requires torch>=2.9"
+)
