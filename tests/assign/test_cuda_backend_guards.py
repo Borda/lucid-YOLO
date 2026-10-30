@@ -55,7 +55,7 @@ def loaded_passes(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     module = ModuleType(_cuda._KERNELS_MODULE)
     for name in _PASS_NAMES:
         setattr(module, name, Mock(name=name))
-    module._AVAILABLE = True  # type: ignore[attr-defined]
+    module._IS_TRITON_3_AVAILABLE = True  # type: ignore[attr-defined]
     module._PASSES = MappingProxyType({name: getattr(module, name) for name in _PASS_NAMES})  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, _cuda._KERNELS_MODULE, module)
     return module

@@ -119,7 +119,7 @@ def _kernels() -> ModuleType | None:
             stacklevel=2,
         )
         return None
-    return module if module._AVAILABLE else None
+    return module if module._IS_TRITON_3_AVAILABLE else None
 
 
 def _indexable(value: Tensor) -> bool:

@@ -15,11 +15,11 @@ try:
     import triton
     import triton.language as tl
 except ImportError:
-    _AVAILABLE = False
+    _IS_TRITON_3_AVAILABLE = False
 else:
-    _AVAILABLE = Version("3.0") <= Version(triton.__version__) < Version("4")
+    _IS_TRITON_3_AVAILABLE = Version("3.0") <= Version(triton.__version__) < Version("4")
 
-if _AVAILABLE:
+if _IS_TRITON_3_AVAILABLE:
 
     @triton.jit  # type: ignore[untyped-decorator]
     def _divide(a, b):  # type: (Any, Any) -> Any

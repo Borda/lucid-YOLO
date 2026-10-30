@@ -563,7 +563,7 @@ from lucid_yolo.assign.tal import TaskAlignedAssigner
 from lucid_yolo.ptl.module import DetectionLitModule
 assert _cuda._kernels() is None
 import lucid_yolo.assign._cuda_kernels as optional_kernels
-assert not optional_kernels._AVAILABLE
+assert not optional_kernels._IS_TRITON_3_AVAILABLE
 boxes = torch.tensor([[[0., 0., 2., 2.]]])
 result = TaskAlignedAssigner(1, fused_assignment=True)(
     torch.tensor([[[.8]]]), boxes.clone(), torch.tensor([[1., 1.]]),
