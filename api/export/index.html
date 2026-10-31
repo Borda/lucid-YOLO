@@ -4733,26 +4733,21 @@
 
         <p>Build a checkpoint-loaded module's export graph, its weights checked key for key.</p>
 <p>A Lightning checkpoint loads into a :class:<code>~lucid_yolo.ptl.module.DetectionLitModule</code>
-(:func:<code>~lucid_yolo.eval.checkpoint.load_eval_module</code>), and the export graphs wrap a
-composite model's <code>deploy()</code> view, which the Lightning module does not have. This
-is the bridge between the two. It reads the task from the module, rebuilds that
-task's composite — :class:<code>~lucid_yolo.models.build.Detector</code>,
-:class:<code>~lucid_yolo.models.build.Segmenter</code>,
-:class:<code>~lucid_yolo.models.build.OrientedDetector</code> or
-:class:<code>~lucid_yolo.models.build.KeypointDetector</code> — at the module's <strong>own</strong>
-multipliers, class count and point count, copies the module's weights into it, and
-wraps its <code>deploy()</code> view in the task's graph class.</p>
-<p>The rebuild is at raw multipliers rather than a variant name, so a module built
-outside the registry's five rows exports as readily as one the training CLI
-configured. The copy is checked strictly in both directions: the module must supply
-every key the composite holds and nothing else, apart from the training-only loss
-state in :data:<code>_TRAINING_ONLY_PREFIXES</code>. That works because the module keeps its
-stages as flat <code>backbone</code>/<code>neck</code>/<code>head</code> attributes (plus the three segmentation
-stages), the same names the composites use, so the two state dicts share their keys.</p>
-<p>The graph owns a copy of the weights: <code>module</code> is read and not modified, and stays
-on whatever device it was on. Whichever weights <code>module</code> holds are what is
-exported, so a module :func:<code>~lucid_yolo.eval.checkpoint.load_eval_module</code> returned
-with <code>use_ema=True</code> exports its EMA shadow.</p>
+(:func:<code>~lucid_yolo.eval.checkpoint.load_eval_module</code>), and the export graphs wrap a composite model's
+<code>deploy()</code> view, which the Lightning module does not have. This is the bridge between the two. It reads the
+task from the module, rebuilds that task's composite — :class:<code>~lucid_yolo.models.build.Detector</code>,
+:class:<code>~lucid_yolo.models.build.Segmenter</code>, :class:<code>~lucid_yolo.models.build.OrientedDetector</code> or
+:class:<code>~lucid_yolo.models.build.KeypointDetector</code> — at the module's <strong>own</strong> multipliers, class count and point
+count, copies the module's weights into it, and wraps its <code>deploy()</code> view in the task's graph class.</p>
+<p>The rebuild is at raw multipliers rather than a variant name, so a module built outside the registry's five
+rows exports as readily as one the training CLI configured. The copy is checked strictly in both directions:
+the module must supply every key the composite holds and nothing else, apart from the training-only loss state
+in :data:<code>_TRAINING_ONLY_PREFIXES</code>. That works because the module keeps its stages as flat
+<code>backbone</code>/<code>neck</code>/<code>head</code> attributes (plus the three segmentation stages), the same names the composites
+use, so the two state dicts share their keys.</p>
+<p>The graph owns a copy of the weights: <code>module</code> is read and not modified, and stays on whatever device it was
+on. Whichever weights <code>module</code> holds are what is exported, so a module
+:func:<code>~lucid_yolo.eval.checkpoint.load_eval_module</code> returned with <code>use_ema=True</code> exports its EMA shadow.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -4903,16 +4898,14 @@ refused by the task's graph class.</p>
     <div class="doc doc-contents first">
 
         <p>Write one export graph to an ONNX file at a pinned opset.</p>
-<p>The shipped counterpart to the four graph classes above: they compose the decode,
-this emits the file. It exists so the opset is pinned <em>somewhere a consumer runs</em>
-rather than left to whatever :func:<code>torch.onnx.export</code>'s default is on the torch a
-given machine installed — see :data:<code>ONNX_OPSET</code> for what that pin buys. The
-export gate calls this function rather than :func:<code>torch.onnx.export</code> directly, so
-the graph an operator gets is the graph the gate certified.</p>
-<p>The emitted file is static in every axis: no <code>dynamic_axes</code> is passed, so it
-answers for exactly the shape of <code>example</code> — the canvas <code>graph</code> baked into its
-buffers, and that example's batch. A consumer needing a second shape exports a
-second file.</p>
+<p>The shipped counterpart to the four graph classes above: they compose the decode, this emits the file. It
+exists so the opset is pinned <em>somewhere a consumer runs</em> rather than left to whatever
+:func:<code>torch.onnx.export</code>'s default is on the torch a given machine installed — see :data:<code>ONNX_OPSET</code> for what
+that pin buys. The export gate calls this function rather than :func:<code>torch.onnx.export</code> directly, so the graph
+an operator gets is the graph the gate certified.</p>
+<p>The emitted file is static in every axis: no <code>dynamic_axes</code> is passed, so it answers for exactly the shape of
+<code>example</code> — the canvas <code>graph</code> baked into its buffers, and that example's batch. A consumer needing a second
+shape exports a second file.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5044,9 +5037,8 @@ and the gate's op assertions then no longer speak for the result.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If the <code>onnx</code> package is not installed.
-torch's TorchScript exporter imports it to finalise the file, so exporting
-needs it even though nothing here imports it; <code>pip install
+                <p>If the <code>onnx</code> package is not installed. torch's TorchScript exporter
+imports it to finalise the file, so exporting needs it even though nothing here imports it; <code>pip install
 "lucid-yolo[export]"</code> adds it.</p>
               </div>
             </td>
@@ -5114,16 +5106,13 @@ needs it even though nothing here imports it; <code>pip install
 
 
         <p>A <code>deploy()</code> view plus its E2E decode, as one exportable module.</p>
-<p>The shared base of :class:<code>DetectExportGraph</code>, :class:<code>SegmentExportGraph</code>,
-:class:<code>OrientedExportGraph</code> and :class:<code>KeypointExportGraph</code>: it bakes the anchor grid for
-one <code>canvas</code> into buffers and holds the
-:class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</code> whose <code>k</code> fixes every task's output
-length — the axis-aligned tasks decode with it directly, the oriented task with a
-:class:<code>~lucid_yolo.decode.topk_e2e.RotatedTopKDecoder</code> built at the same <code>k</code> — so a
-subclass need only compose its own task's dense outputs into a decoded tuple.
-<code>forward</code> is left to subclasses — that is where the four tasks differ, per
-the module docstring's compositions — so this class alone is not directly
-exportable.</p>
+<p>The shared base of :class:<code>DetectExportGraph</code>, :class:<code>SegmentExportGraph</code>, :class:<code>OrientedExportGraph</code> and
+:class:<code>KeypointExportGraph</code>: it bakes the anchor grid for one <code>canvas</code> into buffers and holds the
+:class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</code> whose <code>k</code> fixes every task's output length — the axis-aligned
+tasks decode with it directly, the oriented task with a
+:class:<code>~lucid_yolo.decode.topk_e2e.RotatedTopKDecoder</code> built at the same <code>k</code> — so a subclass need only
+compose its own task's dense outputs into a decoded tuple. <code>forward</code> is left to subclasses — that is where
+the four tasks differ, per the module docstring's compositions — so this class alone is not directly exportable.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5186,15 +5175,12 @@ for images of this exact size.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Device the anchor buffers are built on <em>and</em> <code>deployed</code> is moved
-to, so the two halves of the graph cannot end up on different devices —
-buffers built on an accelerator while the wrapped model stayed wherever
-the caller left it is a failure at the first forward, not at
-construction. The move is in place, as
-:func:<code>~lucid_yolo.predict.predict_image</code> moves the module it is handed:
-a caller reusing <code>deployed</code> afterwards gets it on this device.
-Defaults to CPU, the device :func:<code>torch.onnx.export</code> traces a graph
-from.</p>
+                <p>Device the anchor buffers are built on <em>and</em> <code>deployed</code> is moved to, so the two halves of the graph
+cannot end up on different devices — buffers built on an accelerator while the wrapped model stayed
+wherever the caller left it is a failure at the first forward, not at construction. The move is in place, as
+:func:<code>~lucid_yolo.predict.predict_image</code> moves the module it is handed: a caller reusing <code>deployed</code>
+afterwards gets it on this device. Defaults to CPU, the device :func:<code>torch.onnx.export</code> traces
+a graph from.</p>
               </div>
             </td>
             <td>
@@ -5220,12 +5206,11 @@ from.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If either <code>canvas</code> side is not positive and divisible by every
-stride, per :func:<code>~lucid_yolo.assign.grid.require_grid_canvas</code>, which
-:func:<code>~lucid_yolo.assign.grid.anchor_grid</code> applies as the buffers are
-built. The divisibility this class documents is therefore checked here
-rather than left to the caller: a canvas of 100 px would otherwise get
-96 px worth of anchors and pair every prediction with the wrong pixel.</p>
+                <p>If either <code>canvas</code> side is not positive and divisible by every stride, per
+:func:<code>~lucid_yolo.assign.grid.require_grid_canvas</code>, which :func:<code>~lucid_yolo.assign.grid.anchor_grid</code>
+applies as the buffers are built. The divisibility this class documents is therefore checked here rather
+than left to the caller: a canvas of 100 px would otherwise get 96 px worth of anchors and pair every
+prediction with the wrong pixel.</p>
               </div>
             </td>
           </tr>
@@ -5289,11 +5274,10 @@ rather than left to the caller: a canvas of 100 px would otherwise get
 
 
         <p>Detection E2E export graph: dense one-to-one outputs to the A9 tuple.</p>
-<p>Reproduces :func:<code>~lucid_yolo.predict.predict_image</code>'s <code>"e2e"</code> composition —
-the deployed model's one-to-one <code>(cls, box)</code> pair straight into
-:class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</code>, same argument order — minus
-the letterbox inverse and the confidence filter, which are single-image
-concerns a batched, fixed-shape graph does not have.</p>
+<p>Reproduces :func:<code>~lucid_yolo.predict.predict_image</code>'s <code>"e2e"</code> composition — the deployed model's one-to-one
+<code>(cls, box)</code> pair straight into :class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</code>, same argument order — minus
+the letterbox inverse and the confidence filter, which are single-image concerns a batched, fixed-shape graph
+does not have.</p>
 
 
 <p><span class="doc-section-title">Examples:</span></p>
@@ -5449,19 +5433,16 @@ concerns a batched, fixed-shape graph does not have.</p>
 
 
         <p>Segmentation E2E export graph: the A9 tuple beside its Eq. 7 instance masks.</p>
-<p>Reproduces :func:<code>~lucid_yolo.predict.predict_segmentation</code>'s <code>"e2e"</code>
-composition — the same decoder call for the boxes, the same
-:meth:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder.decode_with_indices</code> source of
-the anchor indices mask coefficients are gathered by, and the same
-mask assembly, resize, crop and threshold operations. Export retains the
-original single-resize graph while eager decode chunks its full-canvas
-temporaries. One shape divergence remains: every one of the <code>k</code>
-rows is gathered, padding rows included, because the output shape is fixed.</p>
-<p>That divergence is why this graph's supported canvases are narrower than its
-base class's: a canvas yielding fewer anchors than <code>k</code> is refused in
-<code>__init__</code>, where it can still be reported as a canvas choice. The coefficient
-gather is the shared clamp-and-zero one, so such a canvas would no longer fail at
-trace time; the module docstring states why the refusal is kept anyway.</p>
+<p>Reproduces :func:<code>~lucid_yolo.predict.predict_segmentation</code>'s <code>"e2e"</code> composition — the same decoder call for
+the boxes, the same :meth:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder.decode_with_indices</code> source of the anchor
+indices mask coefficients are gathered by, and the same mask assembly, resize, crop and threshold operations.
+Export retains the original single-resize graph while eager decode chunks its full-canvas temporaries. One shape
+divergence remains: every one of the <code>k</code> rows is gathered, padding rows included, because the output shape is
+fixed.</p>
+<p>That divergence is why this graph's supported canvases are narrower than its base class's: a canvas yielding
+fewer anchors than <code>k</code> is refused in <code>__init__</code>, where it can still be reported as a canvas choice. The
+coefficient gather is the shared clamp-and-zero one, so such a canvas would no longer fail at trace time; the
+module docstring states why the refusal is kept anyway.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5722,10 +5703,9 @@ requirement, or yields fewer anchors than the decoder's <code>k</code>.</p>
 
 
         <p>Oriented E2E export graph: dense one-to-one outputs to the A45 tuple.</p>
-<p>Reproduces :func:<code>~lucid_yolo.predict.predict_oriented</code>'s <code>"e2e"</code>
-composition — one :class:<code>~lucid_yolo.decode.topk_e2e.RotatedTopKDecoder</code> call
-over the deployed model's one-to-one class logits, <code>(box, angle)</code> pair and the
-baked anchor grid, at the same <code>k</code> as the other graphs' decoder.</p>
+<p>Reproduces :func:<code>~lucid_yolo.predict.predict_oriented</code>'s <code>"e2e"</code> composition — one
+:class:<code>~lucid_yolo.decode.topk_e2e.RotatedTopKDecoder</code> call over the deployed model's one-to-one class logits,
+<code>(box, angle)</code> pair and the baked anchor grid, at the same <code>k</code> as the other graphs' decoder.</p>
 
 
 <p><span class="doc-section-title">Examples:</span></p>
@@ -5881,28 +5861,22 @@ baked anchor grid, at the same <code>k</code> as the other graphs' decoder.</p>
 
 
         <p>Keypoint E2E export graph: the A9 tuple beside each detection's point set.</p>
-<p>The fourth task's graph, and the last of the four to exist -- 0.5.0 shipped a
-keypoint model that trains, validates and evaluates but had no exported view at
-all, so it was the only released task whose model could not leave PyTorch
-(WP-151).</p>
-<p>The composition follows :class:<code>SegmentExportGraph</code> rather than
-:class:<code>DetectExportGraph</code>, for the reason segmentation has it: the point stem
-is dense over anchors, so the decode needs the <em>source anchor</em> of each detection
-row, which is what
-:meth:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder.decode_with_indices</code> returns and
-plain :meth:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder.forward</code> discards. The
-ordering is the one WP-062's angle branch established and
-:class:<code>~lucid_yolo.ptl.module.DetectionLitModule</code> already uses for its own
+<p>The fourth task's graph, and the last of the four to exist -- 0.5.0 shipped a keypoint model that trains,
+validates and evaluates but had no exported view at all, so it was the only released task whose model could not
+leave PyTorch (WP-151).</p>
+<p>The composition follows :class:<code>SegmentExportGraph</code> rather than :class:<code>DetectExportGraph</code>, for the reason
+segmentation has it: the point stem is dense over anchors, so the decode needs the <em>source anchor</em> of each
+detection row, which is what :meth:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder.decode_with_indices</code> returns and
+plain :meth:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder.forward</code> discards. The ordering is the one
+WP-062's angle branch established and :class:<code>~lucid_yolo.ptl.module.DetectionLitModule</code> already uses for its own
 <code>val/oks_mAP</code>: decode the whole dense tensor first, gather second.
-:func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code> needs the entire
-anchor grid and offers no per-detection indexing, so gathering first would mean
-reconstructing each kept row's anchor and stride by hand.</p>
-<p>Padding rows are handled by :func:<code>~lucid_yolo.decode.common.gather_by_anchor</code>,
-which clamps a padding index to a valid position and then zeroes that row, so a
-padding row yields the origin rather than the last anchor's pose. A fixed-shape
-graph cannot drop rows, and this task's gather is defined on them, so this graph
-accepts every canvas its base class does; :class:<code>SegmentExportGraph</code> uses the
-same gather but refuses canvases that would produce padding rows.</p>
+:func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code> needs the entire anchor grid and offers no
+per-detection indexing, so gathering first would mean reconstructing each kept row's anchor and stride by hand.</p>
+<p>Padding rows are handled by :func:<code>~lucid_yolo.decode.common.gather_by_anchor</code>, which clamps a padding index to
+a valid position and then zeroes that row, so a padding row yields the origin rather than the last anchor's
+pose. A fixed-shape graph cannot drop rows, and this task's gather is defined on them, so this graph accepts
+every canvas its base class does; :class:<code>SegmentExportGraph</code> uses the same gather but refuses canvases that
+would produce padding rows.</p>
 
 
 <p><span class="doc-section-title">Examples:</span></p>

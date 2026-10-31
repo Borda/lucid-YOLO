@@ -5186,9 +5186,8 @@ checkpoint onto the module's parameters and buffers.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If the checkpoint names anything restricted loading refuses.
-Raised by the one read, before any reducer the file carries is called -- see
-the module docstring.</p>
+                <p>If the checkpoint names anything restricted loading refuses. Raised by the one read,
+before any reducer the file carries is called -- see the module docstring.</p>
               </div>
             </td>
           </tr>
@@ -5198,12 +5197,10 @@ the module docstring.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If the checkpoint carries no <code>hyper_parameters</code> or <code>state_dict</code>
-mapping, no <code>epoch</code> or <code>global_step</code>, or -- under
-<code>use_ema</code> -- no <code>num_updates</code> beside the shadow; and if <code>use_ema</code> is
-requested and the checkpoint carries no EMA shadow, names the EMA callback in
-more than one <code>callbacks</code> entry, or carries a shadow that does not cover
-every floating-point parameter and buffer.</p>
+                <p>If the checkpoint carries no <code>hyper_parameters</code> or <code>state_dict</code> mapping, no <code>epoch</code> or
+<code>global_step</code>, or -- under <code>use_ema</code> -- no <code>num_updates</code> beside the shadow; and if <code>use_ema</code> is
+requested and the checkpoint carries no EMA shadow, names the EMA callback in more than one <code>callbacks</code>
+entry, or carries a shadow that does not cover every floating-point parameter and buffer.</p>
               </div>
             </td>
           </tr>
@@ -5237,13 +5234,11 @@ every floating-point parameter and buffer.</p>
     <div class="doc doc-contents first">
 
         <p>Resolve <code>auto</code> to the fastest available backend, else check <code>requested</code> exists here.</p>
-<p>A named backend is held to the same availability question <code>auto</code> asks, rather than
-passed through (WP-171). <code>--device cuda</code> on a machine with no CUDA used to be
-accepted and then fail several minutes later, inside the first <code>.to(device)</code> — after
-the checkpoint was loaded and, for a long run, after the annotations were parsed —
-with a message about a tensor rather than about the flag. The refusal names the
-request and what this machine does have, because the useful next command is the one
-the caller cannot guess from a stack trace.</p>
+<p>A named backend is held to the same availability question <code>auto</code> asks, rather than passed through (WP-171).
+<code>--device cuda</code> on a machine with no CUDA used to be accepted and then fail several minutes later, inside the
+first <code>.to(device)</code> — after the checkpoint was loaded and, for a long run, after the annotations were parsed —
+with a message about a tensor rather than about the flag. The refusal names the request and what this machine does
+have, because the useful next command is the one the caller cannot guess from a stack trace.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5351,11 +5346,10 @@ the caller cannot guess from a stack trace.</p>
     <div class="doc doc-contents first">
 
         <p>Detect objects in one image and return them in original-image coordinates.</p>
-<p>The image is letterboxed into an <code>img_size</code> square canvas, run through the module
-once, decoded by the selected path, and mapped back onto the original pixel grid by
-the exact analytic inverse of the letterbox that produced the canvas (A10). Rows
-below <code>conf_threshold</code> are dropped, which also removes the score-zero padding rows
-both decoders emit to keep their output shape fixed.</p>
+<p>The image is letterboxed into an <code>img_size</code> square canvas, run through the module once, decoded by the selected
+path, and mapped back onto the original pixel grid by the exact analytic inverse of the letterbox that produced
+the canvas (A10). Rows below <code>conf_threshold</code> are dropped, which also removes the score-zero padding rows both
+decoders emit to keep their output shape fixed.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5378,8 +5372,7 @@ both decoders emit to keep their output shape fixed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>An eval-mode <code>detect</code> module, as
-:func:<code>~lucid_yolo.eval.checkpoint.load_eval_module</code> returns it.
+                <p>An eval-mode <code>detect</code> module, as :func:<code>~lucid_yolo.eval.checkpoint.load_eval_module</code> returns it.
 <strong>Mutated in place</strong> — see the module docstring's <em>Module ownership</em>.</p>
               </div>
             </td>
@@ -5396,9 +5389,8 @@ both decoders emit to keep their output shape fixed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the image file to read, or an already-decoded <code>(3, H, W)</code> RGB
-tensor: <code>uint8</code>/<code>uint16</code> codes, or floating point in <code>[0, 1]</code>
-(:func:<code>~lucid_yolo.eval.annotations.letterbox_image_tensor</code>).</p>
+                <p>Path to the image file to read, or an already-decoded <code>(3, H, W)</code> RGB tensor: <code>uint8</code>/<code>uint16</code>
+codes, or floating point in <code>[0, 1]</code> (:func:<code>~lucid_yolo.eval.annotations.letterbox_image_tensor</code>).</p>
               </div>
             </td>
             <td>
@@ -5430,9 +5422,8 @@ tensor: <code>uint8</code>/<code>uint16</code> codes, or floating point in <code
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>"e2e"</code> for the suppression-free top-k path over the one-to-one
-branch, <code>"nms"</code> for the confidence-threshold plus class-wise suppression
-path over the dense branch.</p>
+                <p><code>"e2e"</code> for the suppression-free top-k path over the one-to-one branch, <code>"nms"</code> for the
+confidence-threshold plus class-wise suppression path over the dense branch.</p>
               </div>
             </td>
             <td>
@@ -5448,8 +5439,7 @@ path over the dense branch.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Detections at or below this score are dropped. Defaults to
-:data:<code>DEFAULT_CONF_THRESHOLD</code>.</p>
+                <p>Detections at or below this score are dropped. Defaults to :data:<code>DEFAULT_CONF_THRESHOLD</code>.</p>
               </div>
             </td>
             <td>
@@ -5492,7 +5482,7 @@ path over the dense branch.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A CPU tensor of shape <code>(N, 6)</code> whose rows are the A9 tuple</p>
+                <p>A CPU tensor of shape <code>(N, 6)</code> whose rows are the A9 tuple <code>[x1, y1, x2, y2, score, class]</code></p>
               </div>
             </td>
           </tr>
@@ -5502,17 +5492,7 @@ path over the dense branch.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>[x1, y1, x2, y2, score, class]</code> in original-image pixels, score-descending.</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p><code>class</code> is a contiguous class index (see the module docstring).</p>
+                <p>in original-image pixels, score-descending. <code>class</code> is a contiguous class index (see the module docstring).</p>
               </div>
             </td>
           </tr>
@@ -5535,9 +5515,8 @@ path over the dense branch.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If the module's task is not <code>detect</code>, naming the task it is; or if
-<code>decoder</code>, <code>conf_threshold</code> or <code>img_size</code> is outside its domain, per
-:func:<code>_check_predict_arguments</code>.</p>
+                <p>If the module's task is not <code>detect</code>, naming the task it is; or if <code>decoder</code>,
+<code>conf_threshold</code> or <code>img_size</code> is outside its domain, per :func:<code>_check_predict_arguments</code>.</p>
               </div>
             </td>
           </tr>
@@ -5547,8 +5526,7 @@ path over the dense branch.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If a tensor <code>image</code> is not <code>(3, H, W)</code>, or is floating point
-outside <code>[0, 1]</code>.</p>
+                <p>If a tensor <code>image</code> is not <code>(3, H, W)</code>, or is floating point outside <code>[0, 1]</code>.</p>
               </div>
             </td>
           </tr>
@@ -5590,20 +5568,17 @@ outside <code>[0, 1]</code>.</p>
     <div class="doc doc-contents first">
 
         <p>Segment objects in one image and return boxes and masks in original coordinates.</p>
-<p>:func:<code>predict_image</code> plus Eq. 7, in the order
-:class:<code>~lucid_yolo.eval.coco_eval.DualPathEvaluator</code> established and for its reason:
-the model runs once, the selected path decodes boxes <strong>and</strong> reports the anchor each
-row came from, each surviving detection's mask coefficients are gathered by <em>that</em>
-index, the masks are assembled while the boxes are still on the letterboxed canvas
-— which is the frame
-:func:<code>~lucid_yolo.eval.segment_decode.decode_instance_masks</code> crops in — and only
-then are boxes and masks each landed on the original pixel grid. Cropping after the
-inverse letterbox would leave every box right and every mask quietly wrong.</p>
-<p>Rows below <code>conf_threshold</code> are dropped <strong>before</strong> the masks are assembled, which
-is where this differs from the evaluator: the evaluator needs a fixed-length output
-per image and pays for a mask per padding row, while a caller looking at one picture
-wants a mask per object. At 640 px the difference is 300 canvas-resolution masks
-instead of a handful, which is measured in hundreds of megabytes of transient float.</p>
+<p>:func:<code>predict_image</code> plus Eq. 7, in the order :class:<code>~lucid_yolo.eval.coco_eval.DualPathEvaluator</code> established
+and for its reason: the model runs once, the selected path decodes boxes <strong>and</strong> reports the anchor each row came
+from, each surviving detection's mask coefficients are gathered by <em>that</em> index, the masks are assembled while the
+boxes are still on the letterboxed canvas — which is the frame
+:func:<code>~lucid_yolo.eval.segment_decode.decode_instance_masks</code> crops in — and only then are boxes and masks each
+landed on the original pixel grid. Cropping after the inverse letterbox would leave every box right and every mask
+quietly wrong.</p>
+<p>Rows below <code>conf_threshold</code> are dropped <strong>before</strong> the masks are assembled, which is where this differs from the
+evaluator: the evaluator needs a fixed-length output per image and pays for a mask per padding row, while a caller
+looking at one picture wants a mask per object. At 640 px the difference is 300 canvas-resolution masks instead of
+a handful, which is measured in hundreds of megabytes of transient float.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5626,8 +5601,7 @@ instead of a handful, which is measured in hundreds of megabytes of transient fl
             </td>
             <td>
               <div class="doc-md-description">
-                <p>An eval-mode <code>segment</code> module, as
-:func:<code>~lucid_yolo.eval.checkpoint.load_eval_module</code> returns it.
+                <p>An eval-mode <code>segment</code> module, as :func:<code>~lucid_yolo.eval.checkpoint.load_eval_module</code> returns it.
 <strong>Mutated in place</strong> — see the module docstring's <em>Module ownership</em>.</p>
               </div>
             </td>
@@ -5644,9 +5618,8 @@ instead of a handful, which is measured in hundreds of megabytes of transient fl
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the image file to read, or an already-decoded <code>(3, H, W)</code> RGB
-tensor: <code>uint8</code>/<code>uint16</code> codes, or floating point in <code>[0, 1]</code>
-(:func:<code>~lucid_yolo.eval.annotations.letterbox_image_tensor</code>).</p>
+                <p>Path to the image file to read, or an already-decoded <code>(3, H, W)</code> RGB tensor: <code>uint8</code>/<code>uint16</code>
+codes, or floating point in <code>[0, 1]</code> (:func:<code>~lucid_yolo.eval.annotations.letterbox_image_tensor</code>).</p>
               </div>
             </td>
             <td>
@@ -5678,10 +5651,9 @@ tensor: <code>uint8</code>/<code>uint16</code> codes, or floating point in <code
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>"e2e"</code> for the suppression-free top-k path over the one-to-one
-branch, <code>"nms"</code> for the confidence-threshold plus class-wise suppression
-path over the dense branch. The choice reaches the masks too: each path reads
-the mask coefficients of its <strong>own</strong> branch.</p>
+                <p><code>"e2e"</code> for the suppression-free top-k path over the one-to-one branch, <code>"nms"</code> for the
+confidence-threshold plus class-wise suppression path over the dense branch. The choice reaches the masks
+too: each path reads the mask coefficients of its <strong>own</strong> branch.</p>
               </div>
             </td>
             <td>
@@ -5774,10 +5746,9 @@ Defaults to :data:<code>DEFAULT_CONF_THRESHOLD</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If the module's task is not <code>segment</code>, naming the task it is; if a
-module claiming that task has no mask coefficients to decode; or if
-<code>decoder</code>, <code>conf_threshold</code> or <code>img_size</code> is outside its domain, per
-:func:<code>_check_predict_arguments</code>.</p>
+                <p>If the module's task is not <code>segment</code>, naming the task it is; if a module claiming that task
+has no mask coefficients to decode; or if <code>decoder</code>, <code>conf_threshold</code> or <code>img_size</code> is outside its
+domain, per :func:<code>_check_predict_arguments</code>.</p>
               </div>
             </td>
           </tr>
@@ -5787,8 +5758,7 @@ module claiming that task has no mask coefficients to decode; or if
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If a tensor <code>image</code> is not <code>(3, H, W)</code>, or is floating point
-outside <code>[0, 1]</code>.</p>
+                <p>If a tensor <code>image</code> is not <code>(3, H, W)</code>, or is floating point outside <code>[0, 1]</code>.</p>
               </div>
             </td>
           </tr>
@@ -5897,9 +5867,8 @@ canonical form is invariant under it and is <strong>not</strong> recomputed here
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the image file to read, or an already-decoded <code>(3, H, W)</code> RGB
-tensor: <code>uint8</code>/<code>uint16</code> codes, or floating point in <code>[0, 1]</code>
-(:func:<code>~lucid_yolo.eval.annotations.letterbox_image_tensor</code>).</p>
+                <p>Path to the image file to read, or an already-decoded <code>(3, H, W)</code> RGB tensor: <code>uint8</code>/<code>uint16</code>
+codes, or floating point in <code>[0, 1]</code> (:func:<code>~lucid_yolo.eval.annotations.letterbox_image_tensor</code>).</p>
               </div>
             </td>
             <td>
@@ -6074,8 +6043,7 @@ domain, per :func:<code>_check_predict_arguments</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If a tensor <code>image</code> is not <code>(3, H, W)</code>, or is floating point
-outside <code>[0, 1]</code>.</p>
+                <p>If a tensor <code>image</code> is not <code>(3, H, W)</code>, or is floating point outside <code>[0, 1]</code>.</p>
               </div>
             </td>
           </tr>
@@ -6171,9 +6139,8 @@ assumed 17 would silently mis-shape every other schema.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the image file to read, or an already-decoded <code>(3, H, W)</code> RGB
-tensor: <code>uint8</code>/<code>uint16</code> codes, or floating point in <code>[0, 1]</code>
-(:func:<code>~lucid_yolo.eval.annotations.letterbox_image_tensor</code>).</p>
+                <p>Path to the image file to read, or an already-decoded <code>(3, H, W)</code> RGB tensor: <code>uint8</code>/<code>uint16</code>
+codes, or floating point in <code>[0, 1]</code> (:func:<code>~lucid_yolo.eval.annotations.letterbox_image_tensor</code>).</p>
               </div>
             </td>
             <td>
@@ -6314,8 +6281,7 @@ a module claiming that task emits no points on the selected branch; or if
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If a tensor <code>image</code> is not <code>(3, H, W)</code>, or is floating point
-outside <code>[0, 1]</code>.</p>
+                <p>If a tensor <code>image</code> is not <code>(3, H, W)</code>, or is floating point outside <code>[0, 1]</code>.</p>
               </div>
             </td>
           </tr>
@@ -6358,11 +6324,9 @@ outside <code>[0, 1]</code>.</p>
     <div class="doc doc-contents first">
 
         <p>Score a checkpoint on COCO val2017 through both decode paths and return the numbers.</p>
-<p>The protocol is the one <code>lucid-eval</code> runs, chosen by the module's own <code>task</code>:
-box mAP for <code>detect</code>, box plus <code>segm_</code> mask mAP for <code>segment</code> (box only with
-<code>masks=False</code>), box plus <code>oks_</code> keypoint mAP against
-<code>person_keypoints_val2017.json</code> for <code>keypoints</code>. Nothing is printed and no file
-is written.</p>
+<p>The protocol is the one <code>lucid-eval</code> runs, chosen by the module's own <code>task</code>: box mAP for <code>detect</code>, box
+plus <code>segm_</code> mask mAP for <code>segment</code> (box only with <code>masks=False</code>), box plus <code>oks_</code> keypoint mAP against
+<code>person_keypoints_val2017.json</code> for <code>keypoints</code>. Nothing is printed and no file is written.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6590,11 +6554,10 @@ The <code>oks_</code> statistics always come from faster_coco_eval.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If the module's task is not <code>detect</code>, <code>segment</code> or
-<code>keypoints</code>; if a keypoint checkpoint's <code>K</code> is not COCO's 17; if
-<code>limit</code>, <code>batch_size</code>, <code>img_size</code> or <code>eval_backend</code> is outside its
-domain; if <code>data_root</code> is missing while an override is; or if <code>device</code>
-names a backend this machine does not have.</p>
+                <p>If the module's task is not <code>detect</code>, <code>segment</code> or <code>keypoints</code>; if a keypoint checkpoint's
+<code>K</code> is not COCO's 17; if <code>limit</code>, <code>batch_size</code>, <code>img_size</code> or <code>eval_backend</code> is outside its
+domain; if <code>data_root</code> is missing while an override is; or if <code>device</code> names a backend this machine
+does not have.</p>
               </div>
             </td>
           </tr>
@@ -6655,11 +6618,10 @@ names a backend this machine does not have.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>{"e2e": stats, "nms": stats}</code>. Each <code>stats</code> holds the twelve COCO
-box statistics under their bare names (<code>map</code> is mAP50-95, then <code>map_50</code>,
-<code>map_75</code> and the size and recall breakdowns), plus the twelve <code>segm_</code>
-mask statistics for a segmentation checkpoint scored with masks, or the ten
-<code>oks_</code> keypoint statistics for a keypoint checkpoint.</p>
+                <p><code>{"e2e": stats, "nms": stats}</code>. Each <code>stats</code> holds the twelve COCO box statistics under their bare
+names (<code>map</code> is mAP50-95, then <code>map_50</code>, <code>map_75</code> and the size and recall breakdowns), plus the
+twelve <code>segm_</code> mask statistics for a segmentation checkpoint scored with masks, or the ten <code>oks_</code>
+keypoint statistics for a keypoint checkpoint.</p>
               </div>
             </td>
           </tr>
@@ -6743,12 +6705,10 @@ mask statistics for a segmentation checkpoint scored with masks, or the ten
 
 
         <p>Score-based top-k end-to-end decoder for the one-to-one branch (A9).</p>
-<p>Turns the one-to-one branch's raw dense outputs into a fixed-size batch of
-score-ranked detections without any IoU computation or non-maximum
-suppression (R3 sec. 4). The module owns no parameters — it is a pure
-functional transform wrapped as an :class:<code>~torch.nn.Module</code> so it composes
-into an inference graph and traces/exports cleanly with a static output
-shape.</p>
+<p>Turns the one-to-one branch's raw dense outputs into a fixed-size batch of score-ranked detections without any IoU
+computation or non-maximum suppression (R3 sec. 4). The module owns no parameters — it is a pure functional
+transform wrapped as an :class:<code>~torch.nn.Module</code> so it composes into an inference graph and traces/exports cleanly
+with a static output shape.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6771,8 +6731,7 @@ shape.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Maximum detections kept per image; also the fixed output length.
-Defaults to 300 (R1 sec. 3.2.1, R3 sec. 4).</p>
+                <p>Maximum detections kept per image; also the fixed output length. Defaults to 300 (R1 sec. 3.2.1, R3 sec. 4).</p>
               </div>
             </td>
             <td>
@@ -6788,9 +6747,8 @@ Defaults to 300 (R1 sec. 3.2.1, R3 sec. 4).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Detections whose confidence is strictly below this value
-have their score zeroed (the row is kept so the output shape is
-fixed). Defaults to <code>0.0</code> — pure top-k, nothing zeroed.</p>
+                <p>Detections whose confidence is strictly below this value have their score zeroed (the row is
+kept so the output shape is fixed). Defaults to <code>0.0</code> — pure top-k, nothing zeroed.</p>
               </div>
             </td>
             <td>
@@ -6889,9 +6847,8 @@ fixed). Defaults to <code>0.0</code> — pure top-k, nothing zeroed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Raw one-to-one ltrb distances of shape <code>(B, A, 4)</code>
-(order l, t, r, b), aligned with <code>cls_logits</code> on the anchor
-axis.</p>
+                <p>Raw one-to-one ltrb distances of shape <code>(B, A, 4)</code> (order l, t, r, b), aligned with
+<code>cls_logits</code> on the anchor axis.</p>
               </div>
             </td>
             <td>
@@ -6907,8 +6864,7 @@ axis.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Anchor-centre <code>(x, y)</code> coordinates of shape
-<code>(A, 2)</code> in input pixels, as returned by
+                <p>Anchor-centre <code>(x, y)</code> coordinates of shape <code>(A, 2)</code> in input pixels, as returned by
 :func:<code>~lucid_yolo.assign.grid.make_anchor_points</code>.</p>
               </div>
             </td>
@@ -6951,7 +6907,7 @@ axis.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Detections of shape <code>(B, k, 6)</code> whose last axis is the A9 tuple</p>
+                <p>Detections of shape <code>(B, k, 6)</code> whose last axis is the A9 tuple <code>[x1, y1, x2, y2, score, class]</code>,</p>
               </div>
             </td>
           </tr>
@@ -6961,17 +6917,7 @@ axis.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>[x1, y1, x2, y2, score, class]</code>, sorted by descending score with</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>score-zero padding rows filling any shortfall below <code>k</code>.</p>
+                <p>sorted by descending score with score-zero padding rows filling any shortfall below <code>k</code>.</p>
               </div>
             </td>
           </tr>
@@ -7008,12 +6954,10 @@ axis.</p>
     <div class="doc doc-contents ">
 
         <p>Decode as :meth:<code>forward</code> does, and report the source anchor of each row.</p>
-<p>The whole decode lives here and :meth:<code>forward</code> is its box-only view, so
-the two cannot report different selections. The extra return is what any
-per-anchor quantity outside the A9 tuple must be gathered by — the
-segmentation decode's mask coefficients (WP-053b): a coefficient row taken
-from a differently ranked selection would yield a plausible mask of the
-wrong object beside a correct box.</p>
+<p>The whole decode lives here and :meth:<code>forward</code> is its box-only view, so the two cannot report different
+selections. The extra return is what any per-anchor quantity outside the A9 tuple must be gathered by — the
+segmentation decode's mask coefficients (WP-053b): a coefficient row taken from a differently ranked selection
+would yield a plausible mask of the wrong object beside a correct box.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7052,8 +6996,8 @@ wrong object beside a correct box.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Raw one-to-one ltrb distances of shape <code>(B, A, 4)</code>,
-aligned with <code>cls_logits</code> on the anchor axis.</p>
+                <p>Raw one-to-one ltrb distances of shape <code>(B, A, 4)</code>, aligned with <code>cls_logits</code> on the anchor
+axis.</p>
               </div>
             </td>
             <td>
@@ -7069,8 +7013,7 @@ aligned with <code>cls_logits</code> on the anchor axis.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Anchor-centre <code>(x, y)</code> coordinates of shape
-<code>(A, 2)</code> in input pixels.</p>
+                <p>Anchor-centre <code>(x, y)</code> coordinates of shape <code>(A, 2)</code> in input pixels.</p>
               </div>
             </td>
             <td>
@@ -7112,7 +7055,7 @@ aligned with <code>cls_logits</code> on the anchor axis.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A pair <code>(detections, anchor_indices)</code>: the <code>(B, k, 6)</code> A9 batch</p>
+                <p>A pair <code>(detections, anchor_indices)</code>: the <code>(B, k, 6)</code> A9 batch :meth:<code>forward</code> returns, and the</p>
               </div>
             </td>
           </tr>
@@ -7122,17 +7065,7 @@ aligned with <code>cls_logits</code> on the anchor axis.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>meth:<code>forward</code> returns, and the <code>(B, k)</code> long tensor naming the</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <span title="torch.Tensor">Tensor</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>anchor each row came from, with</p>
+                <p><code>(B, k)</code> long tensor naming the anchor each row came from, with</p>
               </div>
             </td>
           </tr>
@@ -7196,20 +7129,17 @@ aligned with <code>cls_logits</code> on the anchor axis.</p>
 
 
         <p>Score-based top-k end-to-end decoder for the one-to-one branch's oriented outputs (A45).</p>
-<p>The oriented twin of :class:<code>TopKDecoder</code>, and deliberately the same contract: the
-one-to-one branch's raw ltrb distances and raw angles (R1 Eq. 13) become canonical
-rotated boxes through :func:<code>~lucid_yolo.models.heads.obb.decode_rboxes</code> (A23), the
-anchors are ranked purely by classification confidence through
-:func:<code>~lucid_yolo.models.heads.obb.o2o_rotated_topk_with_indices</code> — no overlap is
-computed and no box is dropped for overlapping another — and the result is padded
-to exactly <code>k</code> rows, the anchor indices beside it padded with
-:data:<code>~lucid_yolo.decode.common.PAD_ANCHOR_INDEX</code>.</p>
-<p>The padding is what this class adds over calling the ranking directly, which returns
-<code>min(k, A)</code> rows: on a canvas with fewer than <code>k</code> anchors (a side of 96 px or
-less at the three head strides) the row count would otherwise depend on the canvas,
-unlike every other decoder's. On a canvas with at least <code>k</code> anchors the <code>k</code> rows
-are the ranking's own, bit for bit. Rows beyond the available anchors carry
-<code>score == 0</code>, so a caller filtering on score drops them.</p>
+<p>The oriented twin of :class:<code>TopKDecoder</code>, and deliberately the same contract: the one-to-one branch's raw ltrb
+distances and raw angles (R1 Eq. 13) become canonical rotated boxes through
+:func:<code>~lucid_yolo.models.heads.obb.decode_rboxes</code> (A23), the anchors are ranked purely by classification
+confidence through :func:<code>~lucid_yolo.models.heads.obb.o2o_rotated_topk_with_indices</code> — no overlap is computed
+and no box is dropped for overlapping another — and the result is padded to exactly <code>k</code> rows, the anchor indices
+beside it padded with :data:<code>~lucid_yolo.decode.common.PAD_ANCHOR_INDEX</code>.</p>
+<p>The padding is what this class adds over calling the ranking directly, which returns <code>min(k, A)</code> rows: on a
+canvas with fewer than <code>k</code> anchors (a side of 96 px or less at the three head strides) the row count would
+otherwise depend on the canvas, unlike every other decoder's. On a canvas with at least <code>k</code> anchors the <code>k</code>
+rows are the ranking's own, bit for bit. Rows beyond the available anchors carry <code>score == 0</code>, so a caller
+filtering on score drops them.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7347,8 +7277,7 @@ are the ranking's own, bit for bit. Rows beyond the available anchors carry
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Raw one-to-one angles in radians, shape <code>(B, A, 1)</code> or
-<code>(B, A)</code>.</p>
+                <p>Raw one-to-one angles in radians, shape <code>(B, A, 1)</code> or <code>(B, A)</code>.</p>
               </div>
             </td>
             <td>
@@ -7416,7 +7345,7 @@ are the ranking's own, bit for bit. Rows beyond the available anchors carry
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>[cx, cy, w, h, theta, score, class]</code>, sorted by descending score with</p>
+                <p><code>[cx, cy, w, h, theta, score, class]</code>, sorted by descending score with score-zero padding rows</p>
               </div>
             </td>
           </tr>
@@ -7426,7 +7355,7 @@ are the ranking's own, bit for bit. Rows beyond the available anchors carry
             </td>
             <td>
               <div class="doc-md-description">
-                <p>score-zero padding rows filling any shortfall below <code>k</code>.</p>
+                <p>filling any shortfall below <code>k</code>.</p>
               </div>
             </td>
           </tr>
@@ -7462,9 +7391,9 @@ are the ranking's own, bit for bit. Rows beyond the available anchors carry
     <div class="doc doc-contents ">
 
         <p>Decode as :meth:<code>forward</code> does, and report the source anchor of each row.</p>
-<p>The whole decode lives here and :meth:<code>forward</code> is its detections-only view, as
-in :class:<code>TopKDecoder</code>, so the two cannot report different selections. The
-indices are what any per-anchor value outside the A45 tuple is gathered by.</p>
+<p>The whole decode lives here and :meth:<code>forward</code> is its detections-only view, as in :class:<code>TopKDecoder</code>, so the
+two cannot report different selections. The indices are what any per-anchor value outside the A45 tuple is
+gathered by.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7519,8 +7448,7 @@ indices are what any per-anchor value outside the A45 tuple is gathered by.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Raw one-to-one angles in radians, shape <code>(B, A, 1)</code> or
-<code>(B, A)</code>.</p>
+                <p>Raw one-to-one angles in radians, shape <code>(B, A, 1)</code> or <code>(B, A)</code>.</p>
               </div>
             </td>
             <td>
@@ -7659,13 +7587,10 @@ indices are what any per-anchor value outside the A45 tuple is gathered by.</p>
 
 
         <p>Confidence-threshold + class-wise NMS decoder for the dense branch (A9).</p>
-<p>Turns the one-to-many branch's raw dense outputs into a fixed-size batch of
-score-ranked detections via a confidence threshold and class-wise
-non-maximum suppression (the non-E2E path, blueprint sec. 5.5). Emits the
-same <code>(B, max_det, 6)</code> A9 tuple as
-:class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</code> so both paths feed one
-evaluator. The module owns no parameters — it is a pure functional transform
-wrapped as an :class:<code>~torch.nn.Module</code>.</p>
+<p>Turns the one-to-many branch's raw dense outputs into a fixed-size batch of score-ranked detections via a
+confidence threshold and class-wise non-maximum suppression (the non-E2E path, blueprint sec. 5.5). Emits the same
+<code>(B, max_det, 6)</code> A9 tuple as :class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</code> so both paths feed one evaluator.
+The module owns no parameters — it is a pure functional transform wrapped as an :class:<code>~torch.nn.Module</code>.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7688,9 +7613,8 @@ wrapped as an :class:<code>~torch.nn.Module</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Anchors whose best-class score is strictly below this
-value are dropped before NMS. Defaults to <code>0.001</code> (the permissive
-evaluation convention).</p>
+                <p>Anchors whose best-class score is strictly below this value are dropped before NMS. Defaults
+to <code>0.001</code> (the permissive evaluation convention).</p>
               </div>
             </td>
             <td>
@@ -7706,9 +7630,8 @@ evaluation convention).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Class-wise NMS IoU threshold; a lower-scoring box is
-suppressed when its IoU with a kept higher-scoring box of the <em>same</em>
-class exceeds this. Defaults to <code>0.7</code>.</p>
+                <p>Class-wise NMS IoU threshold; a lower-scoring box is suppressed when its IoU with a kept
+higher-scoring box of the <em>same</em> class exceeds this. Defaults to <code>0.7</code>.</p>
               </div>
             </td>
             <td>
@@ -7824,8 +7747,8 @@ Defaults to <code>300</code> (R1 sec. 3.2.1).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Raw dense ltrb distances of shape <code>(B, A, 4)</code> (order l, t,
-r, b), aligned with <code>cls_logits</code> on the anchor axis.</p>
+                <p>Raw dense ltrb distances of shape <code>(B, A, 4)</code> (order l, t, r, b), aligned with <code>cls_logits</code> on
+the anchor axis.</p>
               </div>
             </td>
             <td>
@@ -7841,8 +7764,7 @@ r, b), aligned with <code>cls_logits</code> on the anchor axis.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Anchor-centre <code>(x, y)</code> coordinates of shape
-<code>(A, 2)</code> in input pixels, as returned by
+                <p>Anchor-centre <code>(x, y)</code> coordinates of shape <code>(A, 2)</code> in input pixels, as returned by
 :func:<code>~lucid_yolo.assign.grid.make_anchor_points</code>.</p>
               </div>
             </td>
@@ -7885,7 +7807,7 @@ r, b), aligned with <code>cls_logits</code> on the anchor axis.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Detections of shape <code>(B, max_det, 6)</code> whose last axis is the A9</p>
+                <p>Detections of shape <code>(B, max_det, 6)</code> whose last axis is the A9 tuple <code>[x1, y1, x2, y2, score, class]</code>,</p>
               </div>
             </td>
           </tr>
@@ -7895,17 +7817,7 @@ r, b), aligned with <code>cls_logits</code> on the anchor axis.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>tuple <code>[x1, y1, x2, y2, score, class]</code>, sorted by descending score</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>with score-zero padding rows filling any shortfall below <code>max_det</code>.</p>
+                <p>sorted by descending score with score-zero padding rows filling any shortfall below <code>max_det</code>.</p>
               </div>
             </td>
           </tr>
@@ -7942,17 +7854,13 @@ r, b), aligned with <code>cls_logits</code> on the anchor axis.</p>
     <div class="doc doc-contents ">
 
         <p>Decode as :meth:<code>forward</code> does, and report the source anchor of each row.</p>
-<p>The whole decode lives here and :meth:<code>forward</code> is its box-only view, so
-the two cannot report different survivor sets. The extra return exists for
-the same reason as its one-to-one twin
-(:meth:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder.decode_with_indices</code>): the
-segmentation decode (WP-053b) gathers each detection's mask coefficients
-from the dense <code>(B, A, K)</code> map by these indices. On this path the kept
-set is chosen by the threshold and the suppression, not by a ranking any
-caller could reproduce, so the indices have to be carried out through the
-<strong>same</strong> <code>keep</code>/<code>order</code> selection that built the boxes — recomputing a
-second selection outside is exactly how a mask ends up describing another
-anchor's object.</p>
+<p>The whole decode lives here and :meth:<code>forward</code> is its box-only view, so the two cannot report different
+survivor sets. The extra return exists for the same reason as its one-to-one twin
+(:meth:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder.decode_with_indices</code>): the segmentation decode (WP-053b) gathers
+each detection's mask coefficients from the dense <code>(B, A, K)</code> map by these indices. On this path the kept set
+is chosen by the threshold and the suppression, not by a ranking any caller could reproduce, so the indices
+have to be carried out through the <strong>same</strong> <code>keep</code>/<code>order</code> selection that built the boxes — recomputing a
+second selection outside is exactly how a mask ends up describing another anchor's object.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7991,8 +7899,7 @@ anchor's object.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Raw dense ltrb distances of shape <code>(B, A, 4)</code>, aligned
-with <code>cls_logits</code> on the anchor axis.</p>
+                <p>Raw dense ltrb distances of shape <code>(B, A, 4)</code>, aligned with <code>cls_logits</code> on the anchor axis.</p>
               </div>
             </td>
             <td>
@@ -8008,8 +7915,7 @@ with <code>cls_logits</code> on the anchor axis.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Anchor-centre <code>(x, y)</code> coordinates of shape
-<code>(A, 2)</code> in input pixels.</p>
+                <p>Anchor-centre <code>(x, y)</code> coordinates of shape <code>(A, 2)</code> in input pixels.</p>
               </div>
             </td>
             <td>
@@ -8040,43 +7946,33 @@ with <code>cls_logits</code> on the anchor axis.</p>
     <table>
       <thead>
         <tr>
-<th>Name</th>          <th>Type</th>
+          <th>Type</th>
           <th>Description</th>
         </tr>
       </thead>
       <tbody>
           <tr class="doc-section-item">
-<td></td>            <td>
+            <td>
                   <code><span title="torch.Tensor">Tensor</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A pair <code>(detections, anchor_indices)</code>: the <code>(B, max_det, 6)</code> A9</p>
+                <p>A pair <code>(detections, anchor_indices)</code>: the <code>(B, max_det, 6)</code> A9 batch :meth:<code>forward</code> returns, and the</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
-<td><code>batch</code></td>            <td>
+            <td>
                   <code><span title="torch.Tensor">Tensor</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>meth:<code>forward</code> returns, and the <code>(B, max_det)</code> long tensor</p>
+                <p><code>(B, max_det)</code> long tensor naming the anchor each row came from, with</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
-<td></td>            <td>
-                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <span title="torch.Tensor">Tensor</span>]</code>
-            </td>
             <td>
-              <div class="doc-md-description">
-                <p>naming the anchor each row came from, with</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-<td></td>            <td>
                   <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <span title="torch.Tensor">Tensor</span>]</code>
             </td>
             <td>
@@ -8102,16 +7998,15 @@ with <code>cls_logits</code> on the anchor axis.</p>
 <a id="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-0-10" name="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-0-10" href="#lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-0-10"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">anchors</span>  <span class="c1"># anchor 1 survives; the remaining rows are padding</span>
 <a id="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-0-11" name="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-0-11" href="#lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-0-11"></a><span class="go">tensor([[ 1, -1, -1]])</span>
 </code></pre></div>
-<p>A box has to enclose an area to be a detection: zero <code>ltrb</code> distances put
-<code>x2</code> exactly on <code>x1</code>, and such a row is dropped with the sub-threshold
-ones rather than spending one of the <code>max_det</code> slots.</p>
+<p>A box has to enclose an area to be a detection: zero <code>ltrb</code> distances put <code>x2</code> exactly on <code>x1</code>, and
+such a row is dropped with the sub-threshold ones rather than spending one of the <code>max_det</code> slots.</p>
 <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-1-1" name="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-1-1" href="#lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-1-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">flat</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
 <a id="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-1-2" name="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-1-2" href="#lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-1-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">_</span><span class="p">,</span> <span class="n">none_kept</span> <span class="o">=</span> <span class="n">decoder</span><span class="o">.</span><span class="n">decode_with_indices</span><span class="p">(</span><span class="n">cls_logits</span><span class="p">,</span> <span class="n">flat</span><span class="p">,</span> <span class="n">points</span><span class="p">,</span> <span class="n">strides</span><span class="p">)</span>
 <a id="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-1-3" name="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-1-3" href="#lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-1-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">none_kept</span>
 <a id="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-1-4" name="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-1-4" href="#lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-1-4"></a><span class="go">tensor([[-1, -1, -1]])</span>
 </code></pre></div>
-<p>An empty batch decodes to empty outputs of the documented width rather
-than raising, matching :class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</code>:</p>
+<p>An empty batch decodes to empty outputs of the documented width rather than raising, matching
+:class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</code>:</p>
 <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-2-1" name="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-2-1" href="#lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-2-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">empty</span><span class="p">,</span> <span class="n">empty_anchors</span> <span class="o">=</span> <span class="n">decoder</span><span class="o">.</span><span class="n">decode_with_indices</span><span class="p">(</span>
 <a id="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-2-2" name="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-2-2" href="#lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-2-2"></a><span class="gp">... </span>    <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="n">points</span><span class="p">,</span> <span class="n">strides</span>
 <a id="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-2-3" name="lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-2-3" href="#lucid_yolo.decode.NMSDecoder.decode_with_indices--__codelineno-2-3"></a><span class="gp">... </span><span class="p">)</span>
@@ -8150,16 +8045,13 @@ than raising, matching :class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</cod
 
 
         <p>Confidence-threshold + class-wise rotated-NMS decoder for the dense branch (A45, A61).</p>
-<p>Turns the <strong>one-to-many</strong> branch's dense oriented outputs into a fixed-size batch of
-score-ranked oriented detections, suppressing by exact rotated overlap rather than by
-the overlap of the boxes' upright envelopes. Emits the same <code>(B, max_det, 7)</code> A45
-tuple as :func:<code>~lucid_yolo.models.heads.obb.o2o_rotated_topk</code>, so the suppression
-column and the suppression-free column are the same kind of number. The module owns no
-parameters — it is a pure functional transform wrapped as an
-:class:<code>~torch.nn.Module</code>.</p>
-<p>This is the <em>o2m</em> path's decoder and a comparison baseline. It is not a repair to the
-one-to-one path, whose freedom from NMS is the architecture's claim rather than a
-limitation to work around.</p>
+<p>Turns the <strong>one-to-many</strong> branch's dense oriented outputs into a fixed-size batch of score-ranked oriented
+detections, suppressing by exact rotated overlap rather than by the overlap of the boxes' upright envelopes. Emits
+the same <code>(B, max_det, 7)</code> A45 tuple as :func:<code>~lucid_yolo.models.heads.obb.o2o_rotated_topk</code>, so the
+suppression column and the suppression-free column are the same kind of number. The module owns no parameters — it
+is a pure functional transform wrapped as an :class:<code>~torch.nn.Module</code>.</p>
+<p>This is the <em>o2m</em> path's decoder and a comparison baseline. It is not a repair to the one-to-one path, whose
+freedom from NMS is the architecture's claim rather than a limitation to work around.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8182,9 +8074,8 @@ limitation to work around.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Anchors whose best-class score is strictly below this value are
-dropped before suppression. Defaults to <code>0.001</code> (the permissive evaluation
-convention).</p>
+                <p>Anchors whose best-class score is strictly below this value are dropped before suppression.
+Defaults to <code>0.001</code> (the permissive evaluation convention).</p>
               </div>
             </td>
             <td>
@@ -8200,9 +8091,8 @@ convention).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Rotated-IoU threshold; a lower-scoring box is suppressed when its
-rotated IoU with a kept higher-scoring box of the <em>same</em> class exceeds this.
-Defaults to :data:<code>ROTATED_NMS_IOU_THRESHOLD</code> (A61).</p>
+                <p>Rotated-IoU threshold; a lower-scoring box is suppressed when its rotated IoU with a kept
+higher-scoring box of the <em>same</em> class exceeds this. Defaults to :data:<code>ROTATED_NMS_IOU_THRESHOLD</code> (A61).</p>
               </div>
             </td>
             <td>
@@ -8218,8 +8108,8 @@ Defaults to :data:<code>ROTATED_NMS_IOU_THRESHOLD</code> (A61).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Maximum detections kept per image; also the fixed output length. Defaults
-to <code>300</code> (R1 sec. 3.2.1, A9, A47).</p>
+                <p>Maximum detections kept per image; also the fixed output length. Defaults to <code>300</code> (R1 sec. 3.2.1,
+A9, A47).</p>
               </div>
             </td>
             <td>
@@ -8319,8 +8209,8 @@ to <code>300</code> (R1 sec. 3.2.1, A9, A47).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Raw dense ltrb distances of shape <code>(B, A, 4)</code> (order l, t, r, b),
-aligned with <code>cls_logits</code> on the anchor axis.</p>
+                <p>Raw dense ltrb distances of shape <code>(B, A, 4)</code> (order l, t, r, b), aligned with <code>cls_logits</code>
+on the anchor axis.</p>
               </div>
             </td>
             <td>
@@ -8336,9 +8226,8 @@ aligned with <code>cls_logits</code> on the anchor axis.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Raw dense orientation angles in radians, shape <code>(B, A, 1)</code> or
-<code>(B, A)</code>, as R1 Eq. 13 emits them — any real number, canonicalized by
-the decode rather than by the head (A23).</p>
+                <p>Raw dense orientation angles in radians, shape <code>(B, A, 1)</code> or <code>(B, A)</code>, as R1 Eq. 13 emits
+them — any real number, canonicalized by the decode rather than by the head (A23).</p>
               </div>
             </td>
             <td>
@@ -8354,8 +8243,7 @@ the decode rather than by the head (A23).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Anchor-centre <code>(x, y)</code> coordinates of shape <code>(A, 2)</code> in
-input pixels, as returned by
+                <p>Anchor-centre <code>(x, y)</code> coordinates of shape <code>(A, 2)</code> in input pixels, as returned by
 :func:<code>~lucid_yolo.assign.grid.make_anchor_points</code>.</p>
               </div>
             </td>
@@ -8408,7 +8296,7 @@ input pixels, as returned by
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>[cx, cy, w, h, theta, score, class]</code>, canonical (<code>w &gt;= h</code>, <code>theta</code> in</p>
+                <p><code>[cx, cy, w, h, theta, score, class]</code>, canonical (<code>w &gt;= h</code>, <code>theta</code> in <code>[-pi/4, 3*pi/4)</code>), sorted</p>
               </div>
             </td>
           </tr>
@@ -8418,17 +8306,7 @@ input pixels, as returned by
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>[-pi/4, 3*pi/4)</code>), sorted by descending score, with score-zero padding rows</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>filling any shortfall below <code>max_det</code>.</p>
+                <p>by descending score, with score-zero padding rows filling any shortfall below <code>max_det</code>.</p>
               </div>
             </td>
           </tr>
@@ -8485,12 +8363,10 @@ input pixels, as returned by
     <div class="doc doc-contents first">
 
         <p>Decode one branch's boxes and gather each row's mask coefficients by its own anchor.</p>
-<p>The segmentation half of Eq. 7 before the prototypes: <code>decoder</code> ranks the branch
-and reports each row's source anchor, and
-:func:<code>~lucid_yolo.decode.common.gather_by_anchor</code> takes that anchor's coefficient
-vector. All four inputs must come from the <strong>same</strong> branch — the decoder's ranking
-of one branch paired with the other branch's coefficients is a plausible mask of a
-different object at a correct box.</p>
+<p>The segmentation half of Eq. 7 before the prototypes: <code>decoder</code> ranks the branch and reports each row's source
+anchor, and :func:<code>~lucid_yolo.decode.common.gather_by_anchor</code> takes that anchor's coefficient vector. All four
+inputs must come from the <strong>same</strong> branch — the decoder's ranking of one branch paired with the other branch's
+coefficients is a plausible mask of a different object at a correct box.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8621,7 +8497,7 @@ different object at a correct box.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A row-aligned triple: the decoder's <code>(B, N, 6)</code> detections, its <code>(B, N)</code></p>
+                <p>A row-aligned triple: the decoder's <code>(B, N, 6)</code> detections, its <code>(B, N)</code> anchor indices, and the</p>
               </div>
             </td>
           </tr>
@@ -8631,17 +8507,7 @@ different object at a correct box.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>anchor indices, and the <code>(B, N, M)</code> gathered coefficients, all-zero on</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>padding rows.</p>
+                <p><code>(B, N, M)</code> gathered coefficients, all-zero on padding rows.</p>
               </div>
             </td>
           </tr>
@@ -8686,10 +8552,9 @@ different object at a correct box.</p>
     <div class="doc doc-contents first">
 
         <p>Decode one branch's boxes and take each row's decoded point set by its own anchor.</p>
-<p>:func:<code>decode_with_coefficients</code> for the point stem: <code>decoder</code> ranks the branch
-and :func:<code>gather_keypoint_sets</code> decodes that branch's dense offsets and takes each
-kept row's set. All inputs must come from the same branch, for the reason
-:func:<code>decode_with_coefficients</code> states.</p>
+<p>:func:<code>decode_with_coefficients</code> for the point stem: <code>decoder</code> ranks the branch and :func:<code>gather_keypoint_sets</code>
+decodes that branch's dense offsets and takes each kept row's set. All inputs must come from the same branch, for
+the reason :func:<code>decode_with_coefficients</code> states.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8820,7 +8685,7 @@ kept row's set. All inputs must come from the same branch, for the reason
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A row-aligned triple: the decoder's <code>(B, N, 6)</code> detections, its <code>(B, N)</code></p>
+                <p>A row-aligned triple: the decoder's <code>(B, N, 6)</code> detections, its <code>(B, N)</code> anchor indices, and the</p>
               </div>
             </td>
           </tr>
@@ -8830,17 +8695,7 @@ kept row's set. All inputs must come from the same branch, for the reason
             </td>
             <td>
               <div class="doc-md-description">
-                <p>anchor indices, and the <code>(B, N, K, 2)</code> point sets in canvas pixels, zero on</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>padding rows.</p>
+                <p><code>(B, N, K, 2)</code> point sets in canvas pixels, zero on padding rows.</p>
               </div>
             </td>
           </tr>
@@ -8882,22 +8737,19 @@ kept row's set. All inputs must come from the same branch, for the reason
     <div class="doc doc-contents first">
 
         <p>Select each detection's per-anchor values by the anchor its own box came from.</p>
-<p>The one gather every decode consumer pairs a detection with its anchor's values
-through — the mask coefficients of Eq. 7 and the decoded point sets alike — so the
-padding rule below exists once. <code>anchor_index</code> comes from the decoder that
-produced the detections, so row <code>n</code> of the result belongs to the anchor row <code>n</code>'s
-box came from: a row taken from a differently ranked selection would be a plausible
-mask or pose of the wrong object beside a correct box.</p>
-<p>Rows carrying :data:<code>PAD_ANCHOR_INDEX</code> are clamped to a valid gather position and
-then zeroed, so a padding row never reads the last anchor's values. For coefficients
-that is an all-zero vector — a mask logit of exactly 0, a probability of 0.5, and so
-an empty mask under the strictly-greater A37 threshold; for points it is the origin.
-Those rows carry score 0 as well. On a batch with no padding row the clamp and the
-product by one leave every gathered value bit-for-bit what a bare gather returns.</p>
+<p>The one gather every decode consumer pairs a detection with its anchor's values through — the mask coefficients of
+Eq. 7 and the decoded point sets alike — so the padding rule below exists once. <code>anchor_index</code> comes from the
+decoder that produced the detections, so row <code>n</code> of the result belongs to the anchor row <code>n</code>'s box came from: a
+row taken from a differently ranked selection would be a plausible mask or pose of the wrong object beside a
+correct box.</p>
+<p>Rows carrying :data:<code>PAD_ANCHOR_INDEX</code> are clamped to a valid gather position and then zeroed, so a padding row
+never reads the last anchor's values. For coefficients that is an all-zero vector — a mask logit of exactly 0, a
+probability of 0.5, and so an empty mask under the strictly-greater A37 threshold; for points it is the origin.
+Those rows carry score 0 as well. On a batch with no padding row the clamp and the product by one leave every
+gathered value bit-for-bit what a bare gather returns.</p>
 <p>The values must already be in their final per-anchor form: points are decoded by
-:func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code> over the whole anchor grid
-<strong>before</strong> this runs, because that decode needs every anchor's centre and stride and
-offers no per-detection indexing.</p>
+:func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code> over the whole anchor grid <strong>before</strong> this runs, because
+that decode needs every anchor's centre and stride and offers no per-detection indexing.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8920,8 +8772,8 @@ offers no per-detection indexing.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Dense per-anchor values of shape <code>(B, A, *trailing)</code> — mask
-coefficients <code>(B, A, M)</code>, decoded point sets <code>(B, A, K, 2)</code>.</p>
+                <p>Dense per-anchor values of shape <code>(B, A, *trailing)</code> — mask coefficients <code>(B, A, M)</code>, decoded
+point sets <code>(B, A, K, 2)</code>.</p>
               </div>
             </td>
             <td>
@@ -8937,8 +8789,7 @@ coefficients <code>(B, A, M)</code>, decoded point sets <code>(B, A, K, 2)</code
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Source anchor per detection, shape <code>(B, N)</code>, as a decoder's
-<code>decode_with_indices</code> reports it.</p>
+                <p>Source anchor per detection, shape <code>(B, N)</code>, as a decoder's <code>decode_with_indices</code> reports it.</p>
               </div>
             </td>
             <td>
@@ -9008,12 +8859,11 @@ coefficients <code>(B, A, M)</code>, decoded point sets <code>(B, A, K, 2)</code
     <div class="doc doc-contents first">
 
         <p>Decode one branch's dense point offsets and take each detection's point set.</p>
-<p>Decode first, gather second, and the order is forced:
-:func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code> composes the raw offsets
-with the whole anchor grid and has no per-detection indexing, so gathering first
-would mean reconstructing each kept row's anchor and stride by hand. The gather is
-:func:<code>~lucid_yolo.decode.common.gather_by_anchor</code>, so a padding row yields the
-origin rather than the last anchor's pose.</p>
+<p>Decode first, gather second, and the order is forced: :func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code>
+composes the raw offsets with the whole anchor grid and has no per-detection indexing, so gathering first would
+mean reconstructing each kept row's anchor and stride by hand. The gather is
+:func:<code>~lucid_yolo.decode.common.gather_by_anchor</code>, so a padding row yields the origin rather than the last
+anchor's pose.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -9148,15 +8998,13 @@ origin rather than the last anchor's pose.</p>
     <div class="doc doc-contents first">
 
         <p>Un-letterbox bare <code>(x, y)</code> points of one image back to original coordinates (A10).</p>
-<p>The point-set twin of :func:<code>to_letterboxed_original</code>: the same exact inverse the
-box corners take, applied to points with no score or class column beside them. Any
-leading shape is kept — <code>(N, K, 2)</code> point sets, a flat <code>(P, 2)</code> list — because
-every point is folded into one flat list for a single
-:meth:<code>~lucid_yolo.data.letterbox.Letterbox.inverse_map</code> call and the shape restored
-after, so no row can take a different inverse from its neighbour. A batch whose
-images have different original sizes calls this once per image.</p>
-<p>An empty input skips the inverse and comes back unchanged, so the trailing point
-axis survives an image with nothing in it.</p>
+<p>The point-set twin of :func:<code>to_letterboxed_original</code>: the same exact inverse the box corners take, applied to
+points with no score or class column beside them. Any leading shape is kept — <code>(N, K, 2)</code> point sets, a flat
+<code>(P, 2)</code> list — because every point is folded into one flat list for a single
+:meth:<code>~lucid_yolo.data.letterbox.Letterbox.inverse_map</code> call and the shape restored after, so no row can take a
+different inverse from its neighbour. A batch whose images have different original sizes calls this once per image.</p>
+<p>An empty input skips the inverse and comes back unchanged, so the trailing point axis survives an image with
+nothing in it.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -9227,8 +9075,8 @@ axis survives an image with nothing in it.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The letterbox <code>allow_upscale</code> setting used at resize time;
-must match so the inverse recovers the exact geometry. Defaults to <code>True</code>.</p>
+                <p>The letterbox <code>allow_upscale</code> setting used at resize time; must match so the inverse recovers
+the exact geometry. Defaults to <code>True</code>.</p>
               </div>
             </td>
             <td>

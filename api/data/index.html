@@ -5826,11 +5826,9 @@
 
 
         <p>Geometry for a single image, kept aligned across the transform pipeline.</p>
-<p>The <code>boxes</code>/<code>labels</code>/<code>polygons</code> triple shares one instance axis of
-length <code>N</code>: <code>labels</code> has one entry per box and <code>polygons</code>, when present,
-has one ring per box. <code>rboxes</code> lives on an independent axis of length <code>M</code>
-and carries no labels in this container (rotated-target labelling lands with
-the OBB head in Phase 8).</p>
+<p>The <code>boxes</code>/<code>labels</code>/<code>polygons</code> triple shares one instance axis of length <code>N</code>: <code>labels</code> has one entry
+per box and <code>polygons</code>, when present, has one ring per box. <code>rboxes</code> lives on an independent axis of length
+<code>M</code> and carries no labels in this container (rotated-target labelling lands with the OBB head in Phase 8).</p>
 
 
 <p><span class="doc-section-title">Attributes:</span></p>
@@ -5872,8 +5870,7 @@ the OBB head in Phase 8).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>List of <code>(P_i, 2)</code> float32 instance rings; length <code>0</code> (no
-masks) or <code>N</code> (one ring per box).</p>
+                <p>List of <code>(P_i, 2)</code> float32 instance rings; length <code>0</code> (no masks) or <code>N</code> (one ring per box).</p>
               </div>
             </td>
           </tr>
@@ -5884,8 +5881,8 @@ masks) or <code>N</code> (one ring per box).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>(M, 5)</code> float32 long-edge rotated boxes
-<code>(cx, cy, w, h, theta)</code>; empty <code>(0, 5)</code> when there are none.</p>
+                <p><code>(M, 5)</code> float32 long-edge rotated boxes <code>(cx, cy, w, h, theta)</code>; empty <code>(0, 5)</code> when there are
+none.</p>
               </div>
             </td>
           </tr>
@@ -5896,10 +5893,9 @@ masks) or <code>N</code> (one ring per box).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>(N,)</code> bool R18 difficult flags on the shared instance axis.
-Defaults to empty, which <code>__post_init__</code> expands to an all-<code>False</code>
-row per instance — so "omitted" and "nothing is difficult" are the same
-statement and every consumer may read the field unconditionally.</p>
+                <p><code>(N,)</code> bool R18 difficult flags on the shared instance axis. Defaults to empty, which
+<code>__post_init__</code> expands to an all-<code>False</code> row per instance — so "omitted" and "nothing is difficult"
+are the same statement and every consumer may read the field unconditionally.</p>
               </div>
             </td>
           </tr>
@@ -5910,8 +5906,8 @@ statement and every consumer may read the field unconditionally.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>(N, K, 2)</code> float32 xy pixel coordinates. Its count is either
-zero (absent) or <code>N</code> (one K-point set per box).</p>
+                <p><code>(N, K, 2)</code> float32 xy pixel coordinates. Its count is either zero (absent) or <code>N</code> (one K-point
+set per box).</p>
               </div>
             </td>
           </tr>
@@ -5922,8 +5918,8 @@ zero (absent) or <code>N</code> (one K-point set per box).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>(N, K)</code> int64 visibility values paired with <code>keypoints</code>.
-This container preserves values without constraining their meaning.</p>
+                <p><code>(N, K)</code> int64 visibility values paired with <code>keypoints</code>. This container preserves values
+without constraining their meaning.</p>
               </div>
             </td>
           </tr>
@@ -6020,7 +6016,7 @@ This container preserves values without constraining their meaning.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A new :class:<code>Targets</code> with cloned box/label/rbox/keypoint/visibility</p>
+                <p>A new :class:<code>Targets</code> with cloned box/label/rbox/keypoint/visibility tensors and a fresh list of cloned</p>
               </div>
             </td>
           </tr>
@@ -6035,22 +6031,7 @@ This container preserves values without constraining their meaning.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>tensors and a fresh list of cloned polygon rings; mutating either leaves</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><a class="autorefs autorefs-internal" title="            Targets
-
-
-  
-      dataclass
-   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>the other intact.</p>
+                <p>polygon rings; mutating either leaves the other intact.</p>
               </div>
             </td>
           </tr>
@@ -6087,11 +6068,10 @@ This container preserves values without constraining their meaning.</p>
     <div class="doc doc-contents ">
 
         <p>Select a subset of targets, keeping every modality aligned.</p>
-<p><code>keep</code> selects along the shared instance axis (boxes, labels, keypoints and,
-when present, polygons). Because rotated boxes live on an independent axis,
-they need their own mask: when <code>rboxes</code> is non-empty <code>rkeep</code> is
-<strong>required</strong>, and when <code>rboxes</code> is empty <code>rkeep</code> must be omitted. This
-keeps the two axes explicit rather than silently coupling their lengths.</p>
+<p><code>keep</code> selects along the shared instance axis (boxes, labels, keypoints and, when present, polygons). Because
+rotated boxes live on an independent axis, they need their own mask: when <code>rboxes</code> is non-empty <code>rkeep</code> is
+<strong>required</strong>, and when <code>rboxes</code> is empty <code>rkeep</code> must be omitted. This keeps the two axes explicit rather
+than silently coupling their lengths.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6130,8 +6110,8 @@ keeps the two axes explicit rather than silently coupling their lengths.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>(M,)</code> bool mask over the rotated-box axis. Required iff
-<code>rboxes</code> is non-empty; must be <code>None</code> otherwise.</p>
+                <p><code>(M,)</code> bool mask over the rotated-box axis. Required iff <code>rboxes</code> is non-empty; must be
+<code>None</code> otherwise.</p>
               </div>
             </td>
             <td>
@@ -6162,7 +6142,7 @@ keeps the two axes explicit rather than silently coupling their lengths.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A new :class:<code>Targets</code> holding only the selected instances, keypoint rows,</p>
+                <p>A new :class:<code>Targets</code> holding only the selected instances, keypoint rows, and rotated boxes; the returned</p>
               </div>
             </td>
           </tr>
@@ -6177,7 +6157,7 @@ keeps the two axes explicit rather than silently coupling their lengths.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>and rotated boxes; the returned tensors are independent copies.</p>
+                <p>tensors are independent copies.</p>
               </div>
             </td>
           </tr>
@@ -6200,8 +6180,8 @@ keeps the two axes explicit rather than silently coupling their lengths.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If a mask has the wrong length, or <code>rkeep</code> is missing
-for non-empty <code>rboxes</code> / supplied for empty <code>rboxes</code>.</p>
+                <p>If a mask has the wrong length, or <code>rkeep</code> is missing for non-empty <code>rboxes</code> / supplied for
+empty <code>rboxes</code>.</p>
               </div>
             </td>
           </tr>
@@ -6254,9 +6234,9 @@ for non-empty <code>rboxes</code> / supplied for empty <code>rboxes</code>.</p>
     <div class="doc doc-contents ">
 
         <p>Concatenate several images' targets into one (mosaic/mix assembly).</p>
-<p>Boxes, labels and rotated boxes are concatenated along their axes. Polygon and
-keypoint presence must be consistent: either every contributing instance carries
-that modality or none does — a mix is rejected rather than silently dropped.</p>
+<p>Boxes, labels and rotated boxes are concatenated along their axes. Polygon and keypoint presence must be
+consistent: either every contributing instance carries that modality or none does — a mix is rejected rather
+than silently dropped.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6284,8 +6264,7 @@ that modality or none does — a mix is rejected rather than silently dropped.</
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Targets to merge, in order. An empty list yields
-:meth:<code>empty</code>.</p>
+                <p>Targets to merge, in order. An empty list yields :meth:<code>empty</code>.</p>
               </div>
             </td>
             <td>
@@ -6316,22 +6295,7 @@ that modality or none does — a mix is rejected rather than silently dropped.</
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A single :class:<code>Targets</code> with the merged instances, keypoint rows, and</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><a class="autorefs autorefs-internal" title="            Targets
-
-
-  
-      dataclass
-   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>rotated boxes.</p>
+                <p>A single :class:<code>Targets</code> with the merged instances, keypoint rows, and rotated boxes.</p>
               </div>
             </td>
           </tr>
@@ -6354,8 +6318,8 @@ that modality or none does — a mix is rejected rather than silently dropped.</
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If polygon/keypoint presence is mixed across <code>items</code>, or
-present items carry different keypoint counts.</p>
+                <p>If polygon/keypoint presence is mixed across <code>items</code>, or present items carry different
+keypoint counts.</p>
               </div>
             </td>
           </tr>
@@ -6416,7 +6380,7 @@ present items carry different keypoint counts.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>class:<code>Targets</code> with <code>(0, 4)</code> boxes, <code>(0,)</code> labels, no polygons</p>
+                <p>class:<code>Targets</code> with <code>(0, 4)</code> boxes, <code>(0,)</code> labels, no polygons and <code>(0, 5)</code> rboxes /</p>
               </div>
             </td>
           </tr>
@@ -6431,22 +6395,7 @@ present items carry different keypoint counts.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>and <code>(0, 5)</code> rboxes / <code>(0, 0, 2)</code> keypoints — a safe identity for</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-<td></td>            <td>
-                  <code><a class="autorefs autorefs-internal" title="            Targets
-
-
-  
-      dataclass
-   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>meth:<code>concat</code> and a valid input to :meth:<code>filter</code>.</p>
+                <p><code>(0, 0, 2)</code> keypoints — a safe identity for :meth:<code>concat</code> and a valid input to :meth:<code>filter</code>.</p>
               </div>
             </td>
           </tr>
@@ -6483,15 +6432,13 @@ present items carry different keypoint counts.</p>
     <div class="doc doc-contents ">
 
         <p>Build targets from one quadrilateral per instance: its envelope box and its rotated fit.</p>
-<p>Both modalities are derived from the <em>same</em> quad, which is what makes <code>boxes[i]</code> and
-<code>rboxes[i]</code> one object rather than two lists that happen to be ordered alike — the
-shared instance axis the three oriented readings (COCO <code>oriented=True</code>, YOLO's
-nine-field rows, DOTA's <code>labelTxt</code>) and every rotated transform rely on. <code>boxes</code> is
-:func:<code>~lucid_yolo.data.transforms.boxes_from_polygons</code> of the quads and <code>rboxes</code> is
-:func:<code>~lucid_yolo.data.rotated_geom.polygons_to_rboxes</code> of them stacked; <code>polygons</code>
-stays empty, the quad being carried by <code>rboxes</code> up to the rectangle fit. Parsing a
-quad out of its file, and refusing one with the file's name in the message, stays with
-each reader.</p>
+<p>Both modalities are derived from the <em>same</em> quad, which is what makes <code>boxes[i]</code> and <code>rboxes[i]</code> one object
+rather than two lists that happen to be ordered alike — the shared instance axis the three oriented readings
+(COCO <code>oriented=True</code>, YOLO's nine-field rows, DOTA's <code>labelTxt</code>) and every rotated transform rely on.
+<code>boxes</code> is :func:<code>~lucid_yolo.data.transforms.boxes_from_polygons</code> of the quads and <code>rboxes</code> is
+:func:<code>~lucid_yolo.data.rotated_geom.polygons_to_rboxes</code> of them stacked; <code>polygons</code> stays empty, the
+quad being carried by <code>rboxes</code> up to the rectangle fit. Parsing a quad out of its file, and refusing one
+with the file's name in the message, stays with each reader.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6562,8 +6509,7 @@ each reader.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional <code>(N, K, 2)</code> float32 coordinates, given together with
-<code>keypoint_vis</code>.</p>
+                <p>Optional <code>(N, K, 2)</code> float32 coordinates, given together with <code>keypoint_vis</code>.</p>
               </div>
             </td>
             <td>
@@ -6610,7 +6556,7 @@ each reader.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Targets whose boxes, labels, rotated boxes and any channel given share one</p>
+                <p>Targets whose boxes, labels, rotated boxes and any channel given share one instance axis; every modality</p>
               </div>
             </td>
           </tr>
@@ -6625,7 +6571,7 @@ each reader.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>instance axis; every modality empty when <code>quads</code> is.</p>
+                <p>empty when <code>quads</code> is.</p>
               </div>
             </td>
           </tr>
@@ -6648,8 +6594,8 @@ each reader.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If a quad is not <code>(4, 2)</code>, or a channel's length disagrees with
-<code>quads</code> (the latter from the constructor's own validation).</p>
+                <p>If a quad is not <code>(4, 2)</code>, or a channel's length disagrees with <code>quads</code> (the latter from
+the constructor's own validation).</p>
               </div>
             </td>
           </tr>
@@ -6721,8 +6667,8 @@ each reader.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The window-local targets, <code>boxes</code>/<code>labels</code>/<code>rboxes</code> on one instance
-axis (WP-056) and <code>polygons</code> empty.</p>
+                <p>The window-local targets, <code>boxes</code>/<code>labels</code>/<code>rboxes</code> on one instance axis (WP-056) and
+<code>polygons</code> empty.</p>
               </div>
             </td>
           </tr>
@@ -6733,8 +6679,8 @@ axis (WP-056) and <code>polygons</code> empty.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>(N,)</code> bool, the R18 flag after the crop — the incoming flag OR-ed
-with <code>visible_fraction &lt; 0.7</code> (A39: carried, not acted on).</p>
+                <p><code>(N,)</code> bool, the R18 flag after the crop — the incoming flag OR-ed with
+<code>visible_fraction &lt; 0.7</code> (A39: carried, not acted on).</p>
               </div>
             </td>
           </tr>
@@ -6745,9 +6691,9 @@ with <code>visible_fraction &lt; 0.7</code> (A39: carried, not acted on).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>(N,)</code> float32, R18's <code>U_i</code> — clipped area over original
-area. Kept because the fitted box's area is not the clipped area, so the
-quantity the rule turns on is otherwise unrecoverable downstream.</p>
+                <p><code>(N,)</code> float32, R18's <code>U_i</code> — clipped area over original area. Kept because the fitted
+box's area is not the clipped area, so the quantity the rule turns on is otherwise unrecoverable
+downstream.</p>
               </div>
             </td>
           </tr>
@@ -6869,26 +6815,19 @@ quantity the rule turns on is otherwise unrecoverable downstream.</p>
 
 
         <p>COCO-format detection/segmentation dataset yielding <code>(image, Targets)</code>.</p>
-<p>The instances JSON is parsed once at construction: category ids are remapped
-to contiguous <code>int64</code> labels (the mapping is exposed as
-:attr:<code>category_id_to_label</code> / :attr:<code>label_to_category_id</code>) and annotations
-are grouped by image id. Each <code>__getitem__</code> decodes its image to a CHW
-float32 tensor in <code>[0, 1]</code> and returns the targets built at construction:
-one <code>xyxy</code> box per kept annotation, and its first segmentation ring as a
-<code>(P, 2)</code> polygon. Crowd (<code>iscrowd=1</code>) and non-polygon (RLE / empty /
-degenerate) annotations are skipped, so a retained image carries one ring per
-box or an empty target set.</p>
-<p>Where each box comes from is stated once, in the module docstring: an image
-whose instances all keep a ring gets ring-envelope boxes, so box and mask
-describe one object; an image with any ringless instance carries no polygons
-and gets COCO's <code>bbox</code>, clamped to the image bounds. Either way an instance
-whose box ends up zero-width or zero-height is dropped, matching what the
-train pipeline's <code>instance_keep_mask</code> does to one.</p>
-<p>An optional single-image <code>transforms</code> (any
-:class:<code>~lucid_yolo.data.transforms.GeometricTransform</code>, e.g.
-:class:<code>~lucid_yolo.data.letterbox.Letterbox</code> for validation) is applied to each
-sample before it is returned. Multi-image assemblies (mosaic, mixup,
-copy-paste) are composed at the datamodule level, not here.</p>
+<p>The instances JSON is parsed once at construction: category ids are remapped to contiguous <code>int64</code> labels (the
+mapping is exposed as :attr:<code>category_id_to_label</code> / :attr:<code>label_to_category_id</code>) and annotations are grouped by
+image id. Each <code>__getitem__</code> decodes its image to a CHW float32 tensor in <code>[0, 1]</code> and returns the targets
+built at construction: one <code>xyxy</code> box per kept annotation, and its first segmentation ring as a <code>(P, 2)</code>
+polygon. Crowd (<code>iscrowd=1</code>) and non-polygon (RLE / empty / degenerate) annotations are skipped, so a retained
+image carries one ring per box or an empty target set.</p>
+<p>Where each box comes from is stated once, in the module docstring: an image whose instances all keep a ring gets
+ring-envelope boxes, so box and mask describe one object; an image with any ringless instance carries no polygons
+and gets COCO's <code>bbox</code>, clamped to the image bounds. Either way an instance whose box ends up zero-width or
+zero-height is dropped, matching what the train pipeline's <code>instance_keep_mask</code> does to one.</p>
+<p>An optional single-image <code>transforms</code> (any :class:<code>~lucid_yolo.data.transforms.GeometricTransform</code>, e.g.
+:class:<code>~lucid_yolo.data.letterbox.Letterbox</code> for validation) is applied to each sample before it is returned.
+Multi-image assemblies (mosaic, mixup, copy-paste) are composed at the datamodule level, not here.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6960,9 +6899,8 @@ sample. Defaults to <code>None</code> (raw decoded sample).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Read each annotation's four-point ring as a rotated box (WP-088;
-see the module docstring). <code>False</code> (the default) leaves the reader,
-and every target it has ever produced, exactly as it was.</p>
+                <p>Read each annotation's four-point ring as a rotated box (WP-088; see the module docstring).
+<code>False</code> (the default) leaves the reader, and every target it has ever produced, exactly as it was.</p>
               </div>
             </td>
             <td>
@@ -6978,10 +6916,9 @@ and every target it has ever produced, exactly as it was.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Parse each retained annotation's COCO <code>keypoints</code> field into
-the WP-120 <code>Targets.keypoints</code> / <code>keypoint_vis</code> channels. <code>False</code>
-(the default) leaves the reader, and every target it has ever produced,
-exactly as it was.</p>
+                <p>Parse each retained annotation's COCO <code>keypoints</code> field into the WP-120 <code>Targets.keypoints</code> /
+<code>keypoint_vis</code> channels. <code>False</code> (the default) leaves the reader, and every target it has ever
+produced, exactly as it was.</p>
               </div>
             </td>
             <td>
@@ -7102,14 +7039,11 @@ read off this file's own category <code>keypoints</code> names (A64), or <code>N
     <div class="doc doc-contents ">
 
         <p>The COCO image id of each loader position, in <code>__getitem__</code> order.</p>
-<p>Published because a consumer that pairs this dataset's positions with
-anything read off the <em>same</em> annotation file — the whole-image tile merge
-(:mod:<code>lucid_yolo.eval.tile_merge</code>) pairing a tile to its window, the COCO
-scorer naming the image an accumulated detection belongs to — otherwise has
-to infer the identity from the annotations that landed at a position. Two
-tiles carrying byte-identical annotation sets are indistinguishable that
-way and are not indistinguishable by id, so the pairing can be asserted
-rather than argued.</p>
+<p>Published because a consumer that pairs this dataset's positions with anything read off the <em>same</em> annotation
+file — the whole-image tile merge (:mod:<code>lucid_yolo.eval.tile_merge</code>) pairing a tile to its window, the COCO
+scorer naming the image an accumulated detection belongs to — otherwise has to infer the identity from the
+annotations that landed at a position. Two tiles carrying byte-identical annotation sets are indistinguishable
+that way and are not indistinguishable by id, so the pairing can be asserted rather than argued.</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -7186,10 +7120,9 @@ rather than argued.</p>
     <div class="doc doc-contents ">
 
         <p>The image file name of each loader position, in <code>__getitem__</code> order.</p>
-<p>The companion of :attr:<code>image_ids</code> for a consumer that arrives with a file
-rather than an id — a figure drawn over <code>000007.jpg</code> needs that image's
-labels, and the file name is the one key both the picture on disk and the
-annotation record share (WP-189).</p>
+<p>The companion of :attr:<code>image_ids</code> for a consumer that arrives with a file rather than an id — a figure drawn
+over <code>000007.jpg</code> needs that image's labels, and the file name is the one key both the picture on disk and
+the annotation record share (WP-189).</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -7274,10 +7207,9 @@ annotation record share (WP-189).</p>
     <div class="doc doc-contents ">
 
         <p>Decode every distinct image file once and keep it for every later draw.</p>
-<p><code>cache_images=True</code> at construction calls this; a reader built without the flag
-can call it later to the same effect. A second call is a no-op, and the cache is
-installed only once every file has decoded, so a failure part-way leaves the
-reader uncached rather than half-filled.</p>
+<p><code>cache_images=True</code> at construction calls this; a reader built without the flag can call it later to the
+same effect. A second call is a no-op, and the cache is installed only once every file has decoded, so a
+failure part-way leaves the reader uncached rather than half-filled.</p>
 <p>Records are deduplicated by <code>file_name</code> exactly as the annotation file spells it,
 with no path normalisation: two records naming <code>a.png</code> share one decoded tensor,
 while <code>a.png</code> and <code>./a.png</code> are two spellings and are cached once each. The cost
@@ -7360,9 +7292,8 @@ bar over the decode. <code>False</code> (the default) keeps a library caller qui
     <div class="doc doc-contents ">
 
         <p>Return position <code>index</code>'s targets without decoding its image.</p>
-<p>:meth:<code>__getitem__</code> decodes the picture and applies <code>transforms</code>; a consumer
-that wants the labels alone — to draw them over an image it reads itself, or to
-count instances — gets the precomputed, untransformed
+<p>:meth:<code>__getitem__</code> decodes the picture and applies <code>transforms</code>; a consumer that wants the labels alone —
+to draw them over an image it reads itself, or to count instances — gets the precomputed, untransformed
 :class:<code>~lucid_yolo.data.targets.Targets</code> here at no decode (WP-189).</p>
 
 
@@ -7508,7 +7439,7 @@ count instances — gets the precomputed, untransformed
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A CHW float32 image in <code>[0, 1]</code> and its :class:<code>~lucid_yolo.data.targets.Targets</code></p>
+                <p>A CHW float32 image in <code>[0, 1]</code> and its :class:<code>~lucid_yolo.data.targets.Targets</code> (<code>xyxy</code> boxes,</p>
               </div>
             </td>
           </tr>
@@ -7523,22 +7454,7 @@ count instances — gets the precomputed, untransformed
             </td>
             <td>
               <div class="doc-md-description">
-                <p>(<code>xyxy</code> boxes, contiguous <code>int64</code> labels, one polygon ring per box),</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <a class="autorefs autorefs-internal" title="            Targets
-
-
-  
-      dataclass
-   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>after the optional <code>transforms</code>.</p>
+                <p>contiguous <code>int64</code> labels, one polygon ring per box), after the optional <code>transforms</code>.</p>
               </div>
             </td>
           </tr>
@@ -7581,14 +7497,12 @@ count instances — gets the precomputed, untransformed
 
 
         <p>YOLO-format dataset yielding the same <code>(image, Targets)</code> pairs the COCO reader does.</p>
-<p>Images are the sorted :data:<code>IMAGE_SUFFIXES</code> files of <code>images_dir</code>; each one's label file
-is the same stem under <code>labels_dir</code>. Labels are parsed per sample rather than at
-construction — one image's text is a handful of rows, so the copy-on-write pressure that
-made the COCO reader precompute (WP-073) does not arise, and reading them here keeps the
-image's own decoded size as the denormalizing scale. A malformed row therefore raises at
-the <code>__getitem__</code> that reads it, not at construction; <code>lucid-data check</code> is the
-pre-flight that parses every row of the tree up front, and the module docstring states
-why the two readers differ here.</p>
+<p>Images are the sorted :data:<code>IMAGE_SUFFIXES</code> files of <code>images_dir</code>; each one's label file is the same stem under
+<code>labels_dir</code>. Labels are parsed per sample rather than at construction — one image's text is a handful of rows, so
+the copy-on-write pressure that made the COCO reader precompute (WP-073) does not arise, and reading them here
+keeps the image's own decoded size as the denormalizing scale. A malformed row therefore raises at the
+<code>__getitem__</code> that reads it, not at construction; <code>lucid-data check</code> is the pre-flight that parses every row of
+the tree up front, and the module docstring states why the two readers differ here.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7675,8 +7589,8 @@ why the two readers differ here.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Read nine-field rows as quadrilaterals and fit rotated boxes, instead of
-five-field <code>cls cx cy w h</code> rows. The variant is declared, never sniffed.</p>
+                <p>Read nine-field rows as quadrilaterals and fit rotated boxes, instead of five-field <code>cls cx cy w h</code>
+rows. The variant is declared, never sniffed.</p>
               </div>
             </td>
             <td>
@@ -7692,9 +7606,9 @@ five-field <code>cls cx cy w h</code> rows. The variant is declared, never sniff
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Read an image with no label file as a background image instead
-of raising. <code>False</code> (the default) treats the absence as the broken export it
-usually is; an empty label file means "no objects" either way.</p>
+                <p>Read an image with no label file as a background image instead of raising. <code>False</code> (the
+default) treats the absence as the broken export it usually is; an empty label file means "no objects"
+either way.</p>
               </div>
             </td>
             <td>
@@ -7710,11 +7624,10 @@ usually is; an empty label file means "no objects" either way.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Decode all images once at construction and retain their RGB
-tensors (:meth:<code>cache_images</code>, without its progress report) — <code>uint8</code> for
-an 8-bit source, <code>uint16</code> for a 16-bit PNG, at twice the bytes.
-Opt-in because the cache occupies the uncompressed
-dataset size; forked loader workers share those read-only pages.</p>
+                <p>Decode all images once at construction and retain their RGB tensors (:meth:<code>cache_images</code>,
+without its progress report) — <code>uint8</code> for an 8-bit source, <code>uint16</code> for a 16-bit PNG, at twice the
+bytes. Opt-in because the cache occupies the uncompressed dataset size; forked loader workers share those
+read-only pages.</p>
               </div>
             </td>
             <td>
@@ -7752,12 +7665,10 @@ dataset size; forked loader workers share those read-only pages.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Always <code>None</code>. Declared so both readers answer the
-question A64 makes the <em>dataset's</em> to answer, rather than leaving the caller
-to ask only the reader it expects to have points. The answer here is not a
-placeholder: the YOLO label row carries no keypoint fields to name sides
-with, which is the same reason <code>keypoint_targets=True</code> is refused on a
-YOLO root.</p>
+                <p>Always <code>None</code>. Declared so both readers answer the question A64 makes the <em>dataset's</em> to
+answer, rather than leaving the caller to ask only the reader it expects to have points. The answer here
+is not a placeholder: the YOLO label row carries no keypoint fields to name sides with, which is the same
+reason <code>keypoint_targets=True</code> is refused on a YOLO root.</p>
               </div>
             </td>
           </tr>
@@ -7806,13 +7717,12 @@ YOLO root.</p>
     <div class="doc doc-contents ">
 
         <p>Decode every listed image once and keep it for every later draw.</p>
-<p><code>cache_images=True</code> at construction calls this; a reader built without the flag
-can call it later to the same effect. A second call is a no-op, and the cache is
-installed only once every file has decoded, so a failure part-way leaves the
-reader uncached rather than half-filled.</p>
-<p>Entries are keyed by each listed path as the directory listing spells it, with no
-symlink resolution, so two directory entries aliasing one file — a symlink beside
-its target — are cached once each. The cost of an alias is memory only.</p>
+<p><code>cache_images=True</code> at construction calls this; a reader built without the flag can call it later to the same
+effect. A second call is a no-op, and the cache is installed only once every file has decoded, so a failure
+part-way leaves the reader uncached rather than half-filled.</p>
+<p>Entries are keyed by each listed path as the directory listing spells it, with no symlink resolution, so two
+directory entries aliasing one file — a symlink beside its target — are cached once each. The cost of an alias
+is memory only.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7835,10 +7745,9 @@ its target — are cached once each. The cost of an alias is memory only.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Draw a progress bar over the decode and, once it finishes, report
-the image count and the bytes the cache retains as a <code>UserWarning</code>. A YOLO
-tree states no image sizes, so there is nothing to estimate from before
-decoding. <code>False</code> (the default) keeps a library caller quiet;
+                <p>Draw a progress bar over the decode and, once it finishes, report the image count and the bytes
+the cache retains as a <code>UserWarning</code>. A YOLO tree states no image sizes, so there is nothing to
+estimate from before decoding. <code>False</code> (the default) keeps a library caller quiet;
 :class:<code>~lucid_yolo.ptl.datamodule.DetectionDataModule</code> turns it on.</p>
               </div>
             </td>
@@ -7890,10 +7799,9 @@ decoding. <code>False</code> (the default) keeps a library caller quiet;
     <div class="doc doc-contents ">
 
         <p>Build a split's dataset from a dataset root alone.</p>
-<p>The root's <code>data.yaml</code> is authoritative: it supplies the class names, and its own
-split entry supplies the image directory when it resolves. Where the two directories
-come from is :func:<code>resolve_split_dirs</code>, shared with the pre-run check so a validated
-root is the tree this reader then opens.</p>
+<p>The root's <code>data.yaml</code> is authoritative: it supplies the class names, and its own split entry supplies the
+image directory when it resolves. Where the two directories come from is :func:<code>resolve_split_dirs</code>, shared
+with the pre-run check so a validated root is the tree this reader then opens.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7996,8 +7904,8 @@ root is the tree this reader then opens.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Decode and retain every split image as an RGB tensor, <code>uint8</code>
-for an 8-bit source and <code>uint16</code> for a 16-bit PNG.</p>
+                <p>Decode and retain every split image as an RGB tensor, <code>uint8</code> for an 8-bit source and
+<code>uint16</code> for a 16-bit PNG.</p>
               </div>
             </td>
             <td>
@@ -8046,8 +7954,8 @@ for an 8-bit source and <code>uint16</code> for a 16-bit PNG.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If the <code>data.yaml</code> is malformed, or the images directory's final
-component is not <code>images</code> so no labels directory can be derived from it.</p>
+                <p>If the <code>data.yaml</code> is malformed, or the images directory's final component is not <code>images</code>
+so no labels directory can be derived from it.</p>
               </div>
             </td>
           </tr>
@@ -8153,26 +8061,16 @@ component is not <code>images</code> so no labels directory can be derived from 
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>A CHW float32 image in <code>[0, 1]</code> and its targets in pixel coordinates, after the</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><a class="autorefs autorefs-internal" title="            Targets
+                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <a class="autorefs autorefs-internal" title="            Targets
 
 
   
       dataclass
-   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a></code>
+   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a>]</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>optional <code>transforms</code>.</p>
+                <p>A CHW float32 image in <code>[0, 1]</code> and its targets in pixel coordinates, after the optional <code>transforms</code>.</p>
               </div>
             </td>
           </tr>
@@ -8195,8 +8093,8 @@ component is not <code>images</code> so no labels directory can be derived from 
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If the image has no label file and <code>allow_missing_labels</code> is
-<code>False</code>; the message names both the image and the path it looked for.</p>
+                <p>If the image has no label file and <code>allow_missing_labels</code> is <code>False</code>; the message
+names both the image and the path it looked for.</p>
               </div>
             </td>
           </tr>
@@ -8246,9 +8144,8 @@ component is not <code>images</code> so no labels directory can be derived from 
 
 
         <p>A dataset's own <code>data.yaml</code>: its class names and its split image directories.</p>
-<p>Split entries are kept as written and resolved on demand by :meth:<code>images_dir</code>, so a
-<code>test:</code> line pointing at a directory that was never downloaded costs nothing until
-someone asks for that split.</p>
+<p>Split entries are kept as written and resolved on demand by :meth:<code>images_dir</code>, so a <code>test:</code> line pointing at a
+directory that was never downloaded costs nothing until someone asks for that split.</p>
 
 
 <p><span class="doc-section-title">Attributes:</span></p>
@@ -8350,9 +8247,9 @@ someone asks for that split.</p>
     <div class="doc doc-contents ">
 
         <p>Parse a <code>data.yaml</code> into its class names and split entries.</p>
-<p>Keys the format does not define (the export's <code>roboflow:</code> metadata block, for
-instance) are ignored. <code>nc</code>, when present, must agree with the length of <code>names</code>:
-a file disagreeing with itself is one whose class space cannot be trusted.</p>
+<p>Keys the format does not define (the export's <code>roboflow:</code> metadata block, for instance) are ignored. <code>nc</code>,
+when present, must agree with the length of <code>names</code>: a file disagreeing with itself is one whose class space
+cannot be trusted.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8429,8 +8326,8 @@ a file disagreeing with itself is one whose class space cannot be trusted.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If the document is not a mapping, <code>names</code> is missing or malformed,
-or <code>nc</code> contradicts it. The file is named in every message.</p>
+                <p>If the document is not a mapping, <code>names</code> is missing or malformed, or <code>nc</code> contradicts it.
+The file is named in every message.</p>
               </div>
             </td>
           </tr>
@@ -8477,10 +8374,9 @@ or <code>nc</code> contradicts it. The file is named in every message.</p>
     <div class="doc doc-contents ">
 
         <p>Resolve one split's image directory from the entry the file wrote.</p>
-<p>The entry is tried literally against the file's own directory first, then with its
-leading <code>..</code> components dropped — the published export writes <code>../train/images</code>
-for a tree that sits at <code>&lt;root&gt;/train/images</code>, and the literal reading of that
-escapes the root.</p>
+<p>The entry is tried literally against the file's own directory first, then with its leading <code>..</code> components
+dropped — the published export writes <code>../train/images</code> for a tree that sits at <code>&lt;root&gt;/train/images</code>, and
+the literal reading of that escapes the root.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8633,8 +8529,7 @@ escapes the root.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The transforms to apply left-to-right. An empty sequence is
-the identity.</p>
+                <p>The transforms to apply left-to-right. An empty sequence is the identity.</p>
               </div>
             </td>
             <td>
@@ -8800,13 +8695,11 @@ the identity.</p>
 
 
         <p>Aspect-preserving resize-and-pad transform with an exact inverse (A10).</p>
-<p>The image is scaled by <code>r = min(target_h / H, target_w / W)</code> (a single
-ratio for both axes) and padded to the target canvas with <code>pad_value</code>, in
-one upstream warp from the source canvas to the letterboxed one. Boxes,
-polygons, rotated-box centres and keypoints are warped through the same
-scale-plus-translation affine; rotated-box <code>w</code>/<code>h</code> scale by <code>r</code> and
-<code>theta</code> is unchanged, and keypoint visibilities carry over untouched (a
-letterbox never crops, so no annotated point leaves the canvas).</p>
+<p>The image is scaled by <code>r = min(target_h / H, target_w / W)</code> (a single ratio for both axes) and padded to the
+target canvas with <code>pad_value</code>, in one upstream warp from the source canvas to the letterboxed one. Boxes,
+polygons, rotated-box centres and keypoints are warped through the same scale-plus-translation affine; rotated-box
+<code>w</code>/<code>h</code> scale by <code>r</code> and <code>theta</code> is unchanged, and keypoint visibilities carry over untouched (a letterbox
+never crops, so no annotated point leaves the canvas).</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8829,8 +8722,7 @@ letterbox never crops, so no annotated point leaves the canvas).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Target canvas as a single <code>int</code> (square) or an explicit
-<code>(height, width)</code> pair.</p>
+                <p>Target canvas as a single <code>int</code> (square) or an explicit <code>(height, width)</code> pair.</p>
               </div>
             </td>
             <td>
@@ -8846,9 +8738,8 @@ letterbox never crops, so no annotated point leaves the canvas).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Constant fill for the padded border, in the image's value
-range. Defaults to <code>114/255</code> (mid-grey, the YOLO-lineage
-convention).</p>
+                <p>Constant fill for the padded border, in the image's value range. Defaults to <code>114/255</code> (mid-grey,
+the YOLO-lineage convention).</p>
               </div>
             </td>
             <td>
@@ -8864,9 +8755,8 @@ convention).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Whether the content may be enlarged beyond native size
-when the target is larger than the source. Defaults to <code>True</code> for
-training-time parity; set <code>False</code> to cap the ratio at <code>1.0</code>.</p>
+                <p>Whether the content may be enlarged beyond native size when the target is larger than
+the source. Defaults to <code>True</code> for training-time parity; set <code>False</code> to cap the ratio at <code>1.0</code>.</p>
               </div>
             </td>
             <td>
@@ -8940,8 +8830,7 @@ training-time parity; set <code>False</code> to cap the ratio at <code>1.0</code
             </td>
             <td>
               <div class="doc-md-description">
-                <p>CHW image tensor (float, in the same value range as
-<code>pad_value</code>).</p>
+                <p>CHW image tensor (float, in the same value range as <code>pad_value</code>).</p>
               </div>
             </td>
             <td>
@@ -9087,8 +8976,7 @@ training-time parity; set <code>False</code> to cap the ratio at <code>1.0</code
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Letterboxed canvas <code>(height, width)</code> the points
-live in.</p>
+                <p>Letterboxed canvas <code>(height, width)</code> the points live in.</p>
               </div>
             </td>
             <td>
@@ -9114,17 +9002,7 @@ live in.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>(K, 2)</code> points in original-image coordinates, in <code>points</code>'s</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>dtype.</p>
+                <p><code>(K, 2)</code> points in original-image coordinates, in <code>points</code>'s dtype.</p>
               </div>
             </td>
           </tr>
@@ -9160,9 +9038,8 @@ live in.</p>
     <div class="doc doc-contents ">
 
         <p>Return the forward affine and output size mapping a source into this canvas.</p>
-<p>Exposes the pure scale-and-translation letterbox geometry for a source of
-<code>(orig_h, orig_w)</code> without resampling any image, so a caller can compose
-it into another warp or state it to one.</p>
+<p>Exposes the pure scale-and-translation letterbox geometry for a source of <code>(orig_h, orig_w)</code> without
+resampling any image, so a caller can compose it into another warp or state it to one.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -9227,7 +9104,7 @@ it into another warp or state it to one.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A <code>(matrix, out_h, out_w)</code> triple: the <code>(3, 3)</code> float64 forward</p>
+                <p>A <code>(matrix, out_h, out_w)</code> triple: the <code>(3, 3)</code> float64 forward affine mapping source pixels into</p>
               </div>
             </td>
           </tr>
@@ -9237,17 +9114,7 @@ it into another warp or state it to one.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>affine mapping source pixels into the letterboxed canvas, and the</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="int">int</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>target canvas height and width.</p>
+                <p>the letterboxed canvas, and the target canvas height and width.</p>
               </div>
             </td>
           </tr>
@@ -9284,11 +9151,10 @@ it into another warp or state it to one.</p>
     <div class="doc doc-contents ">
 
         <p>Warp <code>targets</code> through the letterbox affine for a source size, no image.</p>
-<p>The single target-side implementation: :meth:<code>__call__</code> routes through it after
-resampling the image, and a fused warp calls it directly to letterbox targets
-another transform has already produced at the source canvas. Boxes, polygons and
-keypoints are mapped point-wise and rotated-box centres are warped with extents
-scaled and angle fixed — no image is touched either way.</p>
+<p>The single target-side implementation: :meth:<code>__call__</code> routes through it after resampling the image, and a
+fused warp calls it directly to letterbox targets another transform has already produced at the source canvas.
+Boxes, polygons and keypoints are mapped point-wise and rotated-box centres are warped with extents scaled and
+angle fixed — no image is touched either way.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -9316,8 +9182,7 @@ scaled and angle fixed — no image is touched either way.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Geometry at the source canvas to map into the letterboxed
-canvas.</p>
+                <p>Geometry at the source canvas to map into the letterboxed canvas.</p>
               </div>
             </td>
             <td>
@@ -9380,22 +9245,7 @@ canvas.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A new :class:<code>~lucid_yolo.data.targets.Targets</code> in letterboxed-canvas</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><a class="autorefs autorefs-internal" title="            Targets
-
-
-  
-      dataclass
-   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>coordinates.</p>
+                <p>A new :class:<code>~lucid_yolo.data.targets.Targets</code> in letterboxed-canvas coordinates.</p>
               </div>
             </td>
           </tr>
@@ -9440,23 +9290,18 @@ canvas.</p>
 
 
         <p>Random affine warp applied jointly to an image and its targets (WP-010).</p>
-<p>Each call samples a rotation in <code>[-degrees, degrees]</code>, per-axis shears in
-<code>[-shear, shear]</code>, a uniform scale in <code>[1 - scale, 1 + scale]</code> (floored just
-above zero) and a translation of <code>[-translate, translate]</code> times the canvas
-size on each axis — R1 Table S3's ranges, which is what this class still owns —
-and states them to one <code>fuse-augmentations</code> segment, which resamples the image
-once (bilinear, <code>pad_value</code> fill, mid-grey <code>114/255</code> by default). Every
-target modality rides the same composed matrix. Boxes/polygons are clipped to
-the canvas and filtered by <code>min_box_size</code> and <code>min_visibility</code>.</p>
-<p>With <code>letterbox</code> set, upstream's aspect-preserving fit joins the same segment,
-so the source canvas reaches the letterboxed one in a single resample rather than
-two (WP-070's saving, WP-156's delegation). Targets are clipped and filtered at
-the source canvas and only then mapped through the letterbox affine.</p>
-<p>Rotated boxes take the module docstring's corner-warp-and-re-fit path (WP-058)
-and are clipped and filtered by the same two thresholds, with <code>boxes</code>
-recomputed as the envelope of the rotated geometry. That path filters, so it
-requires <code>rboxes</code> 1:1 with <code>boxes</code> and no polygons (WP-056); anything else
-raises :class:<code>ValueError</code>.</p>
+<p>Each call samples a rotation in <code>[-degrees, degrees]</code>, per-axis shears in <code>[-shear, shear]</code>, a uniform
+scale in <code>[1 - scale, 1 + scale]</code> (floored just above zero) and a translation of <code>[-translate, translate]</code>
+times the canvas size on each axis — R1 Table S3's ranges, which is what this class still owns — and states them
+to one <code>fuse-augmentations</code> segment, which resamples the image once (bilinear, <code>pad_value</code> fill, mid-grey
+<code>114/255</code> by default). Every target modality rides the same composed matrix. Boxes/polygons are clipped to the
+canvas and filtered by <code>min_box_size</code> and <code>min_visibility</code>.</p>
+<p>With <code>letterbox</code> set, upstream's aspect-preserving fit joins the same segment, so the source canvas reaches the
+letterboxed one in a single resample rather than two (WP-070's saving, WP-156's delegation). Targets are clipped
+and filtered at the source canvas and only then mapped through the letterbox affine.</p>
+<p>Rotated boxes take the module docstring's corner-warp-and-re-fit path (WP-058) and are clipped and filtered by
+the same two thresholds, with <code>boxes</code> recomputed as the envelope of the rotated geometry. That path filters,
+so it requires <code>rboxes</code> 1:1 with <code>boxes</code> and no polygons (WP-056); anything else raises :class:<code>ValueError</code>.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -9529,8 +9374,7 @@ sampled factor is floored just above zero. Defaults to <code>0.5</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Maximum absolute shear in degrees, sampled independently per axis.
-Defaults to <code>0.0</code>.</p>
+                <p>Maximum absolute shear in degrees, sampled independently per axis. Defaults to <code>0.0</code>.</p>
               </div>
             </td>
             <td>
@@ -9563,8 +9407,7 @@ sampling. Defaults to <code>None</code> (global RNG).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Minimum clipped side length in pixels for an instance to be
-kept. Defaults to <code>2.0</code>.</p>
+                <p>Minimum clipped side length in pixels for an instance to be kept. Defaults to <code>2.0</code>.</p>
               </div>
             </td>
             <td>
@@ -9597,9 +9440,8 @@ pre-clip-extent area) for an instance to be kept. Defaults to <code>0.1</code>.<
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Output canvas the warp lands on, as a single <code>int</code> (square) or
-an explicit <code>(height, width)</code> pair, composed into the same resample.
-Defaults to <code>None</code> (warp to the input canvas).</p>
+                <p>Output canvas the warp lands on, as a single <code>int</code> (square) or an explicit <code>(height, width)</code>
+pair, composed into the same resample. Defaults to <code>None</code> (warp to the input canvas).</p>
               </div>
             </td>
             <td>
@@ -9615,9 +9457,8 @@ Defaults to <code>None</code> (warp to the input canvas).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Whether <code>letterbox</code> may enlarge content past its native size
-when the output canvas is larger than the source. Defaults to <code>True</code>;
-ignored without <code>letterbox</code>.</p>
+                <p>Whether <code>letterbox</code> may enlarge content past its native size when the output canvas
+is larger than the source. Defaults to <code>True</code>; ignored without <code>letterbox</code>.</p>
               </div>
             </td>
             <td>
@@ -9633,9 +9474,8 @@ ignored without <code>letterbox</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Constant fill for canvas the warp exposes, in the image's value
-range. Defaults to <code>114/255</code> (mid-grey, the YOLO-lineage convention,
-matching :class:<code>~lucid_yolo.data.letterbox.Letterbox</code>).</p>
+                <p>Constant fill for canvas the warp exposes, in the image's value range. Defaults to <code>114/255</code>
+(mid-grey, the YOLO-lineage convention, matching :class:<code>~lucid_yolo.data.letterbox.Letterbox</code>).</p>
               </div>
             </td>
             <td>
@@ -9651,10 +9491,9 @@ matching :class:<code>~lucid_yolo.data.letterbox.Letterbox</code>).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The caller has already subtracted <code>pad_value</code> from every
-input pixel, including any mosaic fill. Skip that same subtraction in
-the fused segment and restore the fill after resampling. Defaults to
-<code>False</code>; only a prepared training source supplies centred pixels.</p>
+                <p>The caller has already subtracted <code>pad_value</code> from every input pixel, including any
+mosaic fill. Skip that same subtraction in the fused segment and restore the fill after resampling.
+Defaults to <code>False</code>; only a prepared training source supplies centred pixels.</p>
               </div>
             </td>
             <td>
@@ -9705,8 +9544,7 @@ the fused segment and restore the fill after resampling. Defaults to
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The :class:<code>AffineParams</code> sampled on the most recent call, or
-<code>None</code> before the first call.</p>
+                <p>The :class:<code>AffineParams</code> sampled on the most recent call, or <code>None</code> before the first call.</p>
               </div>
             </td>
           </tr>
@@ -9717,9 +9555,8 @@ the fused segment and restore the fill after resampling. Defaults to
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The <code>(3, 3)</code> float64 forward matrix from the most recent
-call, or <code>None</code> before the first call. This is the <strong>source-canvas</strong>
-affine, before any letterbox.</p>
+                <p>The <code>(3, 3)</code> float64 forward matrix from the most recent call, or <code>None</code> before the
+first call. This is the <strong>source-canvas</strong> affine, before any letterbox.</p>
               </div>
             </td>
           </tr>
@@ -10057,9 +9894,8 @@ drawn one skips it and builds :class:<code>AffineParams</code> directly (WP-147)
     <div class="doc doc-contents ">
 
         <p>Warp <code>image</code> and <code>targets</code> through <code>params</code>, drawing nothing.</p>
-<p>The application half of the seam. Given the same <code>params</code> this is a pure
-function of its inputs, which is what lets an expectation be frozen against
-stated parameters rather than against a seed (WP-147).</p>
+<p>The application half of the seam. Given the same <code>params</code> this is a pure function of its inputs, which is
+what lets an expectation be frozen against stated parameters rather than against a seed (WP-147).</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -10247,11 +10083,10 @@ geometric segment — see :meth:<code>_segment</code>.</p>
 
 
         <p>Photometric HSV jitter applied to the image alone (WP-013).</p>
-<p>Each call samples three independent gains — hue from <code>[-hsv_h, hsv_h]</code>,
-saturation from <code>[-hsv_s, hsv_s]</code> and value from <code>[-hsv_v, hsv_v]</code> — converts
-the image to HSV, applies the hue gain <strong>additively modulo 1</strong>, the saturation and
-value gains <strong>multiplicatively</strong> as <code>channel * (1 + gain)</code> clamped to <code>[0, 1]</code>,
-and converts back to RGB. Targets are geometry only and pass through unchanged.</p>
+<p>Each call samples three independent gains — hue from <code>[-hsv_h, hsv_h]</code>, saturation from <code>[-hsv_s, hsv_s]</code> and
+value from <code>[-hsv_v, hsv_v]</code> — converts the image to HSV, applies the hue gain <strong>additively modulo 1</strong>, the
+saturation and value gains <strong>multiplicatively</strong> as <code>channel * (1 + gain)</code> clamped to <code>[0, 1]</code>, and converts
+back to RGB. Targets are geometry only and pass through unchanged.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -10274,8 +10109,7 @@ and converts back to RGB. Targets are geometry only and pass through unchanged.<
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Half-width of the additive hue-gain range, as a fraction of the hue
-circle. Defaults to <code>0.015</code>.</p>
+                <p>Half-width of the additive hue-gain range, as a fraction of the hue circle. Defaults to <code>0.015</code>.</p>
               </div>
             </td>
             <td>
@@ -10291,8 +10125,7 @@ circle. Defaults to <code>0.015</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Half-width of the multiplicative saturation-gain range. Defaults to
-<code>0.7</code>.</p>
+                <p>Half-width of the multiplicative saturation-gain range. Defaults to <code>0.7</code>.</p>
               </div>
             </td>
             <td>
@@ -10523,9 +10356,8 @@ call, or <code>None</code> before the first call.</p>
     <div class="doc doc-contents ">
 
         <p>Draw one :class:<code>HSVParams</code> from the configured ranges, consuming the RNG.</p>
-<p>The sampling half of the seam: this is the only method that touches
-:attr:<code>generator</code>, so a caller wanting stated gains rather than drawn ones
-builds :class:<code>HSVParams</code> directly (WP-147).</p>
+<p>The sampling half of the seam: this is the only method that touches :attr:<code>generator</code>, so a caller wanting
+stated gains rather than drawn ones builds :class:<code>HSVParams</code> directly (WP-147).</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -10543,17 +10375,7 @@ builds :class:<code>HSVParams</code> directly (WP-147).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The three sampled gains. Nothing is stashed on the instance --</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="lucid_yolo.data.augment.HSVParams">HSVParams</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p><code>last_gains</code> is set by :meth:<code>apply</code>.</p>
+                <p>The three sampled gains. Nothing is stashed on the instance -- <code>last_gains</code> is set by :meth:<code>apply</code>.</p>
               </div>
             </td>
           </tr>
@@ -10724,22 +10546,18 @@ builds :class:<code>HSVParams</code> directly (WP-147).</p>
 
 
         <p>Left-right image flip with matching target mirroring (WP-013).</p>
-<p>With probability <code>p</code> (drawn per call) the image columns are reversed and every
-target modality is mirrored about the vertical axis at <code>x = (W - 1) / 2</code> — the
-axis the column reversal itself reflects about, since a coordinate names a sample
-point and the outermost samples sit at <code>0</code> and <code>W - 1</code> (WP-154b). Boxes swap and
-reflect their x-extent (<code>x1' = (W - 1) - x2</code>, <code>x2' = (W - 1) - x1</code>), polygon and
-keypoint points reflect (<code>x' = (W - 1) - x</code>), and rotated boxes reflect their centre
-(<code>cx' = (W - 1) - cx</code>) with the long edge reflected and re-canonicalized (WP-058).
-When a dataset keypoint pair map is supplied, it then swaps left/right keypoint
-identities (WP-120) — coordinates and visibility flags together, so a mirrored "left
-elbow" arrives in the right slot carrying its own flag. With probability <code>1 - p</code> the
-image and targets pass through unchanged.</p>
-<p>The rotated-box mirror is exact — an isometry maps the rectangle to a rectangle, and
-<code>-theta</code> names the mirrored long edge up to the half turn a rectangle is invariant
-under — so nothing is dropped and, unlike
-:class:<code>~lucid_yolo.data.affine.RandomAffine</code>, this transform imposes no instance-axis
-requirement on the rotated modality.</p>
+<p>With probability <code>p</code> (drawn per call) the image columns are reversed and every target modality is mirrored
+about the vertical axis at <code>x = (W - 1) / 2</code> — the axis the column reversal itself reflects about, since a
+coordinate names a sample point and the outermost samples sit at <code>0</code> and <code>W - 1</code> (WP-154b). Boxes swap
+and reflect their x-extent (<code>x1' = (W - 1) - x2</code>, <code>x2' = (W - 1) - x1</code>), polygon and keypoint points reflect
+(<code>x' = (W - 1) - x</code>), and rotated boxes reflect their centre (<code>cx' = (W - 1) - cx</code>) with the long edge
+reflected and re-canonicalized (WP-058). When a dataset keypoint pair map is supplied, it then swaps left/right
+keypoint identities (WP-120) — coordinates and visibility flags together, so a mirrored "left elbow" arrives in
+the right slot carrying its own flag. With probability <code>1 - p</code> the image and targets pass through unchanged.</p>
+<p>The rotated-box mirror is exact — an isometry maps the rectangle to a rectangle, and <code>-theta</code> names the
+mirrored long edge up to the half turn a rectangle is invariant under — so nothing is dropped and, unlike
+:class:<code>~lucid_yolo.data.affine.RandomAffine</code>, this transform imposes no instance-axis requirement
+on the rotated modality.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -10825,8 +10643,7 @@ an identity swap, the safe default when a task has no left/right symmetry.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Whether the most recent call flipped, or <code>None</code> before the
-first call.</p>
+                <p>Whether the most recent call flipped, or <code>None</code> before the first call.</p>
               </div>
             </td>
           </tr>
@@ -11014,9 +10831,8 @@ first call.</p>
     <div class="doc doc-contents ">
 
         <p>Draw whether this call flips, consuming one uniform against <code>p</code>.</p>
-<p>The sampling half of the seam: this is the only method that touches
-:attr:<code>generator</code>, so a caller wanting a stated flip rather than a drawn one
-builds :class:<code>FlipParams</code> directly (WP-147).</p>
+<p>The sampling half of the seam: this is the only method that touches :attr:<code>generator</code>, so a caller wanting a
+stated flip rather than a drawn one builds :class:<code>FlipParams</code> directly (WP-147).</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -11034,17 +10850,7 @@ builds :class:<code>FlipParams</code> directly (WP-147).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The drawn decision. Nothing is stashed on the instance --</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="lucid_yolo.data.augment.FlipParams">FlipParams</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p><code>last_flipped</code> is set by :meth:<code>apply</code>.</p>
+                <p>The drawn decision. Nothing is stashed on the instance -- <code>last_flipped</code> is set by :meth:<code>apply</code>.</p>
               </div>
             </td>
           </tr>
@@ -11163,7 +10969,7 @@ builds :class:<code>FlipParams</code> directly (WP-147).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Either the original <code>(image, targets)</code> or the left-right flipped image</p>
+                <p>Either the original <code>(image, targets)</code> or the left-right flipped image with every target modality</p>
               </div>
             </td>
           </tr>
@@ -11178,7 +10984,7 @@ builds :class:<code>FlipParams</code> directly (WP-147).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>with every target modality mirrored.</p>
+                <p>mirrored.</p>
               </div>
             </td>
           </tr>
@@ -11225,22 +11031,18 @@ builds :class:<code>FlipParams</code> directly (WP-147).</p>
 
 
         <p>Assemble four images and their targets into one <code>2S x 2S</code> mosaic (WP-011).</p>
-<p>Each call samples a centre <code>(cx, cy)</code> uniformly from <code>[0.5S, 1.5S]</code> on each
-axis, anchors the four images to that centre (image 0's bottom-right corner,
-image 1's bottom-left, image 2's top-right, image 3's top-left all meet at the
-centre), crops each to its quadrant, and grey-fills any uncovered canvas. Each
-image's boxes/polygons are shifted by its placement offset, clipped to the
-canvas, filtered by <code>min_box_size</code> and <code>min_visibility</code>, then merged via
-:meth:<code>~lucid_yolo.data.targets.Targets.concat</code>.</p>
-<p>This is an <strong>assembly, not</strong> a :class:<code>~lucid_yolo.data.transforms.GeometricTransform</code>:
-it consumes four <code>(image, targets)</code> pairs rather than one, so its call
-signature deliberately differs from that protocol. The images may differ in
-size but must share a channel count, dtype and device.</p>
-<p>Rotated boxes are shifted with their image, clipped to the canvas and filtered
-by the same two thresholds (WP-058, module docstring), with <code>boxes</code> recomputed
-as the envelope of the rotated geometry. Because that path filters, an input
-whose <code>rboxes</code> do not share the instance axis with its <code>boxes</code>, or that
-carries polygons alongside them, raises :class:<code>ValueError</code>.</p>
+<p>Each call samples a centre <code>(cx, cy)</code> uniformly from <code>[0.5S, 1.5S]</code> on each axis, anchors the four images to
+that centre (image 0's bottom-right corner, image 1's bottom-left, image 2's top-right, image 3's top-left all
+meet at the centre), crops each to its quadrant, and grey-fills any uncovered canvas. Each image's boxes/polygons
+are shifted by its placement offset, clipped to the canvas, filtered by <code>min_box_size</code> and <code>min_visibility</code>,
+then merged via :meth:<code>~lucid_yolo.data.targets.Targets.concat</code>.</p>
+<p>This is an <strong>assembly, not</strong> a :class:<code>~lucid_yolo.data.transforms.GeometricTransform</code>: it consumes four
+<code>(image, targets)</code> pairs rather than one, so its call signature deliberately differs from that protocol. The
+images may differ in size but must share a channel count, dtype and device.</p>
+<p>Rotated boxes are shifted with their image, clipped to the canvas and filtered by the same two thresholds
+(WP-058, module docstring), with <code>boxes</code> recomputed as the envelope of the rotated geometry. Because that path
+filters, an input whose <code>rboxes</code> do not share the instance axis with its <code>boxes</code>, or that carries polygons
+alongside them, raises :class:<code>ValueError</code>.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -11279,8 +11081,8 @@ carries polygons alongside them, raises :class:<code>ValueError</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional :class:<code>torch.Generator</code> for seeded, reproducible
-centre sampling. Defaults to <code>None</code> (global RNG).</p>
+                <p>Optional :class:<code>torch.Generator</code> for seeded, reproducible centre sampling. Defaults to <code>None</code>
+(global RNG).</p>
               </div>
             </td>
             <td>
@@ -11312,8 +11114,7 @@ centre sampling. Defaults to <code>None</code> (global RNG).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Minimum clipped side length in pixels for an instance to be
-kept. Defaults to <code>2.0</code>.</p>
+                <p>Minimum clipped side length in pixels for an instance to be kept. Defaults to <code>2.0</code>.</p>
               </div>
             </td>
             <td>
@@ -11329,8 +11130,8 @@ kept. Defaults to <code>2.0</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Minimum kept-area fraction (clipped-extent area divided by
-pre-clip-extent area) for an instance to be kept. Defaults to <code>0.1</code>.</p>
+                <p>Minimum kept-area fraction (clipped-extent area divided by pre-clip-extent area) for an
+instance to be kept. Defaults to <code>0.1</code>.</p>
               </div>
             </td>
             <td>
@@ -11358,8 +11159,8 @@ pre-clip-extent area) for an instance to be kept. Defaults to <code>0.1</code>.<
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The <code>(cx, cy)</code> integer centre sampled on the most recent
-call, or <code>None</code> before the first call.</p>
+                <p>The <code>(cx, cy)</code> integer centre sampled on the most recent call, or <code>None</code> before the first
+call.</p>
               </div>
             </td>
           </tr>
@@ -11442,12 +11243,10 @@ call, or <code>None</code> before the first call.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Exactly four <code>(image, targets)</code> pairs. Each <code>image</code> is a CHW
-float tensor (in the same value range as the grey fill, i.e.
-<code>[0, 1]</code>); the images may differ in spatial size but must share a
-channel count, dtype and device. Non-empty <code>rboxes</code> must share the
-instance axis with that input's <code>boxes</code>, and polygon presence must
-be consistent across all four (a requirement of
+                <p>Exactly four <code>(image, targets)</code> pairs. Each <code>image</code> is a CHW float tensor (in the same value
+range as the grey fill, i.e. <code>[0, 1]</code>); the images may differ in spatial size but must share a
+channel count, dtype and device. Non-empty <code>rboxes</code> must share the instance axis with that input's
+<code>boxes</code>, and polygon presence must be consistent across all four (a requirement of
 :meth:<code>~lucid_yolo.data.targets.Targets.concat</code>).</p>
               </div>
             </td>
@@ -11470,26 +11269,16 @@ be consistent across all four (a requirement of
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The <code>(C, 2S, 2S)</code> stitched image and the shifted, clipped, filtered</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><a class="autorefs autorefs-internal" title="            Targets
+                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <a class="autorefs autorefs-internal" title="            Targets
 
 
   
       dataclass
-   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a></code>
+   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a>]</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>and merged targets.</p>
+                <p>The <code>(C, 2S, 2S)</code> stitched image and the shifted, clipped, filtered and merged targets.</p>
               </div>
             </td>
           </tr>
@@ -11512,8 +11301,8 @@ be consistent across all four (a requirement of
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If <code>items</code> does not hold exactly four pairs, or an input's
-non-empty <code>rboxes</code> break WP-056's instance-axis invariant.</p>
+                <p>If <code>items</code> does not hold exactly four pairs, or an input's non-empty <code>rboxes</code> break
+WP-056's instance-axis invariant.</p>
               </div>
             </td>
           </tr>
@@ -11554,9 +11343,8 @@ non-empty <code>rboxes</code> break WP-056's instance-axis invariant.</p>
     <div class="doc doc-contents ">
 
         <p>Draw the stitch centre, consuming two uniforms from the RNG.</p>
-<p>The sampling half of the seam: this is the only method that touches
-:attr:<code>generator</code>, so a caller wanting a stated centre rather than a drawn
-one builds :class:<code>MosaicParams</code> directly (WP-147).</p>
+<p>The sampling half of the seam: this is the only method that touches :attr:<code>generator</code>, so a caller wanting a
+stated centre rather than a drawn one builds :class:<code>MosaicParams</code> directly (WP-147).</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -11574,7 +11362,7 @@ one builds :class:<code>MosaicParams</code> directly (WP-147).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The sampled centre, each axis an integer drawn uniformly from</p>
+                <p>The sampled centre, each axis an integer drawn uniformly from <code>[0.5S, 1.5S]</code>. Nothing is stashed on the</p>
               </div>
             </td>
           </tr>
@@ -11584,17 +11372,7 @@ one builds :class:<code>MosaicParams</code> directly (WP-147).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>[0.5S, 1.5S]</code>. Nothing is stashed on the instance -- <code>last_center</code></p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="lucid_yolo.data.mosaic.MosaicParams">MosaicParams</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>is set by :meth:<code>apply</code>.</p>
+                <p>instance -- <code>last_center</code> is set by :meth:<code>apply</code>.</p>
               </div>
             </td>
           </tr>
@@ -11656,8 +11434,7 @@ one builds :class:<code>MosaicParams</code> directly (WP-147).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Exactly four <code>(image, targets)</code> pairs, as :meth:<code>__call__</code>
-requires.</p>
+                <p>Exactly four <code>(image, targets)</code> pairs, as :meth:<code>__call__</code> requires.</p>
               </div>
             </td>
             <td>
@@ -11695,26 +11472,16 @@ requires.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The <code>(C, 2S, 2S)</code> stitched image and the shifted, clipped, filtered</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><a class="autorefs autorefs-internal" title="            Targets
+                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <a class="autorefs autorefs-internal" title="            Targets
 
 
   
       dataclass
-   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a></code>
+   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a>]</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>and merged targets.</p>
+                <p>The <code>(C, 2S, 2S)</code> stitched image and the shifted, clipped, filtered and merged targets.</p>
               </div>
             </td>
           </tr>
@@ -11737,8 +11504,8 @@ requires.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If <code>items</code> does not hold exactly four pairs, or an input's
-non-empty <code>rboxes</code> break WP-056's instance-axis invariant.</p>
+                <p>If <code>items</code> does not hold exactly four pairs, or an input's non-empty <code>rboxes</code> break
+WP-056's instance-axis invariant.</p>
               </div>
             </td>
           </tr>
@@ -11785,20 +11552,15 @@ non-empty <code>rboxes</code> break WP-056's instance-axis invariant.</p>
 
 
         <p>Convex pixel blend of two same-size images with concatenated targets (WP-012).</p>
-<p>Each call draws a trigger uniform: with probability <code>p</code> the two images are
-blended <code>lam * a + (1 - lam) * b</code> with <code>lam</code> from <code>Beta(alpha, alpha)</code> and
-both target sets are concatenated <strong>unchanged</strong> (every box from both images is
-kept at full weight — detection-lineage mixup applies no <code>lam</code> label
-smoothing). With probability <code>1 - p</code> the <strong>first</strong> pair passes through
-untouched.</p>
-<p>This is an <strong>assembly, not</strong> a :class:<code>~lucid_yolo.data.transforms.GeometricTransform</code>:
-it consumes two <code>(image, targets)</code> pairs rather than one. The two images must
-share the same shape; concatenating the targets additionally requires
-consistent polygon presence (a :meth:<code>~lucid_yolo.data.targets.Targets.concat</code>
-rule).</p>
-<p>Rotated boxes are carried through unchanged (WP-058): the blend moves no
-geometry, so both inputs' <code>rboxes</code> are concatenated exactly as their boxes and
-labels are, still canonical, with nothing clipped or dropped.</p>
+<p>Each call draws a trigger uniform: with probability <code>p</code> the two images are blended <code>lam * a + (1 - lam) * b</code>
+with <code>lam</code> from <code>Beta(alpha, alpha)</code> and both target sets are concatenated <strong>unchanged</strong> (every box from both
+images is kept at full weight — detection-lineage mixup applies no <code>lam</code> label smoothing). With probability
+<code>1 - p</code> the <strong>first</strong> pair passes through untouched.</p>
+<p>This is an <strong>assembly, not</strong> a :class:<code>~lucid_yolo.data.transforms.GeometricTransform</code>: it consumes two
+<code>(image, targets)</code> pairs rather than one. The two images must share the same shape; concatenating the targets
+additionally requires consistent polygon presence (a :meth:<code>~lucid_yolo.data.targets.Targets.concat</code> rule).</p>
+<p>Rotated boxes are carried through unchanged (WP-058): the blend moves no geometry, so both inputs' <code>rboxes</code> are
+concatenated exactly as their boxes and labels are, still canonical, with nothing clipped or dropped.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -11837,9 +11599,8 @@ labels are, still canonical, with nothing clipped or dropped.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Shared <code>Beta</code> concentration; both shape parameters equal <code>alpha</code>,
-so the blend factor is symmetric about <code>0.5</code> and (for large <code>alpha</code>)
-concentrated there. Defaults to <code>32.0</code>.</p>
+                <p>Shared <code>Beta</code> concentration; both shape parameters equal <code>alpha</code>, so the blend factor is symmetric
+about <code>0.5</code> and (for large <code>alpha</code>) concentrated there. Defaults to <code>32.0</code>.</p>
               </div>
             </td>
             <td>
@@ -11855,8 +11616,8 @@ concentrated there. Defaults to <code>32.0</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional :class:<code>torch.Generator</code> for seeded, reproducible
-trigger and blend-factor draws. Defaults to <code>None</code> (global RNG).</p>
+                <p>Optional :class:<code>torch.Generator</code> for seeded, reproducible trigger and blend-factor draws.
+Defaults to <code>None</code> (global RNG).</p>
               </div>
             </td>
             <td>
@@ -11884,8 +11645,8 @@ trigger and blend-factor draws. Defaults to <code>None</code> (global RNG).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The blend factor used on the most recent call, or <code>None</code> if that
-call did not trigger (passed the first pair through) or has not run yet.</p>
+                <p>The blend factor used on the most recent call, or <code>None</code> if that call did not trigger (passed
+the first pair through) or has not run yet.</p>
               </div>
             </td>
           </tr>
@@ -11969,10 +11730,9 @@ call did not trigger (passed the first pair through) or has not run yet.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Exactly two <code>(image, targets)</code> pairs. The two images must share
-shape, dtype and device; polygon presence must be consistent across
-both (a :meth:<code>~lucid_yolo.data.targets.Targets.concat</code> requirement).
-Rotated boxes, if any, are concatenated untouched.</p>
+                <p>Exactly two <code>(image, targets)</code> pairs. The two images must share shape, dtype and device;
+polygon presence must be consistent across both (a :meth:<code>~lucid_yolo.data.targets.Targets.concat</code>
+requirement). Rotated boxes, if any, are concatenated untouched.</p>
               </div>
             </td>
             <td>
@@ -11998,7 +11758,7 @@ Rotated boxes, if any, are concatenated untouched.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Either the blended <code>(image, targets)</code> — the convex pixel blend and the</p>
+                <p>Either the blended <code>(image, targets)</code> — the convex pixel blend and the concatenated targets — or, when</p>
               </div>
             </td>
           </tr>
@@ -12013,22 +11773,7 @@ Rotated boxes, if any, are concatenated untouched.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>concatenated targets — or, when the call does not trigger, the first</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <a class="autorefs autorefs-internal" title="            Targets
-
-
-  
-      dataclass
-   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>input pair untouched.</p>
+                <p>the call does not trigger, the first input pair untouched.</p>
               </div>
             </td>
           </tr>
@@ -12051,8 +11796,7 @@ Rotated boxes, if any, are concatenated untouched.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If <code>items</code> does not hold exactly two pairs, or the two
-images differ in shape.</p>
+                <p>If <code>items</code> does not hold exactly two pairs, or the two images differ in shape.</p>
               </div>
             </td>
           </tr>
@@ -12090,11 +11834,10 @@ images differ in shape.</p>
     <div class="doc doc-contents ">
 
         <p>Draw the trigger and, when it fires, the blend factor.</p>
-<p>The sampling half of the seam: this is the only method that touches
-:attr:<code>generator</code>, so a caller wanting a stated blend rather than a drawn one
-builds :class:<code>MixupParams</code> directly (WP-147). The trigger uniform is always
-consumed; the two gamma draws behind <code>lam</code> are consumed only when it fires,
-which is the draw order <code>__call__</code> has always had.</p>
+<p>The sampling half of the seam: this is the only method that touches :attr:<code>generator</code>, so a caller wanting a
+stated blend rather than a drawn one builds :class:<code>MixupParams</code> directly (WP-147). The trigger uniform is
+always consumed; the two gamma draws behind <code>lam</code> are consumed only when it fires, which is the draw order
+<code>__call__</code> has always had.</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -12173,8 +11916,7 @@ which is the draw order <code>__call__</code> has always had.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Exactly two <code>(image, targets)</code> pairs, as :meth:<code>__call__</code>
-requires.</p>
+                <p>Exactly two <code>(image, targets)</code> pairs, as :meth:<code>__call__</code> requires.</p>
               </div>
             </td>
             <td>
@@ -12212,26 +11954,16 @@ requires.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Either the blended <code>(image, targets)</code> or the first input pair</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><a class="autorefs autorefs-internal" title="            Targets
+                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <a class="autorefs autorefs-internal" title="            Targets
 
 
   
       dataclass
-   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a></code>
+   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a>]</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>untouched.</p>
+                <p>Either the blended <code>(image, targets)</code> or the first input pair untouched.</p>
               </div>
             </td>
           </tr>
@@ -12254,9 +11986,8 @@ requires.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If the two images differ in shape, checked only when
-<code>params</code> calls for a blend -- a pass-through never reads the second
-image, which is the behaviour <code>__call__</code> has always had.</p>
+                <p>If the two images differ in shape, checked only when <code>params</code> calls for a blend --
+a pass-through never reads the second image, which is the behaviour <code>__call__</code> has always had.</p>
               </div>
             </td>
           </tr>
@@ -12303,23 +12034,19 @@ image, which is the behaviour <code>__call__</code> has always had.</p>
 
 
         <p>Paste polygon instances from one image onto another (WP-012).</p>
-<p>The two <code>(image, targets)</code> inputs are the <strong>destination</strong> <code>a</code> and the
-<strong>source</strong> <code>b</code>. For each polygon-carrying instance of <code>b</code> a paste draw is
-taken; with probability <code>p</code> (and up to <code>max_paste</code> pastes) the instance's
-polygon is rasterised to a pixel mask, those source pixels overwrite the
-destination, and the instance's box/label/polygon are appended to <code>a</code>'s
-targets. Instances of <code>b</code> without a polygon are never pasted — the mask is
-mandatory.</p>
-<p>Because pasted instances always carry a polygon, the destination <code>a</code> must
-itself carry polygons (one ring per box) or be empty; otherwise the merged
-target set would mix polygon-present and polygon-absent instances, which
-:class:<code>~lucid_yolo.data.targets.Targets</code> rejects. This matches the segmentation
-lineage the augmentation comes from.</p>
+<p>The two <code>(image, targets)</code> inputs are the <strong>destination</strong> <code>a</code> and the <strong>source</strong> <code>b</code>. For each
+polygon-carrying instance of <code>b</code> a paste draw is taken; with probability <code>p</code> (and up to <code>max_paste</code> pastes)
+the instance's polygon is rasterised to a pixel mask, those source pixels overwrite the destination, and the
+instance's box/label/polygon are appended to <code>a</code>'s targets. Instances of <code>b</code> without a polygon are never
+pasted — the mask is mandatory.</p>
+<p>Because pasted instances always carry a polygon, the destination <code>a</code> must itself carry polygons (one ring per
+box) or be empty; otherwise the merged target set would mix polygon-present and polygon-absent instances, which
+:class:<code>~lucid_yolo.data.targets.Targets</code> rejects. This matches the segmentation lineage the augmentation
+comes from.</p>
 <p>This is an <strong>assembly, not</strong> a :class:<code>~lucid_yolo.data.transforms.GeometricTransform</code>:
 it consumes two pairs rather than one. Both images must share the same shape.</p>
-<p>Rotated boxes are <strong>not</strong> supported, for the reason the module docstring gives:
-the paste unit is a polygon mask and the oriented path carries no polygons
-(WP-056), so any input with a non-empty <code>rboxes</code> raises
+<p>Rotated boxes are <strong>not</strong> supported, for the reason the module docstring gives: the paste unit is a polygon
+mask and the oriented path carries no polygons (WP-056), so any input with a non-empty <code>rboxes</code> raises
 :class:<code>NotImplementedError</code> rather than have its rotated modality dropped.</p>
 
 
@@ -12359,9 +12086,8 @@ the paste unit is a polygon mask and the oriented path carries no polygons
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional cap on the number of instances pasted in one call.
-<code>None</code> (the default) means no cap — every candidate is drawn against
-<code>p</code>.</p>
+                <p>Optional cap on the number of instances pasted in one call. <code>None</code> (the default) means no cap —
+every candidate is drawn against <code>p</code>.</p>
               </div>
             </td>
             <td>
@@ -12377,8 +12103,8 @@ the paste unit is a polygon mask and the oriented path carries no polygons
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional :class:<code>torch.Generator</code> for seeded, reproducible paste
-draws. Defaults to <code>None</code> (global RNG).</p>
+                <p>Optional :class:<code>torch.Generator</code> for seeded, reproducible paste draws. Defaults to <code>None</code>
+(global RNG).</p>
               </div>
             </td>
             <td>
@@ -12406,8 +12132,7 @@ draws. Defaults to <code>None</code> (global RNG).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The number of instances pasted on the most recent call, or
-<code>None</code> before the first call.</p>
+                <p>The number of instances pasted on the most recent call, or <code>None</code> before the first call.</p>
               </div>
             </td>
           </tr>
@@ -12492,9 +12217,8 @@ draws. Defaults to <code>None</code> (global RNG).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Exactly two <code>(image, targets)</code> pairs — destination first,
-source second. The two images must share shape, dtype and device;
-every <code>rboxes</code> must be empty. Only source instances that carry a
+                <p>Exactly two <code>(image, targets)</code> pairs — destination first, source second. The two images must
+share shape, dtype and device; every <code>rboxes</code> must be empty. Only source instances that carry a
 polygon are paste candidates.</p>
               </div>
             </td>
@@ -12521,7 +12245,7 @@ polygon are paste candidates.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The destination image with the pasted pixels and its targets with the</p>
+                <p>The destination image with the pasted pixels and its targets with the pasted instances appended. When</p>
               </div>
             </td>
           </tr>
@@ -12536,22 +12260,7 @@ polygon are paste candidates.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>pasted instances appended. When nothing is pasted, a copy of the</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <a class="autorefs autorefs-internal" title="            Targets
-
-
-  
-      dataclass
-   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>destination image and a clone of its targets are returned.</p>
+                <p>nothing is pasted, a copy of the destination image and a clone of its targets are returned.</p>
               </div>
             </td>
           </tr>
@@ -12574,8 +12283,7 @@ polygon are paste candidates.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If <code>items</code> does not hold exactly two pairs, or the two
-images differ in shape.</p>
+                <p>If <code>items</code> does not hold exactly two pairs, or the two images differ in shape.</p>
               </div>
             </td>
           </tr>
@@ -12624,11 +12332,10 @@ images differ in shape.</p>
     <div class="doc doc-contents ">
 
         <p>Draw each of <code>candidate_count</code> candidates against <code>p</code>, up to <code>max_paste</code>.</p>
-<p>The sampling half of the seam: this is the only method that touches
-:attr:<code>generator</code>, so a caller wanting a stated selection rather than a drawn
-one builds :class:<code>CopyPasteParams</code> directly (WP-147). The draw count depends
-on the candidate count and the cap alone -- never on pixels -- which is what
-lets the loop split from the paste it used to interleave with.</p>
+<p>The sampling half of the seam: this is the only method that touches :attr:<code>generator</code>, so a caller wanting a
+stated selection rather than a drawn one builds :class:<code>CopyPasteParams</code> directly (WP-147). The draw count
+depends on the candidate count and the cap alone -- never on pixels -- which is what lets the loop split from
+the paste it used to interleave with.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -12651,8 +12358,7 @@ lets the loop split from the paste it used to interleave with.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Number of polygon-carrying source instances, i.e.
-<code>len(targets_b.polygons)</code>.</p>
+                <p>Number of polygon-carrying source instances, i.e. <code>len(targets_b.polygons)</code>.</p>
               </div>
             </td>
             <td>
@@ -12678,7 +12384,7 @@ lets the loop split from the paste it used to interleave with.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The selected indices, in paste order. Nothing is stashed on the instance</p>
+                <p>The selected indices, in paste order. Nothing is stashed on the instance -- <code>last_pasted</code> is set by</p>
               </div>
             </td>
           </tr>
@@ -12688,7 +12394,7 @@ lets the loop split from the paste it used to interleave with.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>-- <code>last_pasted</code> is set by :meth:<code>apply</code>.</p>
+                <p>meth:<code>apply</code>.</p>
               </div>
             </td>
           </tr>
@@ -12751,8 +12457,8 @@ lets the loop split from the paste it used to interleave with.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Exactly two <code>(image, targets)</code> pairs -- destination first,
-source second -- as :meth:<code>__call__</code> requires.</p>
+                <p>Exactly two <code>(image, targets)</code> pairs -- destination first, source second -- as :meth:<code>__call__</code>
+requires.</p>
               </div>
             </td>
             <td>
@@ -12794,7 +12500,7 @@ source second -- as :meth:<code>__call__</code> requires.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The destination image with the pasted pixels and its targets with the</p>
+                <p>The destination image with the pasted pixels and its targets with the pasted instances appended. When</p>
               </div>
             </td>
           </tr>
@@ -12809,22 +12515,7 @@ source second -- as :meth:<code>__call__</code> requires.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>pasted instances appended. When <code>params</code> selects nothing, a copy of the</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <a class="autorefs autorefs-internal" title="            Targets
-
-
-  
-      dataclass
-   (lucid_yolo.data.targets.Targets)" href="#lucid_yolo.data.Targets">Targets</a>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>destination image and a clone of its targets are returned.</p>
+                <p><code>params</code> selects nothing, a copy of the destination image and a clone of its targets are returned.</p>
               </div>
             </td>
           </tr>
@@ -12857,12 +12548,11 @@ source second -- as :meth:<code>__call__</code> requires.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If either input carries a non-empty <code>rboxes</code>. The guard
-is repeated here rather than left to :meth:<code>__call__</code> because <code>apply</code> is
-its own entrance (WP-147): a caller building :class:<code>CopyPasteParams</code>
-directly never passes through the wrapper, and :meth:<code>_merge</code> would drop
-the modality instead of refusing it. :meth:<code>__call__</code> keeps its own copy so
-that a rotated input is rejected <em>before</em> :meth:<code>sample</code> consumes a draw.</p>
+                <p>If either input carries a non-empty <code>rboxes</code>. The guard is repeated here rather
+than left to :meth:<code>__call__</code> because <code>apply</code> is its own entrance (WP-147): a caller building
+:class:<code>CopyPasteParams</code> directly never passes through the wrapper, and :meth:<code>_merge</code> would drop the
+modality instead of refusing it. :meth:<code>__call__</code> keeps its own copy so that a rotated input is
+rejected <em>before</em> :meth:<code>sample</code> consumes a draw.</p>
               </div>
             </td>
           </tr>

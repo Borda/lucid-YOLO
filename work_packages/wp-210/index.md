@@ -42,7 +42,7 @@
 | 0.15 | call | `segment_network_capture` | `test_segment_host_routing_and_native_fallback[record]` |
 | 0.15 | call | `oriented_network_capture` | `test_oriented_routing_leaves_cpu_images_native` |
 | 0.14 | call | `oriented_network_capture` | `test_oriented_routing_retires_then_runs_native[objective-override]` |
-| 0.14 | call | `pose_network_capture` | `test_pose_head_certificate_rejects_forward_branch_overrides` |
+| 0.14 | call | `pose_network_capture` | `test_pose_head_certificate_survives_copy_and_rejects_dispatch_overrides[forward-branch]` |
 | 0.13 | call | `network_capture` | `test_cli_accepts_network_capture_option[False-True]` |
 | 0.13 | call | `pose_network_capture` | `test_altered_pose_head_dispatch_fails_certificate[child-swap]` |
 | 0.13 | call | `pose_network_capture` | `test_pose_routing_dispatches_shared_features_to_native_head` |

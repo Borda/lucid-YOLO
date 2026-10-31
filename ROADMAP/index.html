@@ -5550,7 +5550,7 @@
 <td>087d</td>
 <td><code>perf(data): rasterise mask targets in the loader workers</code></td>
 <td>Rasterisation moves into <code>collate_detection</code>, rasterising batches in DataLoader workers ahead of the step: the grid derives from the input canvas (A15), masks travel as a bool stack split by <code>boxes_per_image</code>, and the step rejects a stack rasterised for another grid. Each ring is tested only inside its own bounding window, replacing 087c's flattened-edge batching · <a href="../work_packages/wp-087d/#wp-087d">log</a></td>
-<td><code>test_seg_training.py::test_loader_rasterises_masks_step_would_have</code>, <code>::test_loader_rasterised_masks_give_identical_loss</code>, <code>::test_masks_rasterised_for_another_grid_rejected</code>; <code>test_cli.py::test_mask_targets_follows_model_task</code>; <code>test_rasterize.py::test_windowed_rasterisation_matches_full_grid_rule</code>; seg overfit and data checksum goldens unchanged</td>
+<td><code>test_seg_training.py::test_loader_rasterises_masks_step_would_have</code>, <code>::test_loader_rasterised_masks_give_identical_loss</code>, <code>::test_masks_rasterised_for_another_grid_rejected</code>; <code>test_cli.py::test_loader_target_mode_follows_model_task</code>; <code>test_rasterize.py::test_windowed_rasterisation_matches_full_grid_rule</code>; seg overfit and data checksum goldens unchanged</td>
 <td>087c</td>
 <td>✅</td>
 </tr>
@@ -5980,7 +5980,7 @@
 <td>109</td>
 <td><code>fix(scripts): audit the binaries a wheel ships</code></td>
 <td>A third check in <code>scripts/audit_licenses.py</code> (the path as it stood here; <a href="../work_packages/wp-129/">WP-129</a> moved the script to <code>scripts/lint/audit_licenses.py</code>), over the files each wheel's <code>RECORD</code> declares, matched against a named table of copyleft native libraries. Catches the wheel that declares a permissive license, ships license documents naming no copyleft, and vendors a GPL binary regardless — <code>av</code>'s <code>libx264</code>, met while sourcing <a href="../work_packages/wp-067/">WP-067</a>'s example (D16) · <a href="../work_packages/wp-109/#wp-109">log</a></td>
-<td><code>scripts/_tests/test_audit_licenses.py::test_shipped_x264_flagged_though_nothing_declares_it</code> and <code>::test_live_environment_ships_no_unallowed_copyleft_binary</code></td>
+<td><code>scripts/_tests/test_audit_licenses.py::test_shipped_x264_flagged_without_declaration</code> and <code>::test_live_environment_ships_no_unallowed_copyleft_binary</code></td>
 <td>004</td>
 <td>✅</td>
 </tr>
@@ -5988,7 +5988,7 @@
 <td>110</td>
 <td><code>refine(cli): drop the deprecated download alias</code></td>
 <td>The removal 0.3.0 put in writing in three places — <code>[project.scripts]</code>, AGENTS.md sec. 2, the 0.3.0 changelog — carried out on schedule: the console script, the argparse parser that served only it, and its <code>__main__</code> twin. <code>lucid-data download</code> is untouched. Every operator-facing string naming the alias names the surviving spelling now, the <code>--verify</code> repair hint included — asserted runnable rather than merely present · <a href="../work_packages/wp-110/#wp-110">log</a></td>
-<td><code>tests/cli/test_cli_surface.py::test_deprecated_download_alias_gone</code> and <code>tests/data/test_download.py::TestCliVerify::test_repair_hint_names_command_that_parses</code> (node id moved under <code>TestCliVerify</code> by <a href="../work_packages/wp-128/">WP-128</a>)</td>
+<td><code>tests/cli/test_cli_surface.py::test_deprecated_download_alias_gone</code> and <code>tests/data/test_download.py::TestCliVerify::test_repair_hint_names_parseable_command</code> (node id moved under <code>TestCliVerify</code> by <a href="../work_packages/wp-128/">WP-128</a>)</td>
 <td>089, 096</td>
 <td>✅</td>
 </tr>
@@ -6244,7 +6244,7 @@
 <td>131</td>
 <td><code>feat(data): keypoints fixture, geometric-only det/obb/seg categories</code></td>
 <td>fuse-augmentations' <code>class_names(class_mode)</code> spans the whole <code>Shape</code> union regardless of <code>SyntheticConfig.shapes</code> -- animal shapes landing (<a href="../work_packages/wp-121b/">WP-121b</a>) would move det/obb/seg's frozen <code>*_num_categories</code> goldens from 4 to 16, though those fixtures only draw the 4 geometric shapes. Reported upstream; fix (<code>class_names(class_mode, shapes=...)</code>) is what <code>shapes=DEFAULT_SHAPES</code> on <code>generate_detseg_fixtures</code>/<code>generate_obb_fixtures</code> narrows -- goldens unchanged. <code>generate_keypoints_fixtures</code> is new: 12 images, <code>animal_shapes(2)</code> (duck, elephant). Pinned by git commit not PyPI version (R21) -- version string doesn't move release to release, PyPI forbids re-uploading <code>0.10.0.dev0</code> · <a href="../work_packages/wp-131/#wp-131">log</a></td>
-<td><code>tests/fixtures/test_fixtures_load.py::test_keypoints_set_loads</code>, <code>::test_keypoints_generation_deterministic</code>; <code>make gate</code> green, 27/27 goldens unchanged</td>
+<td><code>tests/fixtures/test_fixtures_load.py::test_keypoints_set_loads</code>, <code>::test_generation_deterministic</code>; <code>make gate</code> green, 27/27 goldens unchanged</td>
 <td>121b</td>
 <td>✅</td>
 </tr>
@@ -6835,7 +6835,7 @@
 <td>184</td>
 <td><code>perf(train): opt-in torch.compile of the detect objective</code></td>
 <td><code>DetectionLitModule</code> gains kw-only <code>compile_step</code> (default off): on a CUDA accelerator under <code>task="detect"</code>, <code>setup</code> compiles the extracted <code>_detect_objective</code> — forward, both decodes, assignment, dual loss — as one Inductor region through the bound method, so state-dict keys are untouched; every other backend or task warns once and stays eager (D24). <code>tal.py</code> skips <code>_check_labels</code> under tracing and writes <code>_resolve_conflicts</code>'s one-hot as an <code>arange</code> comparison so <code>N</code> is not pinned; batch and padded-GT dims are marked dynamic (enforcing). Measured x1.23 det step on an RTX PRO 6000, <code>n</code>, COCO b16; mAP parity is A78, validated 2026-09-20 on an A100 (paired 4-epoch run: x1.25, 1 recompile, loss parity <code>3.6e-5</code> with TF32 off)</td>
-<td><code>tests/ptl/test_compile.py</code> (region traces as 1 graph / 0 breaks with and without <code>capture_scalar_outputs</code>, with GTs and with none; the compiled step matches eager over five batch shapes through the enforcing marks; <code>setup</code> installs the wrapper once on a mocked CUDA accelerator, warns and stays eager off CUDA and for other tasks; keys unchanged); <code>test_module.py::test_compile_step_leaves_state_dict_keys_unchanged</code>; <code>test_cli.py::test_compile_step_flag_reaches_module</code>; <code>make gate</code> green</td>
+<td><code>tests/ptl/test_compile.py</code> (region traces as 1 graph / 0 breaks with and without <code>capture_scalar_outputs</code>, with GTs and with none; the compiled step matches eager over five batch shapes through the enforcing marks; <code>setup</code> installs the wrapper once on a mocked CUDA accelerator, warns and stays eager off CUDA and for other tasks; keys unchanged); <code>test_module.py::test_compile_step_leaves_state_dict_keys_unchanged</code>; <code>test_cli.py::test_model_flag_reaches_hparams</code>; <code>make gate</code> green</td>
 <td>183</td>
 <td>✅</td>
 </tr>
@@ -7019,7 +7019,7 @@
 <td>197b</td>
 <td><code>perf(optim): replay CUDA orthogonalization graphs</code> [DATA][GPU]</td>
 <td>Opt-in CUDA graph replay records the existing pure scalar and batched matrix iterations; gradient values are copied in, results copied out, and optimizer state stays eager. The optimizer owns a bounded workspace; other execution contracts retain the original calls (D29) · <a href="../work_packages/wp-197b/#wp-197b">log</a></td>
-<td><code>tests/optim/test_replay.py</code>; <code>test_cli.py::test_capture_orthogonalization_flag_reaches_module</code>; repeated public-COCO fits, byte parity and focused CPU/CUDA checks; full <code>make gate</code> not run</td>
+<td><code>tests/optim/test_replay.py</code>; <code>test_cli.py::test_model_flag_reaches_hparams</code>; repeated public-COCO fits, byte parity and focused CPU/CUDA checks; full <code>make gate</code> not run</td>
 <td>196</td>
 <td>🔄</td>
 </tr>

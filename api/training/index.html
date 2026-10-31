@@ -5420,17 +5420,14 @@
 
 
         <p>Lightning detector: model stack, dual-branch loss, and MuSGD (WP-034).</p>
-<p>Composes :class:<code>~lucid_yolo.models.backbone.DetectionBackbone</code>,
-:class:<code>~lucid_yolo.models.neck.DetectionNeck</code>, and
-:class:<code>~lucid_yolo.models.heads.detect.DualDetectionHead</code> through
+<p>Composes :class:<code>~lucid_yolo.models.backbone.DetectionBackbone</code>, :class:<code>~lucid_yolo.models.neck.DetectionNeck</code>,
+and :class:<code>~lucid_yolo.models.heads.detect.DualDetectionHead</code> through
 :func:<code>~lucid_yolo.models.build.build_detection_stages</code> — the same factory
-:class:<code>~lucid_yolo.models.build.Detector</code> uses, so the model the fidelity
-gate measures and the model training runs cannot drift apart (WP-087). It
-scores their dense predictions with
-:class:<code>~lucid_yolo.losses.dual_loss.DualBranchLoss</code>, and optimizes under
-Lightning automatic optimization (D4) with
-:class:<code>~lucid_yolo.optim.musgd.MuSGD</code>. See the module docstring for the A8
-constant-LR deferral, the <code>task</code> conditioning, and the :attr:<code>alpha</code> seam.</p>
+:class:<code>~lucid_yolo.models.build.Detector</code> uses, so the model the fidelity gate measures and the model training
+runs cannot drift apart (WP-087). It scores their dense predictions with
+:class:<code>~lucid_yolo.losses.dual_loss.DualBranchLoss</code>, and optimizes under Lightning automatic optimization (D4)
+with :class:<code>~lucid_yolo.optim.musgd.MuSGD</code>. See the module docstring for the A8 constant-LR deferral,
+the <code>task</code> conditioning, and the :attr:<code>alpha</code> seam.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5453,8 +5450,7 @@ constant-LR deferral, the <code>task</code> conditioning, and the :attr:<code>al
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Depth multiplier scaling per-stage repeat counts of the backbone
-and neck.</p>
+                <p>Depth multiplier scaling per-stage repeat counts of the backbone and neck.</p>
               </div>
             </td>
             <td>
@@ -5518,18 +5514,14 @@ and neck.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Supervision task; one of <code>"detect"</code>, <code>"segment"</code>, <code>"obb"</code> or
-<code>"keypoints"</code>, all four active. <code>"segment"</code> additionally builds the
-head's mask-coefficient stems and the three
+                <p>Supervision task; one of <code>"detect"</code>, <code>"segment"</code>, <code>"obb"</code> or <code>"keypoints"</code>, all four active.
+<code>"segment"</code> additionally builds the head's mask-coefficient stems and the three
 :func:<code>~lucid_yolo.models.build.build_segmentation_stages</code> branches as
-<code>proto_fusion</code>/<code>protonet</code>/<code>semantic</code>, and supervises them with the
-two mask terms below. <code>"obb"</code> instead builds both head branches'
-orientation stems (<code>predict_angle</code>, A20) and swaps the two box terms
-for their rotated counterparts (see the module docstring's table).
-<code>"keypoints"</code> builds both branches' point stems (<code>num_keypoints</code>,
-WP-122) and adds the R14 residual log-likelihood term at
-<code>keypoint_gain</code> and the OKS term at <code>oks_gain</code>, leaving every
-detection term as it was. Defaults to <code>"detect"</code>.</p>
+<code>proto_fusion</code>/<code>protonet</code>/<code>semantic</code>, and supervises them with the two mask terms below. <code>"obb"</code>
+instead builds both head branches' orientation stems (<code>predict_angle</code>, A20) and swaps the two box terms
+for their rotated counterparts (see the module docstring's table). <code>"keypoints"</code> builds both branches'
+point stems (<code>num_keypoints</code>, WP-122) and adds the R14 residual log-likelihood term at <code>keypoint_gain</code>
+and the OKS term at <code>oks_gain</code>, leaving every detection term as it was. Defaults to <code>"detect"</code>.</p>
               </div>
             </td>
             <td>
@@ -5545,15 +5537,12 @@ detection term as it was. Defaults to <code>"detect"</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Point count <code>K</code> both head branches predict under
-<code>task="keypoints"</code>; <strong>required</strong> for that task and refused for every
-other one. It has no default on purpose — <code>K</code> describes the dataset's
-annotation schema, not the method (the module docstring argues the case).
-The two directions are both errors on purpose: a missing count under
-<code>"keypoints"</code> has nothing to guess, and a count under any other task
-names a schema the head builds no stem for, so the module would train
-no points while <code>save_hyperparameters</code> recorded <code>K</code> for a reader to
-trust later.</p>
+                <p>Point count <code>K</code> both head branches predict under <code>task="keypoints"</code>; <strong>required</strong>
+for that task and refused for every other one. It has no default on purpose — <code>K</code> describes the
+dataset's annotation schema, not the method (the module docstring argues the case). The two directions are
+both errors on purpose: a missing count under <code>"keypoints"</code> has nothing to guess, and a count under any
+other task names a schema the head builds no stem for, so the module would train no points while
+<code>save_hyperparameters</code> recorded <code>K</code> for a reader to trust later.</p>
               </div>
             </td>
             <td>
@@ -5569,8 +5558,7 @@ trust later.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Base learning rate for MuSGD (<code>lr0</code>; the A8 schedule decays from
-it). Defaults to <code>0.01</code>.</p>
+                <p>Base learning rate for MuSGD (<code>lr0</code>; the A8 schedule decays from it). Defaults to <code>0.01</code>.</p>
               </div>
             </td>
             <td>
@@ -5586,9 +5574,8 @@ it). Defaults to <code>0.01</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Final LR fraction of the A8 linear decay — the LR ends at
-<code>lr * lrf</code>. <code>&gt;= 1</code> together with <code>warmup_epochs &lt;= 0</code> disables
-the schedule (constant LR). Defaults to <code>0.01</code>.</p>
+                <p>Final LR fraction of the A8 linear decay — the LR ends at <code>lr * lrf</code>. <code>&gt;= 1</code> together with
+<code>warmup_epochs &lt;= 0</code> disables the schedule (constant LR). Defaults to <code>0.01</code>.</p>
               </div>
             </td>
             <td>
@@ -5604,8 +5591,8 @@ the schedule (constant LR). Defaults to <code>0.01</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Length of the opening linear LR warmup, in epochs
-(fractions allowed). <code>0</code> disables warmup. Defaults to <code>3.0</code>.</p>
+                <p>Length of the opening linear LR warmup, in epochs (fractions allowed). <code>0</code> disables warmup.
+Defaults to <code>3.0</code>.</p>
               </div>
             </td>
             <td>
@@ -5637,8 +5624,7 @@ the schedule (constant LR). Defaults to <code>0.01</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Decoupled weight decay (matrix parameters only). Defaults to
-<code>5e-4</code>.</p>
+                <p>Decoupled weight decay (matrix parameters only). Defaults to <code>5e-4</code>.</p>
               </div>
             </td>
             <td>
@@ -5686,11 +5672,10 @@ the schedule (constant LR). Defaults to <code>0.01</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Gain on the <strong>IoU term</strong> of both loss branches — the axis-aligned
-Complete-IoU under <code>"detect"</code>/<code>"segment"</code>, and under <code>"obb"</code> the
-rotated ProbIoU that replaces it in the same slot (A49; the module
-docstring explains why the slot rather than the formula is what the name
-refers to). Defaults to <code>7.5</code>.</p>
+                <p>Gain on the <strong>IoU term</strong> of both loss branches — the axis-aligned Complete-IoU under
+<code>"detect"</code>/<code>"segment"</code>, and under <code>"obb"</code> the rotated ProbIoU that replaces it in the same slot (A49;
+the module docstring explains why the slot rather than the formula is what the name refers to).
+Defaults to <code>7.5</code>.</p>
               </div>
             </td>
             <td>
@@ -5722,9 +5707,9 @@ refers to). Defaults to <code>7.5</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Gain on the <strong>L1 box term</strong> of both branches: against the
-axis-aligned target under <code>"detect"</code>/<code>"segment"</code>, and under <code>"obb"</code>
-against the rotated box's own <code>(cx, cy, w, h)</code> (A50). Defaults to <code>6.0</code>.</p>
+                <p>Gain on the <strong>L1 box term</strong> of both branches: against the axis-aligned target under
+<code>"detect"</code>/<code>"segment"</code>, and under <code>"obb"</code> against the rotated box's own <code>(cx, cy, w, h)</code> (A50).
+Defaults to <code>6.0</code>.</p>
               </div>
             </td>
             <td>
@@ -5740,9 +5725,8 @@ against the rotated box's own <code>(cx, cy, w, h)</code> (A50). Defaults to <co
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Initial one-to-many branch weight seeding the dual loss (used
-before training and whenever the epoch schedule is inactive).
-Defaults to <code>0.5</code>.</p>
+                <p>Initial one-to-many branch weight seeding the dual loss (used before training and whenever the epoch
+schedule is inactive). Defaults to <code>0.5</code>.</p>
               </div>
             </td>
             <td>
@@ -5758,8 +5742,8 @@ Defaults to <code>0.5</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>One-to-many branch weight the progressive schedule sets on the
-first epoch (branch weights <code>(0.8, 0.2)</code>). Defaults to <code>0.8</code>.</p>
+                <p>One-to-many branch weight the progressive schedule sets on the first epoch (branch weights
+<code>(0.8, 0.2)</code>). Defaults to <code>0.8</code>.</p>
               </div>
             </td>
             <td>
@@ -5775,8 +5759,8 @@ first epoch (branch weights <code>(0.8, 0.2)</code>). Defaults to <code>0.8</cod
             </td>
             <td>
               <div class="doc-md-description">
-                <p>One-to-many branch weight the schedule ramps to on the last
-epoch (branch weights <code>(0.1, 0.9)</code>). Defaults to <code>0.1</code>.</p>
+                <p>One-to-many branch weight the schedule ramps to on the last epoch (branch weights <code>(0.1, 0.9)</code>).
+Defaults to <code>0.1</code>.</p>
               </div>
             </td>
             <td>
@@ -5792,8 +5776,8 @@ epoch (branch weights <code>(0.1, 0.9)</code>). Defaults to <code>0.1</code>.</p
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Weight on the instance-mask term under <code>task="segment"</code>,
-ignored otherwise (A38). Defaults to <code>2.5</code>.</p>
+                <p>Weight on the instance-mask term under <code>task="segment"</code>, ignored otherwise (A38).
+Defaults to <code>2.5</code>.</p>
               </div>
             </td>
             <td>
@@ -5809,8 +5793,8 @@ ignored otherwise (A38). Defaults to <code>2.5</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Weight on the auxiliary semantic term under
-<code>task="segment"</code>, ignored otherwise (A38). Defaults to <code>0.5</code>.</p>
+                <p>Weight on the auxiliary semantic term under <code>task="segment"</code>, ignored otherwise (A38).
+Defaults to <code>0.5</code>.</p>
               </div>
             </td>
             <td>
@@ -5826,15 +5810,12 @@ ignored otherwise (A38). Defaults to <code>2.5</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Weight on R1 Eq. 15's square-object angle term under
-<code>task="obb"</code>, ignored otherwise. Defaults to <code>0.25</code> (A22 — R1 does
-not state one, and :func:<code>~lucid_yolo.losses.angle_loss.square_angle_loss</code>
-returns the term pre-gain precisely so this caller owns it). Lowered
-from <code>1.0</code> by WP-093, which measured the term destabilizing angle
-regression on <strong>elongated</strong> targets: at <code>1.0</code> the oriented overfit
-cleared its floor on 1 of 5 seeds with a 0.667 spread, at <code>0.25</code> on
-4 of 5 with 0.096. See A22 for the dose-response and why the remedy is
-this gain rather than <code>lambda</code>, which R1 does state.</p>
+                <p>Weight on R1 Eq. 15's square-object angle term under <code>task="obb"</code>, ignored otherwise. Defaults to
+<code>0.25</code> (A22 — R1 does not state one, and :func:<code>~lucid_yolo.losses.angle_loss.square_angle_loss</code> returns
+the term pre-gain precisely so this caller owns it). Lowered from <code>1.0</code> by WP-093, which measured
+the term destabilizing angle regression on <strong>elongated</strong> targets: at <code>1.0</code> the oriented overfit
+cleared its floor on 1 of 5 seeds with a 0.667 spread, at <code>0.25</code> on 4 of 5 with 0.096. See A22 for the
+dose-response and why the remedy is this gain rather than <code>lambda</code>, which R1 does state.</p>
               </div>
             </td>
             <td>
@@ -5850,9 +5831,8 @@ this gain rather than <code>lambda</code>, which R1 does state.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Which of R17's two rotated-IoU losses the <code>"obb"</code> box
-term uses, <code>"hellinger"</code> (bounded, the A49 default) or
-<code>"bhattacharyya"</code> (unbounded). Ignored otherwise.</p>
+                <p>Which of R17's two rotated-IoU losses the <code>"obb"</code> box term uses, <code>"hellinger"</code> (bounded,
+the A49 default) or <code>"bhattacharyya"</code> (unbounded). Ignored otherwise.</p>
               </div>
             </td>
             <td>
@@ -5868,22 +5848,16 @@ term uses, <code>"hellinger"</code> (bounded, the A49 default) or
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Weight on the R14 residual-log-likelihood term under
-<code>task="keypoints"</code>, ignored otherwise. Defaults to <code>1.0</code> (A68), which
-is <strong>not a measured value</strong>: R14 trains RLE as an objective in its own
-right and never states a weight for it beside a detection loss, and no
-allowlisted source covers the pair. <code>1.0</code> is therefore the neutral
-placeholder — the term as the paper writes it — pending the same
-dose-response treatment WP-093 gave <code>angle_gain</code> under A22. Expect it
-to want lowering, and by orders rather than factors: the term is a
-negative log-likelihood of residuals standardized by a sigmoid <code>sigma</code>
-in <code>(0, 1)</code>, while
-:func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code> works in
-absolute input pixels, so at initialisation it is measured two orders
-above the whole detection total rather than beside it. A68 cites this
-module's <code>keypoint_gain=0</code> bit-exactness test as its validation: at
-zero the term must leave the detection objective untouched, whatever
-scale it takes at one.</p>
+                <p>Weight on the R14 residual-log-likelihood term under <code>task="keypoints"</code>, ignored otherwise.
+Defaults to <code>1.0</code> (A68), which is <strong>not a measured value</strong>: R14 trains RLE as an objective in its own
+right and never states a weight for it beside a detection loss, and no allowlisted source covers the pair.
+<code>1.0</code> is therefore the neutral placeholder — the term as the paper writes it — pending the same
+dose-response treatment WP-093 gave <code>angle_gain</code> under A22. Expect it to want lowering, and by orders
+rather than factors: the term is a negative log-likelihood of residuals standardized by a sigmoid <code>sigma</code>
+in <code>(0, 1)</code>, while :func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code> works in absolute input
+pixels, so at initialisation it is measured two orders above the whole detection total rather than beside
+it. A68 cites this module's <code>keypoint_gain=0</code> bit-exactness test as its validation: at zero the term must
+leave the detection objective untouched, whatever scale it takes at one.</p>
               </div>
             </td>
             <td>
@@ -5899,21 +5873,16 @@ scale it takes at one.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Which keypoint objective <code>task="keypoints"</code> supervises with,
-ignored otherwise. Defaults to <code>"rle"</code>, R14's full residual
-log-likelihood (:class:<code>~lucid_yolo.losses.rle_loss.RLELoss</code>) — every
-config, checkpoint and accepted figure this project has produced was
-produced under it, and the default is what keeps that true. The
-alternative, <code>"laplace_nll"</code>
-(:class:<code>~lucid_yolo.losses.keypoint_nll_loss.LaplaceNLLLoss</code>), drops the
-normalizing flow and keeps everything else, which is R14 Table 7's own
-published ablation: the two rows are "RLE" at <code>70.5</code> AP and "Laplace,
-learnable variance" at <code>67.4</code> AP on COCO. It exists for WP-125, whose
-acceptance is RLE's <em>mechanism</em> claim rather than an absolute pose
-number — a claim of that shape needs a paired run differing only in the
-mechanism, and one figure on its own cannot settle it. The switch is
-therefore an experimental control, not a tuning knob: a production pose
-run has no reason to leave the default.</p>
+                <p>Which keypoint objective <code>task="keypoints"</code> supervises with, ignored otherwise. Defaults to
+<code>"rle"</code>, R14's full residual log-likelihood (:class:<code>~lucid_yolo.losses.rle_loss.RLELoss</code>) — every
+config, checkpoint and accepted figure this project has produced was produced under it, and the default is
+what keeps that true. The alternative, <code>"laplace_nll"</code>
+(:class:<code>~lucid_yolo.losses.keypoint_nll_loss.LaplaceNLLLoss</code>), drops the normalizing flow and keeps
+everything else, which is R14 Table 7's own published ablation: the two rows are "RLE" at <code>70.5</code> AP and
+"Laplace, learnable variance" at <code>67.4</code> AP on COCO. It exists for WP-125, whose acceptance is RLE's
+<em>mechanism</em> claim rather than an absolute pose number — a claim of that shape needs a paired run differing
+only in the mechanism, and one figure on its own cannot settle it. The switch is therefore an experimental
+control, not a tuning knob: a production pose run has no reason to leave the default.</p>
               </div>
             </td>
             <td>
@@ -5929,26 +5898,19 @@ run has no reason to leave the default.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Weight on the Object-Keypoint-Similarity term
-(:class:<code>~lucid_yolo.losses.oks_loss.OKSLoss</code>, WP-178) under
-<code>task="keypoints"</code>, ignored otherwise. Defaults to <code>0.0</code> (A75), which
-is a deliberate <em>off</em> rather than a measured value. R1 sec. 3.4.2 states
-that YOLO26's pose training uses an OKS-based loss extended with RLE, and
-R1 Table 9 ablates the pair's weights <code>(w_OKS, w_RLE)</code> on COCO
-keypoints val for YOLO26s — <code>(48, 0)</code> 61.5, <code>(48, 1)</code> 60.8,
-<code>(24, 1)</code> 63.0, <code>(24, 2)</code> 62.5, <code>(12, 1)</code> 62.6, <code>(0, 1)</code> 61.9,
-<code>(0, 2)</code> 62.4 mAP — so the published target is <code>(24, 1)</code>. But R1
-gives no formula for its OKS loss and its citation is off this project's
-allowlist, so the term here is derived from R12's metric definition
-(A75), and a weight measured under a loss this project had to derive is
-not a measured value here. Shipping <code>24.0</code> as the default would make
-an untested number look like evidence while being none — A68's own
-reasoning for <code>keypoint_gain</code> — and would silently move every existing
-keypoints config off the objective its accepted figures were produced
-under. <code>0.0</code> keeps that objective bit-exact (the module's
-<code>oks_gain=0</code> bit-exactness test is its validation); the pre-gain term
-is still computed and logged as <code>train/oks</code> so a dose-response run
-against <code>(24, 1)</code> has its reading before it moves the gain.</p>
+                <p>Weight on the Object-Keypoint-Similarity term (:class:<code>~lucid_yolo.losses.oks_loss.OKSLoss</code>, WP-178)
+under <code>task="keypoints"</code>, ignored otherwise. Defaults to <code>0.0</code> (A75), which is a deliberate <em>off</em>
+rather than a measured value. R1 sec. 3.4.2 states that YOLO26's pose training uses an OKS-based loss
+extended with RLE, and R1 Table 9 ablates the pair's weights <code>(w_OKS, w_RLE)</code> on COCO keypoints val for
+YOLO26s — <code>(48, 0)</code> 61.5, <code>(48, 1)</code> 60.8, <code>(24, 1)</code> 63.0, <code>(24, 2)</code> 62.5, <code>(12, 1)</code> 62.6,
+<code>(0, 1)</code> 61.9, <code>(0, 2)</code> 62.4 mAP — so the published target is <code>(24, 1)</code>. But R1 gives no formula
+for its OKS loss and its citation is off this project's allowlist, so the term here is derived from R12's
+metric definition (A75), and a weight measured under a loss this project had to derive is not a measured
+value here. Shipping <code>24.0</code> as the default would make an untested number look like evidence while being
+none — A68's own reasoning for <code>keypoint_gain</code> — and would silently move every existing keypoints
+config off the objective its accepted figures were produced under. <code>0.0</code> keeps that objective bit-exact
+(the module's <code>oks_gain=0</code> bit-exactness test is its validation); the pre-gain term is still computed and
+logged as <code>train/oks</code> so a dose-response run against <code>(24, 1)</code> has its reading before it moves the gain.</p>
               </div>
             </td>
             <td>
@@ -5964,10 +5926,9 @@ against <code>(24, 1)</code> has its reading before it moves the gain.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Opt into CUDA target-assignment fusion. It retains the
-current objectives and native CPU/MPS, compiler and unsupported-layout paths.
-Default <code>False</code> avoids compilation cost on short or small workloads. Where
-<code>compile_step=True</code> is honoured, the compiled objective assigns natively and
+                <p>Opt into CUDA target-assignment fusion. It retains the current objectives and native CPU/MPS,
+compiler and unsupported-layout paths. Default <code>False</code> avoids compilation cost on short or small
+workloads. Where <code>compile_step=True</code> is honoured, the compiled objective assigns natively and
 :meth:<code>setup</code> warns once per <code>fit</code>.</p>
               </div>
             </td>
@@ -5984,22 +5945,17 @@ Default <code>False</code> avoids compilation cost on short or small workloads. 
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Whether to :func:<code>torch.compile</code> the detection objective —
-forward, both decodes, assignment and the dual loss as <strong>one</strong> Inductor
-region (WP-184, D24). Defaults to <code>False</code>. Honoured on a CUDA
-accelerator under <code>task="detect"</code> only; any other accelerator or task
-warns once at :meth:<code>setup</code> and stays eager (MPS Inductor crashes in
-<code>convolution_backward</code>, and the three other tasks' extra terms still
-read tensors on the host). Measured on an RTX PRO 6000 at variant <code>n</code>,
-COCO, batch 16, deterministic: the training step goes from 74.7 ms to
-60.9 ms (x1.23) against eager, for 110-140 s of compilation per process
-plus a handful of recompiles per run (the <code>no_grad</code> evaluation graph, and
-one each for a batch with no ground truths, one per image, or one
-image — Dynamo specialises sizes 0 and 1 whatever is marked). It
-compiles the bound method rather than the module, so parameter names,
-the state dict, EMA, checkpoints and export are untouched. Whether the
-compiled objective trains to the same mAP as eager is A78, still open —
-which is why the default is off.</p>
+                <p>Whether to :func:<code>torch.compile</code> the detection objective — forward, both decodes, assignment and
+the dual loss as <strong>one</strong> Inductor region (WP-184, D24). Defaults to <code>False</code>. Honoured on a CUDA
+accelerator under <code>task="detect"</code> only; any other accelerator or task warns once at :meth:<code>setup</code> and
+stays eager (MPS Inductor crashes in <code>convolution_backward</code>, and the three other tasks' extra terms
+still read tensors on the host). Measured on an RTX PRO 6000 at variant <code>n</code>, COCO, batch 16,
+deterministic: the training step goes from 74.7 ms to 60.9 ms (x1.23) against eager, for 110-140 s of
+compilation per process plus a handful of recompiles per run (the <code>no_grad</code> evaluation graph, and one each
+for a batch with no ground truths, one per image, or one image — Dynamo specialises sizes 0 and 1 whatever
+is marked). It compiles the bound method rather than the module, so parameter names, the state dict, EMA,
+checkpoints and export are untouched. Whether the compiled objective trains to the same mAP as eager is
+A78, still open — which is why the default is off.</p>
               </div>
             </td>
             <td>
@@ -6015,11 +5971,10 @@ which is why the default is off.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Enable MuSGD's optional CUDA graph replay of
-its existing Newton--Schulz calls. Defaults to <code>False</code>. Shapes,
-strides, dtype, device, step count and precision select each recording;
-this flag alone leaves learning rates, momentum and parameters outside the graphs.
-Extra workspace and setup can outweigh the saving on short runs.</p>
+                <p>Enable MuSGD's optional CUDA graph replay of its existing Newton--Schulz calls.
+Defaults to <code>False</code>. Shapes, strides, dtype, device, step count and precision select each recording; this
+flag alone leaves learning rates, momentum and parameters outside the graphs. Extra workspace and setup can
+outweigh the saving on short runs.</p>
               </div>
             </td>
             <td>
@@ -6035,34 +5990,26 @@ Extra workspace and setup can outweigh the saving on short runs.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Replay fixed detection, keypoint, oriented or segmentation network stages' CUDA
-forward and backward with :func:<code>torch.cuda.make_graphed_callables</code>. Defaults to <code>False</code>
-because capture pays setup and retains a graph pool. Requires <code>task="detect"</code>,
-<code>task="keypoints"</code>, <code>task="obb"</code> or <code>task="segment"</code>, <code>compile_step=False</code> and
-single-device CUDA automatic optimization.
-Pose records backbone, neck and each prediction stem independently, preserving
-absent point-stem gradients when a batch supplies no positives. Pose training stays eager
-with a fully frozen backbone and neck, or when
-the head's topology or class forward changed since construction or a head
-module is hooked, overridden or compiled. The trainable set is fixed per fit
-at the first recording: a fully frozen start, or a later freeze or unfreeze
-of a recorded parameter, keeps the rest of that fit eager after one warning.
-Each pose stem separately retires its recording if its trainable set or mode changes,
-and replacing a head module retires every recording before shared features run.
-Oriented training records the complete network, including both angle stems,
-and retains the native classification and oriented objective. An overridden
-objective keeps it eager. Detection, pose and oriented training
-stay eager when the LightningModule carries a hook, overrides
-<code>forward</code> or is compiled. Segmentation records only backbone and neck,
-leaving all predictions independent; <code>capture_segment_heads</code> can replay
-those predictions separately. Segmentation retires replay when the head
-topology/dispatch changes, a head hook is registered, or <code>forward_segmentation</code>
-is overridden or compiled.
-Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
-One image signature is recorded per fit; partial batches stay eager and
-changed storage, modes, hooks or precision retire the recording. Warmup
-restores buffers and RNG, and the fit callbacks discard recordings on
-completion or failure. Higher-order differentiation is unsupported.</p>
+                <p>Replay fixed detection, keypoint, oriented or segmentation network stages' CUDA forward and
+backward with :func:<code>torch.cuda.make_graphed_callables</code>. Defaults to <code>False</code> because capture pays setup
+and retains a graph pool. Requires <code>task="detect"</code>, <code>task="keypoints"</code>, <code>task="obb"</code> or
+<code>task="segment"</code>, <code>compile_step=False</code> and single-device CUDA automatic optimization. Pose records
+backbone, neck and each prediction stem independently, preserving absent point-stem gradients when a batch
+supplies no positives. Pose training stays eager with a fully frozen backbone and neck, or when the head's
+topology or class forward changed since construction or a head module is hooked, overridden or compiled.
+The trainable set is fixed per fit at the first recording: a fully frozen start, or a later freeze or
+unfreeze of a recorded parameter, keeps the rest of that fit eager after one warning. Each pose stem
+separately retires its recording if its trainable set or mode changes, and replacing a head module retires
+every recording before shared features run. Oriented training records the complete network, including both
+angle stems, and retains the native classification and oriented objective. An overridden objective keeps it
+eager. Detection, pose and oriented training stay eager when the LightningModule carries a hook, overrides
+<code>forward</code> or is compiled. Segmentation records only backbone and neck, leaving all predictions
+independent; <code>capture_segment_heads</code> can replay those predictions separately. Segmentation retires replay
+when the head topology/dispatch changes, a head hook is registered, or <code>forward_segmentation</code> is
+overridden or compiled. Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
+One image signature is recorded per fit; partial batches stay eager and changed storage, modes, hooks or
+precision retire the recording. Warmup restores buffers and RNG, and the fit callbacks discard recordings
+on completion or failure. Higher-order differentiation is unsupported.</p>
               </div>
             </td>
             <td>
@@ -6078,10 +6025,9 @@ completion or failure. Higher-order differentiation is unsupported.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Enable MuSGD's optional replay of the existing update preparation,
-including momentum, followed by a native batched parameter write at the current
-learning rate. Defaults to <code>False</code>. Uses private gradient storage and live
-parameters and momentum; unsupported signatures stay native. Like
+                <p>Enable MuSGD's optional replay of the existing update preparation, including momentum,
+followed by a native batched parameter write at the current learning rate. Defaults to <code>False</code>.
+Uses private gradient storage and live parameters and momentum; unsupported signatures stay native. Like
 <code>capture_orthogonalization</code>, this has setup and retained-workspace costs.</p>
               </div>
             </td>
@@ -6098,16 +6044,14 @@ parameters and momentum; unsupported signatures stay native. Like
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Replay the existing detection assignment and loss forward/backward,
-for detection or pose, on single-device CUDA automatic training. Default off:
-recording pays setup and retains a graph pool. Masked target capacity grows
-geometrically; the method, label checks, live branch schedule and optimizer stay
-unchanged. Requires <code>task="detect"</code> or <code>task="keypoints"</code>, and
-<code>compile_step=False</code>. Pose also batches the existing RLE densities, keeping
-visibility, separate means and branch weights. Batched parameter-gradient
-summation can change rounding. Can combine with <code>capture_network</code>,
-<code>capture_orthogonalization</code> and <code>capture_updates</code>; it records no optimizer
-update itself, so the optimizer step is whatever those optimizer options select.</p>
+                <p>Replay the existing detection assignment and loss forward/backward, for detection or pose, on
+single-device CUDA automatic training. Default off: recording pays setup and retains a graph pool. Masked
+target capacity grows geometrically; the method, label checks, live branch schedule and optimizer stay
+unchanged. Requires <code>task="detect"</code> or <code>task="keypoints"</code>, and <code>compile_step=False</code>. Pose also
+batches the existing RLE densities, keeping visibility, separate means and branch weights.
+Batched parameter-gradient summation can change rounding. Can combine with <code>capture_network</code>,
+<code>capture_orthogonalization</code> and <code>capture_updates</code>; it records no optimizer update itself, so the
+optimizer step is whatever those optimizer options select.</p>
               </div>
             </td>
             <td>
@@ -6145,15 +6089,13 @@ that is compiled.</p>
             <td>
               <div class="doc-md-description">
                 <p>Replay PyTorch's L2 gradient-norm reduction on single-device CUDA with torch&gt;=2.9.
-Default false. Native scaling reads the current clipping limit; one fit-scoped
-gradient signature is retained and drift retires recording. Value clipping,
-disabled clipping (limit <code>None</code> or at most zero), optimizers that unscale inside
-their own step, customized module/precision-plugin or PyTorch clipping,
-non-CUDA devices, unsupported torch versions and unsupported gradient layouts
-keep native clipping. Ordinary <code>16-mixed</code> GradScaler training can capture after
-unscaling; unscale-in-step optimizers retain Lightning's mixed-precision clipping
-rejection. Extra private CUDA buffers and setup cost may outweigh the gain
-outside small-batch training.</p>
+Default false. Native scaling reads the current clipping limit; one fit-scoped gradient signature is
+retained and drift retires recording. Value clipping, disabled clipping (limit <code>None</code> or at most zero),
+optimizers that unscale inside their own step, customized module/precision-plugin or PyTorch clipping,
+non-CUDA devices, unsupported torch versions and unsupported gradient layouts keep native clipping.
+Ordinary <code>16-mixed</code> GradScaler training can capture after unscaling; unscale-in-step optimizers retain
+Lightning's mixed-precision clipping rejection. Extra private CUDA buffers and setup cost may outweigh the
+gain outside small-batch training.</p>
               </div>
             </td>
             <td>
@@ -6179,15 +6121,13 @@ outside small-batch training.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If <code>task</code> is not one of <code>"detect"</code>, <code>"segment"</code>, <code>"obb"</code>,
-<code>"keypoints"</code>, if <code>rotated_iou_form</code> is not a known rotated-IoU form,
-if <code>capture_network</code> is combined with a task other than detection, keypoints,
-oriented detection or segmentation, <code>capture_loss</code> with a task other than detection
-or keypoints, <code>capture_segment_heads</code> with a non-segmentation task, or any of them
-with <code>compile_step=True</code> (for <code>capture_segment_heads</code>, forward compatibility
-with a compiled segment objective), if <code>keypoint_loss</code> is not a known keypoint
-objective, if <code>task="keypoints"</code> was asked for without a <code>num_keypoints</code>, or if
-a <code>num_keypoints</code> was given for a task that builds no point stem.</p>
+                <p>If <code>task</code> is not one of <code>"detect"</code>, <code>"segment"</code>, <code>"obb"</code>, <code>"keypoints"</code>, if
+<code>rotated_iou_form</code> is not a known rotated-IoU form, if <code>capture_network</code> is combined with a task other
+than detection, keypoints, oriented detection or segmentation, <code>capture_loss</code> with a task other than
+detection or keypoints, <code>capture_segment_heads</code> with a non-segmentation task, or any of them with
+<code>compile_step=True</code> (for <code>capture_segment_heads</code>, forward compatibility with a compiled segment
+objective), if <code>keypoint_loss</code> is not a known keypoint objective, if <code>task="keypoints"</code> was asked for
+without a <code>num_keypoints</code>, or if a <code>num_keypoints</code> was given for a task that builds no point stem.</p>
               </div>
             </td>
           </tr>
@@ -6243,14 +6183,11 @@ a <code>num_keypoints</code> was given for a task that builds no point stem.</p>
     <div class="doc doc-contents ">
 
         <p>Supervision task this module was built for: <code>"detect"</code>, <code>"segment"</code>, <code>"obb"</code> or <code>"keypoints"</code>.</p>
-<p>Read-only, and the supported way for a consumer to ask whether a loaded
-checkpoint has a mask branch, an angle branch or a keypoint branch —
-:meth:<code>forward_segmentation</code> gates on this
-same value, so the caller's question and the module's own behaviour cannot
-answer differently. Reading <code>hparams["task"]</code> instead would be a
-stringly-typed lookup into a bag that is only as complete as the
-checkpoint that filled it, and it raises rather than defaulting when a
-checkpoint predates the hyperparameter.</p>
+<p>Read-only, and the supported way for a consumer to ask whether a loaded checkpoint has a mask branch, an angle
+branch or a keypoint branch — :meth:<code>forward_segmentation</code> gates on this same value, so the caller's question
+and the module's own behaviour cannot answer differently. Reading <code>hparams["task"]</code> instead would be a
+stringly-typed lookup into a bag that is only as complete as the checkpoint that filled it, and it raises
+rather than defaulting when a checkpoint predates the hyperparameter.</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -6323,7 +6260,7 @@ checkpoint predates the hyperparameter.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The current :attr:<code>DualBranchLoss.alpha</code>; setting it rewrites the</p>
+                <p>The current :attr:<code>DualBranchLoss.alpha</code>; setting it rewrites the underlying loss attribute so a scheduler</p>
               </div>
             </td>
           </tr>
@@ -6333,7 +6270,7 @@ checkpoint predates the hyperparameter.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>underlying loss attribute so a scheduler can update the ramp per epoch.</p>
+                <p>can update the ramp per epoch.</p>
               </div>
             </td>
           </tr>
@@ -6369,18 +6306,15 @@ checkpoint predates the hyperparameter.</p>
     <div class="doc doc-contents ">
 
         <p>Record Lightning hyperparameters, with <code>task</code> in its plain spelling, on every save.</p>
-<p>The plain spelling, even when a :class:<code>~lucid_yolo.tasks.Task</code> member was passed:
-a checkpoint loads under <code>torch.load(weights_only=True)</code>, whose restricted
-unpickler refuses a <code>Task</code> in <code>hparams["task"]</code>. Normalizing the constructor's
-local before the call is not enough, because the save merges every subclass
-<code>__init__</code> frame's arguments over this one's, <code>**kwargs</code> contents included, and
-correcting the record once after the constructor's own call is not enough either,
-because a subclass may save again after <code>super().__init__</code> returns. So every save
-corrects both records it wrote: <code>hparams</code>, which the checkpoint stores, and the
-initial snapshot a logger writes. The arguments keep Lightning's meaning; with no
-<code>frame</code>, the caller's frame is passed on, since Lightning would otherwise inspect
-this override's. A hyperparameter dict given without <code>task</code> (LightningCLI's path)
-stays as given.</p>
+<p>The plain spelling, even when a :class:<code>~lucid_yolo.tasks.Task</code> member was passed: a checkpoint loads under
+<code>torch.load(weights_only=True)</code>, whose restricted unpickler refuses a <code>Task</code> in <code>hparams["task"]</code>.
+Normalizing the constructor's local before the call is not enough, because the save merges every subclass
+<code>__init__</code> frame's arguments over this one's, <code>**kwargs</code> contents included, and correcting the record once
+after the constructor's own call is not enough either, because a subclass may save again after
+<code>super().__init__</code> returns. So every save corrects both records it wrote: <code>hparams</code>, which the checkpoint
+stores, and the initial snapshot a logger writes. The arguments keep Lightning's meaning; with no <code>frame</code>,
+the caller's frame is passed on, since Lightning would otherwise inspect this override's. A hyperparameter dict
+given without <code>task</code> (LightningCLI's path) stays as given.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6488,25 +6422,21 @@ stays as given.</p>
     <div class="doc doc-contents ">
 
         <p>Pick the CUDA memory layout and objective, then refuse multi-process runs the protocols cannot gather.</p>
-<p>With <code>compile_step</code> on, :meth:<code>_compile_objective</code> decides once whether the
-detection objective is compiled (CUDA accelerator, <code>"detect"</code> task) or stays
-eager with a warning naming why; a second <code>setup</code> — <code>fit</code> then <code>validate</code>
-— changes nothing.</p>
-<p>On a CUDA accelerator the parameters are converted to <code>channels_last</code> (NHWC),
-the layout cuDNN's convolution kernels prefer: eager training of the <code>n</code> model
-stepped 8% faster on an RTX PRO 6000 with no other change, and the datamodule
-hands over its images in the same layout so no op has to permute. This hook is
-where the conversion belongs because it runs before device placement and before
-every callback's <code>on_fit_start</code> — so :class:<code>EMACallback</code>'s shadow, cloned
-there, inherits the layout rather than averaging across a permute. The decision
-reads the trainer's accelerator rather than :func:<code>torch.cuda.is_available</code>,
-which is true on a CUDA box that was asked for <code>accelerator="cpu"</code>, and it is
-not a flag: CPU and MPS keep their default layout and their bit-exact goldens,
-and there is nothing to configure on the one backend where the layout pays. A
+<p>With <code>compile_step</code> on, :meth:<code>_compile_objective</code> decides once whether the detection objective is compiled
+(CUDA accelerator, <code>"detect"</code> task) or stays eager with a warning naming why; a second <code>setup</code> — <code>fit</code>
+then <code>validate</code> — changes nothing.</p>
+<p>On a CUDA accelerator the parameters are converted to <code>channels_last</code> (NHWC), the layout cuDNN's convolution
+kernels prefer: eager training of the <code>n</code> model stepped 8% faster on an RTX PRO 6000 with no other change,
+and the datamodule hands over its images in the same layout so no op has to permute. This hook is where the
+conversion belongs because it runs before device placement and before every callback's <code>on_fit_start</code> — so
+:class:<code>EMACallback</code>'s shadow, cloned there, inherits the layout rather than averaging across a permute.
+The decision reads the trainer's accelerator rather than :func:<code>torch.cuda.is_available</code>, which is true on a
+CUDA box that was asked for <code>accelerator="cpu"</code>, and it is not a flag: CPU and MPS keep their default layout
+and their bit-exact goldens, and there is nothing to configure on the one backend where the layout pays. A
 module with no trainer attached is left as built.</p>
-<p>All task metrics gather whole-epoch records across ranks before scoring.
-Rotated and keypoint metrics also drop sampler padding by dataset identity,
-retaining the original sequential validation order and scoring protocols.</p>
+<p>All task metrics gather whole-epoch records across ranks before scoring. Rotated and keypoint metrics also
+drop sampler padding by dataset identity, retaining the original sequential validation order
+and scoring protocols.</p>
 <p>Setting up <code>"fit"</code> also re-arms the once-per-fit gradient-snapshot-skip verdict that
 :meth:<code>_report_native_closure</code> logs at the first training step.</p>
 
@@ -6586,12 +6516,11 @@ retaining the original sequential validation order and scoring protocols.</p>
     <div class="doc doc-contents ">
 
         <p>Optionally record the norm reduction while retaining native clipping semantics.</p>
-<p>Ordinary FP16 GradScaler gradients are already unscaled before this hook and
-can use capture. Optimizers that unscale inside their own step keep the native
-call, including Lightning's mixed-precision clipping rejection. Value or disabled
-clipping retires capture once, as does customized module or precision-plugin
-clipping, with the latter diagnostic naming the plugin type. Plugins inheriting
-the checked stock clipping methods through their MRO remain eligible.</p>
+<p>Ordinary FP16 GradScaler gradients are already unscaled before this hook and can use capture. Optimizers that
+unscale inside their own step keep the native call, including Lightning's mixed-precision clipping rejection.
+Value or disabled clipping retires capture once, as does customized module or precision-plugin clipping, with
+the latter diagnostic naming the plugin type. Plugins inheriting the checked stock clipping methods through
+their MRO remain eligible.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6677,13 +6606,10 @@ Algorithms other than <code>"norm"</code> keep native clipping.</p>
     <div class="doc doc-contents ">
 
         <p>Ramp the dual-loss branch weight for the epoch about to start (WP-035).</p>
-<p>Sets :attr:<code>alpha</code> to
-:meth:<code>~lucid_yolo.losses.progressive.ProgressiveLossSchedule.alpha_at</code>
-evaluated at the current 0-based epoch and the trainer's total epoch
-count — the linear R1 Eq. 2-3 ramp updated once per epoch. When
-<code>trainer.max_epochs</code> is unset (<code>None</code> or <code>&lt;= 0</code>, as for a
-step-bounded or <code>fast_dev_run</code> run) the ramp denominator is undefined,
-so <code>alpha</code> is left at its seeded value.</p>
+<p>Sets :attr:<code>alpha</code> to :meth:<code>~lucid_yolo.losses.progressive.ProgressiveLossSchedule.alpha_at</code> evaluated at
+the current 0-based epoch and the trainer's total epoch count — the linear R1 Eq. 2-3 ramp updated once per
+epoch. When <code>trainer.max_epochs</code> is unset (<code>None</code> or <code>&lt;= 0</code>, as for a step-bounded or
+<code>fast_dev_run</code> run) the ramp denominator is undefined, so <code>alpha</code> is left at its seeded value.</p>
 
 
 <p><span class="doc-section-title">Examples:</span></p>
@@ -6733,8 +6659,7 @@ so <code>alpha</code> is left at its seeded value.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Input batch of shape <code>(B, 3, H, W)</code> with <code>H</code> and <code>W</code>
-divisible by 32.</p>
+                <p>Input batch of shape <code>(B, 3, H, W)</code> with <code>H</code> and <code>W</code> divisible by 32.</p>
               </div>
             </td>
             <td>
@@ -6765,7 +6690,7 @@ divisible by 32.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>class:<code>~lucid_yolo.models.heads.detect.DualHeadOutput</code> dense</p>
+                <p>class:<code>~lucid_yolo.models.heads.detect.DualHeadOutput</code> dense predictions (raw class logits and raw</p>
               </div>
             </td>
           </tr>
@@ -6780,22 +6705,7 @@ divisible by 32.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>predictions (raw class logits and raw <code>ltrb</code> distances) of both</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-<td></td>            <td>
-                  <code><a class="autorefs autorefs-internal" title="            DualHeadOutput
-
-
-  
-      dataclass
-   (lucid_yolo.models.heads.detect.DualHeadOutput)" href="../models/#lucid_yolo.models.DualHeadOutput">DualHeadOutput</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>branches.</p>
+                <p><code>ltrb</code> distances) of both branches.</p>
               </div>
             </td>
           </tr>
@@ -6831,16 +6741,13 @@ divisible by 32.</p>
     <div class="doc doc-contents ">
 
         <p>Run the detection <strong>and</strong> mask branches over an image batch (WP-087).</p>
-<p>:meth:<code>forward</code> returns the detection head's output alone, because that is
-what every detection consumer — the E2E decode, the mAP metric, the export
-path — asks for. Segmentation needs the prototype maps and the auxiliary
-logits from the <em>same</em> neck features, so this is the second entry point,
-and it is the module's only composition of the mask side: the training
-step and the overfit gate both call it rather than re-running
-<code>backbone -&gt; neck -&gt; proto_fusion -&gt; protonet</code> themselves, which is how
-the two would drift apart.</p>
-<p>The auxiliary semantic branch is training-only (A17) and returns <code>None</code>
-in eval mode; the prototypes are produced in both modes.</p>
+<p>:meth:<code>forward</code> returns the detection head's output alone, because that is what every detection consumer —
+the E2E decode, the mAP metric, the export path — asks for. Segmentation needs the prototype maps and the
+auxiliary logits from the <em>same</em> neck features, so this is the second entry point, and it is the module's only
+composition of the mask side: the training step and the overfit gate both call it rather than re-running
+<code>backbone -&gt; neck -&gt; proto_fusion -&gt; protonet</code> themselves, which is how the two would drift apart.</p>
+<p>The auxiliary semantic branch is training-only (A17) and returns <code>None</code> in eval mode; the prototypes are
+produced in both modes.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6863,8 +6770,7 @@ in eval mode; the prototypes are produced in both modes.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Input batch of shape <code>(B, 3, H, W)</code> with <code>H</code> and <code>W</code>
-divisible by 32.</p>
+                <p>Input batch of shape <code>(B, 3, H, W)</code> with <code>H</code> and <code>W</code> divisible by 32.</p>
               </div>
             </td>
             <td>
@@ -6895,7 +6801,7 @@ divisible by 32.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>class:<code>~lucid_yolo.models.build.SegmentOutput</code> holding the dual</p>
+                <p>class:<code>~lucid_yolo.models.build.SegmentOutput</code> holding the dual head's dense predictions (including both</p>
               </div>
             </td>
           </tr>
@@ -6910,22 +6816,7 @@ divisible by 32.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>head's dense predictions (including both branches' mask</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-<td></td>            <td>
-                  <code><a class="autorefs autorefs-internal" title="            SegmentOutput
-
-
-  
-      dataclass
-   (lucid_yolo.models.build.SegmentOutput)" href="../models/#lucid_yolo.models.SegmentOutput">SegmentOutput</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>coefficients), the raw prototype maps, and the auxiliary logits.</p>
+                <p>branches' mask coefficients), the raw prototype maps, and the auxiliary logits.</p>
               </div>
             </td>
           </tr>
@@ -6948,9 +6839,8 @@ divisible by 32.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If this module's task is not <code>"segment"</code> — the mask
-branches are only built for that task, so any other task has no
-prototypes to return.</p>
+                <p>If this module's task is not <code>"segment"</code> — the mask branches are only built for that task,
+so any other task has no prototypes to return.</p>
               </div>
             </td>
           </tr>
@@ -6990,14 +6880,13 @@ prototypes to return.</p>
     <div class="doc doc-contents ">
 
         <p>Run the backbone, neck, and <strong>one</strong> head branch over an image batch.</p>
-<p>:meth:<code>forward</code> returns both branches because training reads both. Every
-inference decode reads exactly one: the top-k path the one-to-one branch, the
-suppression path the one-to-many. Called through :meth:<code>forward</code>, the other
-branch's stems run over all three levels and their outputs are discarded, so this
-is the entry point for a caller that already knows which half it will read.</p>
-<p>The composition is deliberately the same three calls :meth:<code>forward</code> makes, with
-only the head's own branch selection narrowed -- the backbone and neck are shared
-by both branches and are not run twice or run differently here.</p>
+<p>:meth:<code>forward</code> returns both branches because training reads both. Every inference decode reads exactly one:
+the top-k path the one-to-one branch, the suppression path the one-to-many. Called through :meth:<code>forward</code>, the
+other branch's stems run over all three levels and their outputs are discarded, so this is the entry point for
+a caller that already knows which half it will read.</p>
+<p>The composition is deliberately the same three calls :meth:<code>forward</code> makes, with only the head's own branch
+selection narrowed -- the backbone and neck are shared by both branches and are not run twice or run
+differently here.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7020,8 +6909,7 @@ by both branches and are not run twice or run differently here.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Input batch of shape <code>(B, 3, H, W)</code> with <code>H</code> and <code>W</code>
-divisible by 32.</p>
+                <p>Input batch of shape <code>(B, 3, H, W)</code> with <code>H</code> and <code>W</code> divisible by 32.</p>
               </div>
             </td>
             <td>
@@ -7037,8 +6925,7 @@ divisible by 32.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Which head branch to run, one of
-:data:<code>~lucid_yolo.models.heads.detect.BRANCH_NAMES</code>.</p>
+                <p>Which head branch to run, one of :data:<code>~lucid_yolo.models.heads.detect.BRANCH_NAMES</code>.</p>
               </div>
             </td>
             <td>
@@ -7064,17 +6951,7 @@ divisible by 32.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>That branch's</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="lucid_yolo.models.heads.detect.BranchOutput">BranchOutput</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>class:<code>~lucid_yolo.models.heads.detect.BranchOutput</code> dense predictions.</p>
+                <p>That branch's :class:<code>~lucid_yolo.models.heads.detect.BranchOutput</code> dense predictions.</p>
               </div>
             </td>
           </tr>
@@ -7133,14 +7010,12 @@ divisible by 32.</p>
     <div class="doc doc-contents ">
 
         <p>Run <strong>one</strong> head branch and the prototype maps over an image batch.</p>
-<p>The branch-limited twin of :meth:<code>forward_segmentation</code>, and the mask side's
-reason for existing is the same as the detection side's: Eq. 7 reads the
-coefficients of the branch its decoder read, never both.</p>
-<p>Two things are dropped rather than returned. The other branch's stems -- including
-its coefficient stem, which is the widest of the optional ones -- are never run.
-The auxiliary semantic head is not run either: it is training-only (A17) and
-already returns <code>None</code> in eval mode, so a caller decoding masks has nothing to
-read from it. What remains is exactly the pair Eq. 7 multiplies.</p>
+<p>The branch-limited twin of :meth:<code>forward_segmentation</code>, and the mask side's reason for existing is the same as
+the detection side's: Eq. 7 reads the coefficients of the branch its decoder read, never both.</p>
+<p>Two things are dropped rather than returned. The other branch's stems -- including its coefficient stem, which
+is the widest of the optional ones -- are never run. The auxiliary semantic head is not run either: it is
+training-only (A17) and already returns <code>None</code> in eval mode, so a caller decoding masks has nothing to read
+from it. What remains is exactly the pair Eq. 7 multiplies.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7163,8 +7038,7 @@ read from it. What remains is exactly the pair Eq. 7 multiplies.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Input batch of shape <code>(B, 3, H, W)</code> with <code>H</code> and <code>W</code>
-divisible by 32.</p>
+                <p>Input batch of shape <code>(B, 3, H, W)</code> with <code>H</code> and <code>W</code> divisible by 32.</p>
               </div>
             </td>
             <td>
@@ -7180,8 +7054,7 @@ divisible by 32.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Which head branch to run, one of
-:data:<code>~lucid_yolo.models.heads.detect.BRANCH_NAMES</code>.</p>
+                <p>Which head branch to run, one of :data:<code>~lucid_yolo.models.heads.detect.BRANCH_NAMES</code>.</p>
               </div>
             </td>
             <td>
@@ -7240,9 +7113,8 @@ divisible by 32.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If this module's task is not <code>"segment"</code> -- the mask branches
-are only built for that task, so any other task has no prototypes to
-return; or if <code>branch</code> is not a known branch name.</p>
+                <p>If this module's task is not <code>"segment"</code> -- the mask branches are only built for that task,
+so any other task has no prototypes to return; or if <code>branch</code> is not a known branch name.</p>
               </div>
             </td>
           </tr>
@@ -7304,8 +7176,8 @@ return; or if <code>branch</code> is not a known branch name.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The datamodule batch <code>(images, list[Targets], masks)</code>; the
-two-element <code>(images, list[Targets])</code> form rasterises in the step.</p>
+                <p>The datamodule batch <code>(images, list[Targets], masks)</code>; the two-element <code>(images, list[Targets])</code>
+form rasterises in the step.</p>
               </div>
             </td>
             <td>
@@ -7373,18 +7245,14 @@ two-element <code>(images, list[Targets])</code> form rasterises in the step.</p
     <div class="doc doc-contents ">
 
         <p>Omit snapshots that the native closure clears before backward.</p>
-<p>Only detection network replay with accumulation one and the native
-pass-through profiler qualifies. The native forward runs inside the
-permission; zeroing, backward and subsequent
-callbacks run outside it. Restoring the closure in <code>finally</code> keeps a
-failed or reused closure from retaining the wrapper. Custom zeroing,
-observers, strategies, precision plugins, optimizer wrappers and a
-closure whose own <code>closure</code> method was replaced on the instance keep
-the original snapshots. Lightning minors beyond the inspected 2.4-2.6
-contract also retain them. This hook only filters on the replay flag
-and the closure's shape; the certificate, evaluated as the forward
-starts, decides. The first step of a fit logs the verdict once, at
-rank-zero info level: active, or the first check that failed.</p>
+<p>Only detection network replay with accumulation one and the native pass-through profiler qualifies. The native
+forward runs inside the permission; zeroing, backward and subsequent callbacks run outside it. Restoring the
+closure in <code>finally</code> keeps a failed or reused closure from retaining the wrapper. Custom zeroing, observers,
+strategies, precision plugins, optimizer wrappers and a closure whose own <code>closure</code> method was replaced on
+the instance keep the original snapshots. Lightning minors beyond the inspected 2.4-2.6 contract also retain
+them. This hook only filters on the replay flag and the closure's shape; the certificate, evaluated as the
+forward starts, decides. The first step of a fit logs the verdict once, at rank-zero info level: active, or the
+first check that failed.</p>
 
 
     </div>
@@ -7405,34 +7273,25 @@ rank-zero info level: active, or the first check that failed.</p>
     <div class="doc doc-contents ">
 
         <p>Run one validation step: shared forward and loss, plus the mAP update.</p>
-<p>Beyond the <code>val/</code>-logged loss, the one-to-one branch is decoded with
-the E2E :class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</code> from the same
-forward and accumulated into the epoch's
-:class:<code>~torchmetrics.detection.MeanAveragePrecision</code> (WP-077), logged
-as <code>val/mAP</code> by :meth:<code>on_validation_epoch_end</code>. Scoring runs in
-letterbox coordinates — IoU is invariant to each image's uniform
-letterbox scaling, so the number tracks the original-coordinate
-protocol closely; the acceptance figure remains <code>lucid-eval</code>
-(original coordinates, both paths).</p>
-<p>A <code>"segment"</code> module additionally decodes the kept detections' masks
-and accumulates <code>val/segm_mAP</code> (:meth:<code>_update_val_segm</code>), so a
-segmentation run reports the quality of the branch it exists for rather
-than of its boxes alone. That needs the ground-truth masks, which only a
-loader built with <code>mask_targets=True</code> supplies — the CLI links that
-flag to <code>model.task</code>, and a batch without them is scored on boxes only
-rather than rasterised a second time here.</p>
-<p>An <code>"obb"</code> module accumulates the WP-063 rotated mAP
-(:meth:<code>_update_val_rotated</code>) <strong>instead of</strong> <code>val/mAP</code>, not beside it
-(WP-102): the axis-aligned figure reads the A44 composition's
-<em>pre-rotation</em> rectangle, so a run whose orientations were random and one
-whose orientations were right log the identical curve, and the acceptance
-number would otherwise first appear hours after the run.</p>
-<p>A <code>"keypoints"</code> module additionally decodes the kept detections' points
-and accumulates <code>val/oks_mAP</code> (:meth:<code>_update_val_keypoints</code>, WP-137),
-the same "beside <code>val/mAP</code>" relationship <code>"segment"</code> has: the box
-branch and the point branch answer different questions, and a run whose
-boxes are fine but whose points have not yet wired up should not read as
-healthy on the one number that was already there.</p>
+<p>Beyond the <code>val/</code>-logged loss, the one-to-one branch is decoded with the E2E
+:class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</code> from the same forward and accumulated into the epoch's
+:class:<code>~torchmetrics.detection.MeanAveragePrecision</code> (WP-077), logged as <code>val/mAP</code> by
+:meth:<code>on_validation_epoch_end</code>. Scoring runs in letterbox coordinates — IoU is invariant to each image's
+uniform letterbox scaling, so the number tracks the original-coordinate protocol closely; the acceptance figure
+remains <code>lucid-eval</code> (original coordinates, both paths).</p>
+<p>A <code>"segment"</code> module additionally decodes the kept detections' masks and accumulates <code>val/segm_mAP</code>
+(:meth:<code>_update_val_segm</code>), so a segmentation run reports the quality of the branch it exists for rather than
+of its boxes alone. That needs the ground-truth masks, which only a loader built with <code>mask_targets=True</code>
+supplies — the CLI links that flag to <code>model.task</code>, and a batch without them is scored on boxes only rather
+than rasterised a second time here.</p>
+<p>An <code>"obb"</code> module accumulates the WP-063 rotated mAP (:meth:<code>_update_val_rotated</code>) <strong>instead of</strong>
+<code>val/mAP</code>, not beside it (WP-102): the axis-aligned figure reads the A44 composition's <em>pre-rotation</em>
+rectangle, so a run whose orientations were random and one whose orientations were right log the identical
+curve, and the acceptance number would otherwise first appear hours after the run.</p>
+<p>A <code>"keypoints"</code> module additionally decodes the kept detections' points and accumulates <code>val/oks_mAP</code>
+(:meth:<code>_update_val_keypoints</code>, WP-137), the same "beside <code>val/mAP</code>" relationship <code>"segment"</code> has:
+the box branch and the point branch answer different questions, and a run whose boxes are fine but whose points
+have not yet wired up should not read as healthy on the one number that was already there.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7455,8 +7314,8 @@ healthy on the one number that was already there.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The datamodule batch <code>(images, list[Targets], masks)</code>; the
-two-element <code>(images, list[Targets])</code> form rasterises in the step.</p>
+                <p>The datamodule batch <code>(images, list[Targets], masks)</code>; the two-element <code>(images, list[Targets])</code>
+form rasterises in the step.</p>
               </div>
             </td>
             <td>
@@ -7524,27 +7383,21 @@ two-element <code>(images, list[Targets])</code> form rasterises in the step.</p
     <div class="doc doc-contents ">
 
         <p>Compute and log the epoch's E2E <code>val/mAP</code> (progress-bar metric), then reset.</p>
-<p>A <code>"segment"</code> run additionally logs <code>val/segm_mAP</code>, whenever any batch
-of the epoch carried ground-truth masks; an <code>"obb"</code> run logs the WP-063
-<code>val/rotated_mAP</code> and <code>val/rotated_mAP50</code> over everything the epoch saw
-and logs <strong>no</strong> <code>val/mAP</code> at all (WP-102): that figure reads the A44
-composition's pre-rotation rectangle, so it cannot separate a run whose
-orientations were right from one whose orientations were random, and its
-accumulator costs a CPU pass over every detection of every batch to say so.
-The rotated metric is the one an oriented run is asking for; carrying a
-second one that answers a different question is not a free comparison.</p>
-<p>A <code>"keypoints"</code> run additionally logs <code>val/oks_mAP</code> (WP-137,
-:meth:<code>_log_oks_map</code>), beside <code>val/mAP</code> rather than instead of it, for
-the same reason <code>val/segm_mAP</code> sits beside <code>val/mAP</code> and not the
-other way <code>val/rotated_mAP</code> does.</p>
-<p>The <code>val/segm_mAP</code> guard is reduced across processes before it is read.
-:meth:<code>~torchmetrics.Metric.compute</code> synchronises collectively, so a rank
-that happened to draw a shard without mask targets must still enter it —
-deciding to skip on that rank alone would leave the others waiting inside
-the collective for a call that never comes. The reduction is <code>any</code>: one
-rank with masks makes the metric well-defined for all of them, and on a
-single process it is the identity, so the accepted single-device behaviour
-is unchanged.</p>
+<p>A <code>"segment"</code> run additionally logs <code>val/segm_mAP</code>, whenever any batch of the epoch carried ground-truth
+masks; an <code>"obb"</code> run logs the WP-063 <code>val/rotated_mAP</code> and <code>val/rotated_mAP50</code> over everything the
+epoch saw and logs <strong>no</strong> <code>val/mAP</code> at all (WP-102): that figure reads the A44 composition's pre-rotation
+rectangle, so it cannot separate a run whose orientations were right from one whose orientations were random,
+and its accumulator costs a CPU pass over every detection of every batch to say so. The rotated metric is the
+one an oriented run is asking for; carrying a second one that answers a different question is not a free
+comparison.</p>
+<p>A <code>"keypoints"</code> run additionally logs <code>val/oks_mAP</code> (WP-137, :meth:<code>_log_oks_map</code>), beside <code>val/mAP</code>
+rather than instead of it, for the same reason <code>val/segm_mAP</code> sits beside <code>val/mAP</code> and not the other way
+<code>val/rotated_mAP</code> does.</p>
+<p>The <code>val/segm_mAP</code> guard is reduced across processes before it is read. :meth:<code>~torchmetrics.Metric.compute</code>
+synchronises collectively, so a rank that happened to draw a shard without mask targets must still enter it —
+deciding to skip on that rank alone would leave the others waiting inside the collective for a call that never
+comes. The reduction is <code>any</code>: one rank with masks makes the metric well-defined for all of them, and on a
+single process it is the identity, so the accepted single-device behaviour is unchanged.</p>
 
 
     </div>
@@ -7565,30 +7418,22 @@ is unchanged.</p>
     <div class="doc doc-contents ">
 
         <p>Return MuSGD, paired with the A8 warmup + linear-decay LR schedule.</p>
-<p>The schedule (WP-072) is a per-step
-:class:<code>~torch.optim.lr_scheduler.LambdaLR</code> over
-:func:<code>~lucid_yolo.optim.schedule.warmup_decay_factor</code>: a linear warmup
-across the first <code>warmup_epochs</code> epochs, then a linear decay from
-<code>lr</code> down to <code>lr * lrf</code> at the trainer's estimated final step. The
-bare constant-LR optimizer is returned instead when the schedule is
-explicitly disabled (<code>lrf &gt;= 1</code> and <code>warmup_epochs &lt;= 0</code>), when no
-trainer is attached (direct calls in tests and tools), or when the run
-has no positive <code>max_epochs</code> to anchor the warmup fraction.</p>
-<p>The warmup length is a <strong>fraction of the run</strong>, so a short run can ask
-for more warmup steps than it has steps: <code>warmup_epochs=3</code> against a
-two-epoch smoke budget is config-reachable and is exactly the shape the
-short tiers get launched at. Left alone, every step would take the ramp
-branch — the LR would climb for the whole run, peak below <code>lr</code>, and
-never decay, with nothing saying so. The count is clamped to
-<code>total_steps - 1</code>, which recovers the peak but not the decay: a run
-whose requested warmup covers it has no steps left to decay over, so the
-clamp buys back only the ramp reaching full <code>lr</code> on the final step.
-That is the ceiling of what a clamp can do here, which is why it warns
-rather than applying silently — the recipe cannot be honoured, and the
-honest signal is to say which schedule actually ran. Clamping rather
-than raising keeps the launchable run launchable: a crash here would
-fail a run over a schedule detail on the tier where the schedule matters
-least.</p>
+<p>The schedule (WP-072) is a per-step :class:<code>~torch.optim.lr_scheduler.LambdaLR</code> over
+:func:<code>~lucid_yolo.optim.schedule.warmup_decay_factor</code>: a linear warmup across the first <code>warmup_epochs</code>
+epochs, then a linear decay from <code>lr</code> down to <code>lr * lrf</code> at the trainer's estimated final step. The bare
+constant-LR optimizer is returned instead when the schedule is explicitly disabled (<code>lrf &gt;= 1</code> and
+<code>warmup_epochs &lt;= 0</code>), when no trainer is attached (direct calls in tests and tools), or when the run has
+no positive <code>max_epochs</code> to anchor the warmup fraction.</p>
+<p>The warmup length is a <strong>fraction of the run</strong>, so a short run can ask for more warmup steps than it has
+steps: <code>warmup_epochs=3</code> against a two-epoch smoke budget is config-reachable and is exactly the shape the
+short tiers get launched at. Left alone, every step would take the ramp branch — the LR would climb for the
+whole run, peak below <code>lr</code>, and never decay, with nothing saying so. The count is clamped to
+<code>total_steps - 1</code>, which recovers the peak but not the decay: a run whose requested warmup covers it has no
+steps left to decay over, so the clamp buys back only the ramp reaching full <code>lr</code> on the final step. That is
+the ceiling of what a clamp can do here, which is why it warns rather than applying silently — the recipe
+cannot be honoured, and the honest signal is to say which schedule actually ran. Clamping rather than raising
+keeps the launchable run launchable: a crash here would fail a run over a schedule detail on the tier where
+the schedule matters least.</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -7606,7 +7451,7 @@ least.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>class:<code>~lucid_yolo.optim.musgd.MuSGD</code> over <code>self.parameters()</code>,</p>
+                <p>class:<code>~lucid_yolo.optim.musgd.MuSGD</code> over <code>self.parameters()</code>, alone or inside a Lightning</p>
               </div>
             </td>
           </tr>
@@ -7616,17 +7461,7 @@ least.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>alone or inside a Lightning optimizer/scheduler config dict with the</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-<td></td>            <td>
-                  <code><span title="pytorch_lightning.utilities.types.OptimizerLRScheduler">OptimizerLRScheduler</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>step-interval LambdaLR.</p>
+                <p>optimizer/scheduler config dict with the step-interval LambdaLR.</p>
               </div>
             </td>
           </tr>
@@ -7664,15 +7499,12 @@ least.</p>
 
 
         <p>Detection datamodule assembling the Phase 1 augmentation pipeline (WP-014).</p>
-<p>Train and val splits are built from the COCO 2017 layout under <code>data_root</code>
-(<code>train2017/</code> + <code>annotations/instances_train2017.json</code> and the <code>val2017</code>
-equivalents); each split path may be overridden explicitly (used by the offline
-fixture tests, which have a single Roboflow-style split). A <code>data_root</code> written in
-the YOLO convention instead is read by
-:class:<code>~lucid_yolo.data.yolo.YoloDetectionDataset</code> — see the module docstring for the
-three-step dispatch (WP-099b). Training samples pass
-through :class:<code>_TrainPipeline</code> (mosaic/mixup/copy-paste/affine/hsv/flip +
-letterbox); validation is letterbox-only. No split is ever downloaded.</p>
+<p>Train and val splits are built from the COCO 2017 layout under <code>data_root</code> (<code>train2017/</code> +
+<code>annotations/instances_train2017.json</code> and the <code>val2017</code> equivalents); each split path may be overridden
+explicitly (used by the offline fixture tests, which have a single Roboflow-style split). A <code>data_root</code> written
+in the YOLO convention instead is read by :class:<code>~lucid_yolo.data.yolo.YoloDetectionDataset</code> — see the module
+docstring for the three-step dispatch (WP-099b). Training samples pass through :class:<code>_TrainPipeline</code>
+(mosaic/mixup/copy-paste/affine/hsv/flip + letterbox); validation is letterbox-only. No split is ever downloaded.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7729,12 +7561,10 @@ names, or a YOLO root (a <code>data.yaml</code> beside <code>images</code>/<code
             </td>
             <td>
               <div class="doc-md-description">
-                <p>DataLoader worker processes. <code>None</code> (default) resolves
-to <code>min(batch_size, cpu count)</code>, further capped so the in-flight
-worker queue fits the free <code>/dev/shm</code> budget on Linux
-(:func:<code>_shm_capped_workers</code>) — a many-core host with a large batch
-otherwise fills the shm tmpfs before the first step. Determinism of
-the seeded pipeline is guaranteed only at an explicit <code>0</code> (a
+                <p>DataLoader worker processes. <code>None</code> (default) resolves to <code>min(batch_size, cpu count)</code>,
+further capped so the in-flight worker queue fits the free <code>/dev/shm</code> budget on Linux
+(:func:<code>_shm_capped_workers</code>) — a many-core host with a large batch otherwise fills the shm tmpfs
+before the first step. Determinism of the seeded pipeline is guaranteed only at an explicit <code>0</code> (a
 single in-process generator).</p>
               </div>
             </td>
@@ -7768,9 +7598,8 @@ single in-process generator).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Square letterbox side for every emitted sample. Defaults to 640, and
-must be a positive multiple of every head stride — validated at construction,
-for the reason <code>variant</code> is.</p>
+                <p>Square letterbox side for every emitted sample. Defaults to 640, and must be a positive multiple of
+every head stride — validated at construction, for the reason <code>variant</code> is.</p>
               </div>
             </td>
             <td>
@@ -7786,10 +7615,9 @@ for the reason <code>variant</code> is.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Override for the train images directory. Defaults to
-whichever of <code>data_root/"train2017"</code> and <code>data_root/"train"</code>
-:func:<code>~lucid_yolo.data.layout.resolve_split</code> finds, so a tiled
-oriented root needs no override at all.</p>
+                <p>Override for the train images directory. Defaults to whichever of
+<code>data_root/"train2017"</code> and <code>data_root/"train"</code> :func:<code>~lucid_yolo.data.layout.resolve_split</code> finds,
+so a tiled oriented root needs no override at all.</p>
               </div>
             </td>
             <td>
@@ -7822,8 +7650,7 @@ alongside the images directory, never independently of it.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Override for the val images directory. Resolved as the
-train one is.</p>
+                <p>Override for the val images directory. Resolved as the train one is.</p>
               </div>
             </td>
             <td>
@@ -7839,8 +7666,7 @@ train one is.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Override for the val annotation JSON. Resolved alongside
-the val images directory.</p>
+                <p>Override for the val annotation JSON. Resolved alongside the val images directory.</p>
               </div>
             </td>
             <td>
@@ -7872,10 +7698,9 @@ the val images directory.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Whether loader batches land in page-locked host memory for
-async host-to-device copies. <code>None</code> (default) resolves to <code>True</code>
-exactly when CUDA is available — MPS and CPU runs get <code>False</code>
-(pinning buys nothing there and MPS warns on it).</p>
+                <p>Whether loader batches land in page-locked host memory for async host-to-device copies. <code>None</code>
+(default) resolves to <code>True</code> exactly when CUDA is available — MPS and CPU runs get <code>False</code> (pinning
+buys nothing there and MPS warns on it).</p>
               </div>
             </td>
             <td>
@@ -7891,9 +7716,8 @@ exactly when CUDA is available — MPS and CPU runs get <code>False</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Batches each worker keeps prefetched (defaults to
-:data:<code>_PREFETCH_FACTOR</code>); ignored at <code>num_workers=0</code> where the
-DataLoader forbids it.</p>
+                <p>Batches each worker keeps prefetched (defaults to :data:<code>_PREFETCH_FACTOR</code>); ignored at
+<code>num_workers=0</code> where the DataLoader forbids it.</p>
               </div>
             </td>
             <td>
@@ -7909,14 +7733,11 @@ DataLoader forbids it.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Worker count for the validation loader only, capped by
-nothing — the flag an operator states to spend the whole machine on
-validation. <code>None</code> (default) resolves to an auto-chosen
-<code>num_workers</code> bounded by :func:<code>_val_worker_target</code> (WP-073, WP-102), and
-to a <em>named</em> <code>num_workers</code> bounded by the in-flight memory budget of
-:meth:<code>_val_loader_workers</code> (WP-103) — letterbox-only val samples need
-few workers, and both worker populations are resident at the epoch
-boundary where validation runs.</p>
+                <p>Worker count for the validation loader only, capped by nothing — the flag an operator states
+to spend the whole machine on validation. <code>None</code> (default) resolves to an auto-chosen <code>num_workers</code>
+bounded by :func:<code>_val_worker_target</code> (WP-073, WP-102), and to a <em>named</em> <code>num_workers</code> bounded by the
+in-flight memory budget of :meth:<code>_val_loader_workers</code> (WP-103) — letterbox-only val samples need few
+workers, and both worker populations are resident at the epoch boundary where validation runs.</p>
               </div>
             </td>
             <td>
@@ -7932,10 +7753,9 @@ boundary where validation runs.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Keep loader workers alive across epochs. Defaults
-to <code>False</code> (WP-076): respawning costs seconds per epoch while a
-persistent pool accumulates per-worker memory for the whole run —
-the observed slow-creep OOM on long containerized runs.</p>
+                <p>Keep loader workers alive across epochs. Defaults to <code>False</code> (WP-076): respawning costs
+seconds per epoch while a persistent pool accumulates per-worker memory for the whole run — the observed
+slow-creep OOM on long containerized runs.</p>
               </div>
             </td>
             <td>
@@ -7951,18 +7771,14 @@ the observed slow-creep OOM on long containerized runs.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Decode the training split once during :meth:<code>setup</code>
-and retain read-only RGB tensors — <code>uint8</code> for 8-bit sources, <code>uint16</code>
-(twice the bytes) for a 16-bit PNG. Defaults to <code>False</code>;
-enabling it trades the uncompressed split size in host RAM for removing
-image decode from every augmented draw in every epoch. :meth:<code>setup</code>
-only pays this cost for a <code>"fit"</code>/<code>None</code> stage, so a
-<code>"validate"</code>/<code>"test"</code>/<code>"predict"</code> call never decodes the train
-split it will not read. The decode draws a progress bar and reports the
-cache's size as a <code>UserWarning</code> — before decoding on a COCO root, from
-the annotation file's image sizes, and after it on a YOLO root, which
-states none — so an undersized host sees the figure rather than a silent
-stall ending in an out-of-memory kill.</p>
+                <p>Decode the training split once during :meth:<code>setup</code> and retain read-only RGB tensors —
+<code>uint8</code> for 8-bit sources, <code>uint16</code> (twice the bytes) for a 16-bit PNG. Defaults to <code>False</code>;
+enabling it trades the uncompressed split size in host RAM for removing image decode from every augmented
+draw in every epoch. :meth:<code>setup</code> only pays this cost for a <code>"fit"</code>/<code>None</code> stage, so a
+<code>"validate"</code>/<code>"test"</code>/<code>"predict"</code> call never decodes the train split it will not read. The decode
+draws a progress bar and reports the cache's size as a <code>UserWarning</code> — before decoding on a COCO root,
+from the annotation file's image sizes, and after it on a YOLO root, which states none — so an undersized
+host sees the figure rather than a silent stall ending in an out-of-memory kill.</p>
               </div>
             </td>
             <td>
@@ -8003,15 +7819,12 @@ must hold the split.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Apply training HSV and quantization on CUDA, in batches, under
-float32 or mixed precision. Off by default; other backends and precisions
-retain worker-side colour augmentation. The workers
-keep their RNG draws and transport float32 images plus the stated gains,
-using four times the default image IPC and transfer bytes. The worker cap
-budgets float32 images only for a count chosen here (<code>num_workers</code>
-unset) in one process; a named <code>num_workers</code> is neither capped nor
-warned, and each DDP rank budgets the free shm on its own. Validation
-stays uint8.</p>
+                <p>Apply training HSV and quantization on CUDA, in batches, under float32 or mixed precision. Off by
+default; other backends and precisions retain worker-side colour augmentation. The workers keep their RNG
+draws and transport float32 images plus the stated gains, using four times the default image IPC and
+transfer bytes. The worker cap budgets float32 images only for a count chosen here (<code>num_workers</code>
+unset) in one process; a named <code>num_workers</code> is neither capped nor warned, and each DDP rank budgets
+the free shm on its own. Validation stays uint8.</p>
               </div>
             </td>
             <td>
@@ -8443,20 +8256,16 @@ path tried.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The Lightning stage (<code>"fit"</code>/<code>"validate"</code>/…). Both splits are
-always built, so a repeated call yields the same splits and a fresh train
-pipeline — mosaic probability and draw generator back at their initial
-state. <code>cache_train_images</code> only decodes the train split when <code>stage</code>
-is <code>"fit"</code> or <code>None</code>: a <code>"validate"</code>/<code>"test"</code>/<code>"predict"</code> call
-never pays to cache a split it will not read, and releases a cache an
-earlier fit-stage call built. A repeat <code>"fit"</code>/<code>None</code> call with the
-cache on keeps the already-decoded train reader rather than decoding the
-split again beside it, so the result is idempotent and the decode cost is
-paid once, not once per call.</p>
-<p>A call that raises installs nothing it built: the val dataset and both
-caches keep their previous values, and no train pipeline is left behind,
-so :meth:<code>train_dataloader</code> raises rather than serving the pipeline an
-earlier stage built.</p>
+                <p>The Lightning stage (<code>"fit"</code>/<code>"validate"</code>/…). Both splits are always built, so a repeated
+call yields the same splits and a fresh train pipeline — mosaic probability and draw generator
+back at their initial state. <code>cache_train_images</code> only decodes the train split when <code>stage</code> is
+<code>"fit"</code> or <code>None</code>: a <code>"validate"</code>/<code>"test"</code>/<code>"predict"</code> call never pays to cache a split it
+will not read, and releases a cache an earlier fit-stage call built. A repeat <code>"fit"</code>/<code>None</code> call
+with the cache on keeps the already-decoded train reader rather than decoding the split again beside
+it, so the result is idempotent and the decode cost is paid once, not once per call.</p>
+<p>A call that raises installs nothing it built: the val dataset and both caches keep their previous
+values, and no train pipeline is left behind, so :meth:<code>train_dataloader</code> raises rather than serving
+the pipeline an earlier stage built.</p>
               </div>
             </td>
             <td>
@@ -8519,22 +8328,17 @@ requested modality.</p>
     <div class="doc doc-contents ">
 
         <p>Restore the float images and <code>list[Targets]</code> consumer contract on-device.</p>
-<p>Lightning calls this after moving the batch to the accelerator, so both the
-uint8 images and the :class:<code>PackedTargets</code> tensor fields are already
-on-device: the images are dequantized to the attached module's dtype
-(:meth:<code>_consumer_dtype</code> — <code>code / 255</code> at that precision,
-:func:<code>_dequantize_images</code>) and the packed targets are unpacked, all on the
-same device the module trains on, with no extra host-to-device hop.
-A deferred training batch first applies its stated HSV gains and quantizes
-the result, then reaches this same dequantization. Matching
-the module dtype keeps a <code>"16-true"</code>/<code>"bf16-true"</code> run's half weights and
-inputs aligned; <code>"16-mixed"</code> leaves the module float32 and lets autocast
-cast. Already-float images and already-list targets (a non-packed direct
-feed) pass through untouched, so the hook is safe to run over either form.
-Both the train and val loaders share this single restore. On CUDA the
-restored images are made <code>channels_last</code>, the layout the module's
-parameters take in :meth:<code>DetectionLitModule.setup</code>; masks and every other
-device keep the default layout.</p>
+<p>Lightning calls this after moving the batch to the accelerator, so both the uint8 images and the
+:class:<code>PackedTargets</code> tensor fields are already on-device: the images are dequantized to the attached
+module's dtype (:meth:<code>_consumer_dtype</code> — <code>code / 255</code> at that precision, :func:<code>_dequantize_images</code>) and
+the packed targets are unpacked, all on the same device the module trains on, with no extra host-to-device
+hop. A deferred training batch first applies its stated HSV gains and quantizes the result, then reaches this
+same dequantization. Matching the module dtype keeps a <code>"16-true"</code>/<code>"bf16-true"</code> run's half weights and
+inputs aligned; <code>"16-mixed"</code> leaves the module float32 and lets autocast cast. Already-float images and
+already-list targets (a non-packed direct feed) pass through untouched, so the hook is safe to run over
+either form. Both the train and val loaders share this single restore. On CUDA the restored images are made
+<code>channels_last</code>, the layout the module's parameters take in :meth:<code>DetectionLitModule.setup</code>; masks and
+every other device keep the default layout.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8605,7 +8409,7 @@ or an already-restored <code>(float images, list[Targets])</code> batch.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The <code>(images, list[Targets], masks)</code> consumer batch — <code>[0, 1]</code> images</p>
+                <p>The <code>(images, list[Targets], masks)</code> consumer batch — <code>[0, 1]</code> images at the module's dtype, the</p>
               </div>
             </td>
           </tr>
@@ -8620,7 +8424,7 @@ or an already-restored <code>(float images, list[Targets])</code> batch.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>at the module's dtype, the ragged per-image targets, and the per-image</p>
+                <p>ragged per-image targets, and the per-image mask stacks a segmentation loader rasterised in its workers</p>
               </div>
             </td>
           </tr>
@@ -8630,7 +8434,7 @@ or an already-restored <code>(float images, list[Targets])</code> batch.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>mask stacks a segmentation loader rasterised in its workers (<code>None</code> on</p>
+                <p>(<code>None</code> on a detection loader, or on any already-restored feed, which is the signal the module</p>
               </div>
             </td>
           </tr>
@@ -8645,22 +8449,7 @@ or an already-restored <code>(float images, list[Targets])</code> batch.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>a detection loader, or on any already-restored feed, which is the signal</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <span title="list">list</span>[<a class="autorefs autorefs-internal" title="            Targets
-
-
-  
-      dataclass
-   (lucid_yolo.data.targets.Targets)" href="../data/#lucid_yolo.data.Targets">Targets</a>], <span title="list">list</span>[<span title="torch.Tensor">Tensor</span>] | None]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>the module rasterises the masks itself).</p>
+                <p>rasterises the masks itself).</p>
               </div>
             </td>
           </tr>
@@ -8716,12 +8505,10 @@ and float64 gains (:func:<code>_restore_images</code>).</p>
     <div class="doc doc-contents ">
 
         <p>Return the shuffled training loader with the packed batch transport.</p>
-<p>DataLoader's type parameter describes dataset items, while this collate
-returns a different form. The cast records the collated boundary rather
-than exposing the pipeline's private deferred-sample union to consumers.
-The loader collates through :func:<code>_collate_training</code>, the private twin of
-:func:<code>collate_detection</code> that also accepts that union, so the public collate
-keeps its <code>(image, Targets)</code> signature.</p>
+<p>DataLoader's type parameter describes dataset items, while this collate returns a different form. The cast
+records the collated boundary rather than exposing the pipeline's private deferred-sample union to consumers.
+The loader collates through :func:<code>_collate_training</code>, the private twin of :func:<code>collate_detection</code> that also
+accepts that union, so the public collate keeps its <code>(image, Targets)</code> signature.</p>
 
 
     </div>
@@ -8742,11 +8529,10 @@ keeps its <code>(image, Targets)</code> signature.</p>
     <div class="doc doc-contents ">
 
         <p>Return the unshuffled validation loader (letterbox-only samples).</p>
-<p>The loader runs on its own worker count — <code>val_num_workers</code>, defaulting to a
-pixel-scaled cap on an auto-chosen train count (WP-073, WP-102) and to the
-memory budget of :meth:<code>_val_loader_workers</code> on a named one (WP-103): letterbox
-only samples need a fraction of the train pipeline's CPU, and both worker
-populations are resident at the epoch boundary where validation runs.</p>
+<p>The loader runs on its own worker count — <code>val_num_workers</code>, defaulting to a pixel-scaled cap on an
+auto-chosen train count (WP-073, WP-102) and to the memory budget of :meth:<code>_val_loader_workers</code> on a named
+one (WP-103): letterbox only samples need a fraction of the train pipeline's CPU, and both worker populations
+are resident at the epoch boundary where validation runs.</p>
 <p>Annotated with the collated <code>(images, PackedTargets)</code> transport, as
 :meth:<code>train_dataloader</code> is: the dataset yields <code>(image, Targets)</code> pairs, and
 the cast records the form :func:<code>collate_detection</code> actually hands the trainer.</p>
@@ -8770,15 +8556,13 @@ the cast records the form :func:<code>collate_detection</code> actually hands th
     <div class="doc doc-contents ">
 
         <p>Set the training pipeline's mosaic probability.</p>
-<p>This is the seam <code>CloseMosaicCallback</code> (WP-036) drives to disable mosaic
-for the final training epochs: it sets <code>prob=0</code>. The value lands on the
-main-process pipeline, which loader worker processes copy when they start:
-in-process loading (<code>num_workers=0</code>) uses it from the next sample, and a
-pool started after this call — every later epoch's pool under the default
-<code>persistent_workers=False</code> — samples with it. Persistent workers keep the
-copy they started with and never see the change; with <code>epoch_prefetch</code>
-also requested, a change of value warns once, since the next epoch's first
-batches are also already queued by then. Repeat calls are harmless.</p>
+<p>This is the seam <code>CloseMosaicCallback</code> (WP-036) drives to disable mosaic for the final training epochs: it
+sets <code>prob=0</code>. The value lands on the main-process pipeline, which loader worker processes copy when they
+start: in-process loading (<code>num_workers=0</code>) uses it from the next sample, and a pool started after this call
+— every later epoch's pool under the default <code>persistent_workers=False</code> — samples with it. Persistent
+workers keep the copy they started with and never see the change; with <code>epoch_prefetch</code> also requested,
+a change of value warns once, since the next epoch's first batches are also already queued by then. Repeat
+calls are harmless.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8801,8 +8585,7 @@ batches are also already queued by then. Repeat calls are harmless.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The new mosaic probability, forwarded to
-:attr:<code>_TrainPipeline.mosaic_p</code>.</p>
+                <p>The new mosaic probability, forwarded to :attr:<code>_TrainPipeline.mosaic_p</code>.</p>
               </div>
             </td>
             <td>
@@ -8874,50 +8657,41 @@ batches are also already queued by then. Repeat calls are harmless.</p>
 
 
         <p>Track an exponential-moving-average shadow of the weights and eval with it.</p>
-<p>A shadow copy of the module's floating-point parameters <strong>and</strong> buffers (batch-norm
-running statistics included; integer buffers such as <code>num_batches_tracked</code> are left
-out — they carry no meaningful average) is created on :meth:<code>on_fit_start</code> on the
-module's device. After each <em>optimizer step</em> (:meth:<code>on_train_batch_end</code>, honoring
-<code>update_every</code>) the shadow is blended toward the live weights under
-:func:<code>torch.no_grad</code> with a <em>warmup-ramped</em> decay</p>
+<p>A shadow copy of the module's floating-point parameters <strong>and</strong> buffers (batch-norm running statistics included;
+integer buffers such as <code>num_batches_tracked</code> are left out — they carry no meaningful average) is created on
+:meth:<code>on_fit_start</code> on the module's device. After each <em>optimizer step</em> (:meth:<code>on_train_batch_end</code>, honoring
+<code>update_every</code>) the shadow is blended toward the live weights under :func:<code>torch.no_grad</code> with a
+<em>warmup-ramped</em> decay</p>
 <p><code>d_t = decay * (1 - exp(-t / tau))</code>     <code>shadow &lt;- d_t * shadow + (1 - d_t) * live</code></p>
-<p>where <code>t</code> is the number of updates performed so far. Tensors sharing a device and
-dtype are submitted to one foreach interpolation: the same recurrence with fewer
-accelerator launches, but not bit-identical to the per-tensor form in any dtype. It
-agrees within the test tolerance for fp32 and fp64, and a half-precision shadow rounds
-once per step instead of twice (a difference of about 1 ulp). A tensor whose shadow and
-live dtypes differ keeps the per-tensor recurrence. The ramp starts the effective
-decay near zero so the early shadow tracks the fast-moving weights closely, then
-relaxes toward the nominal <code>decay</code> as training settles (blueprint D4). Around the
-validation loop the callback swaps the shadow in (:meth:<code>on_validation_start</code>) and the
-live weights back out (:meth:<code>on_validation_end</code>), so validation metrics are EMA
-metrics — the "used for eval" contract of D4. The shadow and update counters are
-checkpointed via :meth:<code>state_dict</code>/:meth:<code>load_state_dict</code>, so a save/resume round
+<p>where <code>t</code> is the number of updates performed so far. Tensors sharing a device and dtype are submitted to one
+foreach interpolation: the same recurrence with fewer accelerator launches, but not bit-identical to the
+per-tensor form in any dtype. It agrees within the test tolerance for fp32 and fp64, and a half-precision shadow
+rounds once per step instead of twice (a difference of about 1 ulp). A tensor whose shadow and live dtypes differ
+keeps the per-tensor recurrence. The ramp starts the effective decay near zero so the early shadow tracks the
+fast-moving weights closely, then relaxes toward the nominal <code>decay</code> as training settles (blueprint D4). Around
+the validation loop the callback swaps the shadow in (:meth:<code>on_validation_start</code>) and the live weights back out
+(:meth:<code>on_validation_end</code>), so validation metrics are EMA metrics — the "used for eval" contract of D4. The
+shadow and update counters are checkpointed via :meth:<code>state_dict</code>/:meth:<code>load_state_dict</code>, so a save/resume round
 trip continues the same average rather than restarting it.</p>
-<p><strong>Cadence is optimizer steps, not batches.</strong> <code>update_every</code> and <code>tau</code> are both
-counted in optimizer steps, so <code>accumulate_grad_batches &gt; 1</code> does not multiply the
-number of blends: :meth:<code>on_train_batch_end</code> blends only on a batch that actually
-advanced <code>trainer.global_step</code>, which under accumulation is the last batch of each
-accumulation window. That hook rather than <code>on_before_zero_grad</code> because Lightning
-calls the latter at the <em>start</em> of an accumulation window, before that window's
-<code>training_step</code> — it would blend pre-step weights and never see the state left by the
-final optimizer step of a run.</p>
-<p><strong>Callback ordering.</strong> The weight swap is deliberately hook-scoped, not run-scoped, so
-it does not depend on how Lightning happens to order the callback list: the shadow is
-installed in :meth:<code>on_validation_start</code> and taken out again in
-:meth:<code>on_validation_end</code> (and in :meth:<code>on_exception</code>, so a failed validation cannot
-leave EMA weights wearing the live model's identity). Checkpoints written by
-:class:<code>~pytorch_lightning.callbacks.ModelCheckpoint</code> therefore hold the <em>raw</em> trained
-weights in <code>state_dict</code>, with the EMA available separately under this callback's
-<code>state_dict</code> — the split :func:<code>~lucid_yolo.eval.checkpoint.load_eval_module</code>
-relies on when it overlays the shadow on request. <code>ModelCheckpoint</code> saves from
-<code>on_validation_end</code> too, and Lightning moves it to the end of the callback list, so
-within a single validation the restore runs first; the two facts are recorded together
-because only the second is Lightning's to change.</p>
-<p>The exact <code>decay</code>/<code>tau</code> constants are unpublished in the source papers; the
-defaults are the conventional YOLO-lineage values and are documented here as a small,
-self-contained assumption (D4 names EMA explicitly, so no <code>ASSUMPTIONS.md</code> row is
-warranted).</p>
+<p><strong>Cadence is optimizer steps, not batches.</strong> <code>update_every</code> and <code>tau</code> are both counted in optimizer steps, so
+<code>accumulate_grad_batches &gt; 1</code> does not multiply the number of blends: :meth:<code>on_train_batch_end</code> blends only on
+a batch that actually advanced <code>trainer.global_step</code>, which under accumulation is the last batch of each
+accumulation window. That hook rather than <code>on_before_zero_grad</code> because Lightning calls the latter at the
+<em>start</em> of an accumulation window, before that window's <code>training_step</code> — it would blend pre-step weights and
+never see the state left by the final optimizer step of a run.</p>
+<p><strong>Callback ordering.</strong> The weight swap is deliberately hook-scoped, not run-scoped, so it does not depend on how
+Lightning happens to order the callback list: the shadow is installed in :meth:<code>on_validation_start</code> and taken
+out again in :meth:<code>on_validation_end</code> (and in :meth:<code>on_exception</code>, so a failed validation cannot leave EMA
+weights wearing the live model's identity). Checkpoints written by
+:class:<code>~pytorch_lightning.callbacks.ModelCheckpoint</code> therefore hold the <em>raw</em> trained weights in <code>state_dict</code>,
+with the EMA available separately under this callback's <code>state_dict</code> — the split
+:func:<code>~lucid_yolo.eval.checkpoint.load_eval_module</code> relies on when it overlays the shadow on request.
+<code>ModelCheckpoint</code> saves from <code>on_validation_end</code> too, and Lightning moves it to the end of the callback list,
+so within a single validation the restore runs first; the two facts are recorded together because only the second
+is Lightning's to change.</p>
+<p>The exact <code>decay</code>/<code>tau</code> constants are unpublished in the source papers; the defaults are the conventional
+YOLO-lineage values and are documented here as a small, self-contained assumption (D4 names EMA explicitly, so no
+<code>ASSUMPTIONS.md</code> row is warranted).</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8940,8 +8714,7 @@ warranted).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Nominal per-update decay the warmup ramp relaxes toward. Must be in
-<code>[0, 1)</code>. Defaults to <code>0.9999</code>.</p>
+                <p>Nominal per-update decay the warmup ramp relaxes toward. Must be in <code>[0, 1)</code>. Defaults to <code>0.9999</code>.</p>
               </div>
             </td>
             <td>
@@ -9191,11 +8964,10 @@ shadow is cloned from the current floating-point parameters and buffers.</p>
     <div class="doc doc-contents ">
 
         <p>Blend the shadow toward the live weights once per optimizer step.</p>
-<p>A batch that did not advance <code>trainer.global_step</code> — every batch of an
-<code>accumulate_grad_batches</code> window but its last — leaves the shadow untouched, so
-<code>update_every</code> and the <code>tau</code> ramp are counted in optimizer steps as documented
-rather than in batches. By this hook the step has already been applied, so the
-blend reads post-step weights.</p>
+<p>A batch that did not advance <code>trainer.global_step</code> — every batch of an <code>accumulate_grad_batches</code> window
+but its last — leaves the shadow untouched, so <code>update_every</code> and the <code>tau</code> ramp are counted in optimizer
+steps as documented rather than in batches. By this hook the step has already been applied, so the blend reads
+post-step weights.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -9445,12 +9217,11 @@ blend reads post-step weights.</p>
     <div class="doc doc-contents ">
 
         <p>Take the shadow back out of the module when a run dies mid-validation.</p>
-<p>Without this the swap of :meth:<code>on_validation_start</code> is undone only by the normal
-completion path, so an exception raised inside the validation loop propagates with
-the EMA weights still installed under the raw model's identity — anything the
-failure handler then inspects, saves or resumes from would be the shadow rather
-than the trained weights. Restoration is idempotent, so the ordinary path running
-first (or this hook firing outside validation) is harmless.</p>
+<p>Without this the swap of :meth:<code>on_validation_start</code> is undone only by the normal completion path, so an
+exception raised inside the validation loop propagates with the EMA weights still installed under the raw
+model's identity — anything the failure handler then inspects, saves or resumes from would be the shadow
+rather than the trained weights. Restoration is idempotent, so the ordinary path running first (or this hook
+firing outside validation) is harmless.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -9597,10 +9368,9 @@ first (or this hook firing outside validation) is harmless.</p>
     <div class="doc doc-contents ">
 
         <p>Restore the shadow and update counters from a checkpoint.</p>
-<p>A checkpoint written before the cadence was fixed to optimizer steps carries the
-counter under <code>batches_seen</code>; it is read as the <code>update_every</code> phase it in fact
-was, so resuming such a run continues rather than restarts. The two counts differ
-only when that run used <code>accumulate_grad_batches &gt; 1</code>.</p>
+<p>A checkpoint written before the cadence was fixed to optimizer steps carries the counter under
+<code>batches_seen</code>; it is read as the <code>update_every</code> phase it in fact was, so resuming such a run continues
+rather than restarts. The two counts differ only when that run used <code>accumulate_grad_batches &gt; 1</code>.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -9664,15 +9434,14 @@ only when that run used <code>accumulate_grad_batches &gt; 1</code>.</p>
 
 
         <p>Disable mosaic augmentation for the final <code>close_mosaic</code> training epochs.</p>
-<p>Mosaic (four-image compositing) runs at <code>p=1.0</code> for most of training but is
-switched off for the last <code>close_mosaic</code> epochs so the network finishes on
-natural, un-composited images (blueprint sec. 5.9; [R1] Tables S3/S6). At the
-start of every training epoch this callback checks whether the current epoch has
-reached the close-mosaic window (<code>current_epoch &gt;= max_epochs - close_mosaic</code>)
-and, if so, sets the training pipeline's mosaic probability to <code>0</code> via the
-datamodule's :meth:<code>~lucid_yolo.ptl.datamodule.DetectionDataModule.set_mosaic_prob</code>
-seam. The flip is idempotent — re-setting <code>0</code> each subsequent epoch is harmless
-— and is logged exactly once, on the epoch it first takes effect (rank zero only).</p>
+<p>Mosaic (four-image compositing) runs at <code>p=1.0</code> for most of training but is switched off for the last
+<code>close_mosaic</code> epochs so the network finishes on natural, un-composited images (blueprint sec. 5.9; [R1] Tables
+S3/S6). At the start of every training epoch this callback checks whether the current epoch has reached the
+close-mosaic window (<code>current_epoch &gt;= max_epochs - close_mosaic</code>) and, if so, sets the training pipeline's
+mosaic probability to <code>0</code> via the datamodule's
+:meth:<code>~lucid_yolo.ptl.datamodule.DetectionDataModule.set_mosaic_prob</code> seam. The flip is idempotent — re-setting
+<code>0</code> each subsequent epoch is harmless — and is logged exactly once, on the epoch it first takes effect (rank
+zero only).</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -9795,8 +9564,7 @@ first epoch. Must be non-negative.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The active trainer, read for <code>current_epoch</code>, <code>max_epochs</code>,
-and the attached <code>datamodule</code>.</p>
+                <p>The active trainer, read for <code>current_epoch</code>, <code>max_epochs</code>, and the attached <code>datamodule</code>.</p>
               </div>
             </td>
             <td>
@@ -9945,15 +9713,12 @@ and the attached <code>datamodule</code>.</p>
 
 
         <p>Compose the one-to-many and one-to-one detection-branch losses.</p>
-<p>Holds two :class:<code>~lucid_yolo.losses.detection_loss.DetectionBranchLoss</code>
-instances (identical gains), a dense o2m assigner
-(:class:<code>~lucid_yolo.assign.stal.SmallTargetAssigner</code>, <code>topk = 10</code>), and a
-unique o2o assigner (:class:<code>~lucid_yolo.assign.one_to_one.UniqueAssigner</code>,
-<code>topk = 7</code> reduced to one). The object is stateless apart from its gains,
-assigners, and the settable :attr:<code>alpha</code>, so a single instance is reused
-across the training run. It is coordinate-scale agnostic in the same way as
-the per-branch loss: predicted and ground-truth boxes only need to share a
-frame (see :class:<code>~lucid_yolo.losses.detection_loss.DetectionBranchLoss</code>).</p>
+<p>Holds two :class:<code>~lucid_yolo.losses.detection_loss.DetectionBranchLoss</code> instances (identical gains), a dense o2m
+assigner (:class:<code>~lucid_yolo.assign.stal.SmallTargetAssigner</code>, <code>topk = 10</code>), and a unique o2o assigner
+(:class:<code>~lucid_yolo.assign.one_to_one.UniqueAssigner</code>, <code>topk = 7</code> reduced to one). The object is stateless apart
+from its gains, assigners, and the settable :attr:<code>alpha</code>, so a single instance is reused across the training run.
+It is coordinate-scale agnostic in the same way as the per-branch loss: predicted and ground-truth boxes only need
+to share a frame (see :class:<code>~lucid_yolo.losses.detection_loss.DetectionBranchLoss</code>).</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -10040,8 +9805,7 @@ frame (see :class:<code>~lucid_yolo.losses.detection_loss.DetectionBranchLoss</c
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Candidate-set size for the o2o assignment before the unique
-<code>topk2 = 1</code> reduction (default <code>7</code>).</p>
+                <p>Candidate-set size for the o2o assignment before the unique <code>topk2 = 1</code> reduction (default <code>7</code>).</p>
               </div>
             </td>
             <td>
@@ -10075,8 +9839,7 @@ epoch).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Small-target surrogate threshold shared by both assigners (the
-smallest stride, <code>8.0</code> at 640 input).</p>
+                <p>Small-target surrogate threshold shared by both assigners (the smallest stride, <code>8.0</code> at 640 input).</p>
               </div>
             </td>
             <td>
@@ -10293,10 +10056,8 @@ both branches (see :func:<code>lucid_yolo.assign.make_anchor_points</code>).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional <code>(A,)</code> per-anchor level strides, forwarded to
-both branch losses so their L1 terms are measured in stride
-units (A13 revision, WP-078). The training path always passes
-strides.</p>
+                <p>Optional <code>(A,)</code> per-anchor level strides, forwarded to both branch losses so their L1 terms are
+measured in stride units (A13 revision, WP-078). The training path always passes strides.</p>
               </div>
             </td>
             <td>
@@ -10312,14 +10073,11 @@ strides.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional <code>(B, N, 5)</code> rotated ground truths in the
-long-edge convention, entry <code>(b, n)</code> describing the same object
-as <code>gt_boxes[b, n]</code>. Forwarded verbatim to <strong>both</strong> assigners,
-where it switches candidacy to point-in-rotated-rect containment
-(WP-061, A25) and nothing else: the IoU, the alignment metric, the
-targets and the weights keep running on the axis-aligned
-envelopes. Omitted (the default) leaves the assignment, and
-therefore every tensor operation on this path, exactly as it was —
+                <p>Optional <code>(B, N, 5)</code> rotated ground truths in the long-edge convention, entry <code>(b, n)</code>
+describing the same object as <code>gt_boxes[b, n]</code>. Forwarded verbatim to <strong>both</strong> assigners, where it
+switches candidacy to point-in-rotated-rect containment (WP-061, A25) and nothing else: the IoU, the
+alignment metric, the targets and the weights keep running on the axis-aligned envelopes. Omitted (the
+default) leaves the assignment, and therefore every tensor operation on this path, exactly as it was —
 which is what keeps the detection objective bit-identical.</p>
               </div>
             </td>
@@ -10336,16 +10094,12 @@ which is what keeps the detection objective bit-identical.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional 0-d <code>float64</code> tensor carrying the branch weight for
-this call in place of :attr:<code>alpha</code>. The compiled detection step
-(WP-184) passes it because a Python float read inside the traced
-region is a Dynamo guard on its value, and the WP-035 schedule
-changes it every epoch — one recompile per epoch until
-<code>cache_size_limit</code> dropped the region to eager (WP-187). The
-blend casts it to each branch total's dtype after forming
-<code>1 - alpha</code> in double, which is exactly the arithmetic the
-Python-float form does, so the total is bit-identical either
-way. Omitted (the default) blends with the attribute.</p>
+                <p>Optional 0-d <code>float64</code> tensor carrying the branch weight for this call in place of :attr:<code>alpha</code>.
+The compiled detection step (WP-184) passes it because a Python float read inside the traced region is
+a Dynamo guard on its value, and the WP-035 schedule changes it every epoch — one recompile per epoch
+until <code>cache_size_limit</code> dropped the region to eager (WP-187). The blend casts it to each branch
+total's dtype after forming <code>1 - alpha</code> in double, which is exactly the arithmetic the Python-float
+form does, so the total is bit-identical either way. Omitted (the default) blends with the attribute.</p>
               </div>
             </td>
             <td>
@@ -10391,7 +10145,7 @@ way. Omitted (the default) blends with the attribute.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>class:<code>~lucid_yolo.losses.detection_loss.DetectionLossOutput</code>, the</p>
+                <p>class:<code>~lucid_yolo.losses.detection_loss.DetectionLossOutput</code>, the <code>alpha</code> used, and both branches'</p>
               </div>
             </td>
           </tr>
@@ -10406,22 +10160,7 @@ way. Omitted (the default) blends with the attribute.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>alpha</code> used, and both branches' assignments (so a mask term can</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-<td></td>            <td>
-                  <code><a class="autorefs autorefs-internal" title="            DualLossOutput
-
-
-  
-      dataclass
-   (lucid_yolo.losses.dual_loss.DualLossOutput)" href="#lucid_yolo.losses.DualLossOutput">DualLossOutput</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>supervise exactly these positives instead of assigning again).</p>
+                <p>assignments (so a mask term can supervise exactly these positives instead of assigning again).</p>
               </div>
             </td>
           </tr>
@@ -10480,18 +10219,14 @@ way. Omitted (the default) blends with the attribute.</p>
 
 
         <p>Combined dual-branch loss, its two per-branch breakdowns, and both assignments.</p>
-<p><code>total</code> is the <code>alpha</code>-weighted combination of the two branch totals;
-the <code>o2m</code> and <code>o2o</code> fields carry each branch's full
-:class:<code>~lucid_yolo.losses.detection_loss.DetectionLossOutput</code> (its pre-gain
-<code>box</code>/<code>cls</code>/<code>l1</code> terms and gain-weighted <code>total</code>), and <code>alpha</code> is
-the branch weight used for this call.</p>
-<p>The two :class:<code>~lucid_yolo.assign.tal.AssignResult</code> values are returned rather
-than kept private because any <em>other</em> term supervising the same positives —
-the WP-087 instance-mask loss is the first — must score the ground truth each
-anchor was actually assigned to here. Recomputing the assignment at the call
-site would create a second selection path free to disagree with this one, and
-a mask scored against the wrong (but plausible) instance is invisible in the
-loss value.</p>
+<p><code>total</code> is the <code>alpha</code>-weighted combination of the two branch totals; the <code>o2m</code> and <code>o2o</code> fields carry each
+branch's full :class:<code>~lucid_yolo.losses.detection_loss.DetectionLossOutput</code> (its pre-gain <code>box</code>/<code>cls</code>/<code>l1</code>
+terms and gain-weighted <code>total</code>), and <code>alpha</code> is the branch weight used for this call.</p>
+<p>The two :class:<code>~lucid_yolo.assign.tal.AssignResult</code> values are returned rather than kept private because any
+<em>other</em> term supervising the same positives — the WP-087 instance-mask loss is the first — must score the ground
+truth each anchor was actually assigned to here. Recomputing the assignment at the call site would create a second
+selection path free to disagree with this one, and a mask scored against the wrong (but plausible) instance is
+invisible in the loss value.</p>
 
 
 <p><span class="doc-section-title">Attributes:</span></p>
@@ -10511,8 +10246,7 @@ loss value.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>alpha * o2m.total + (1 - alpha) * o2o.total</code>; the scalar to
-backpropagate.</p>
+                <p><code>alpha * o2m.total + (1 - alpha) * o2o.total</code>; the scalar to backpropagate.</p>
               </div>
             </td>
           </tr>
@@ -10545,9 +10279,8 @@ backpropagate.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Branch weight applied to the o2m total (o2o gets <code>1 - alpha</code>) —
-the :attr:<code>DualBranchLoss.alpha</code> float when no override is supplied,
-otherwise the override tensor itself, without a read back to the host.</p>
+                <p>Branch weight applied to the o2m total (o2o gets <code>1 - alpha</code>) — the :attr:<code>DualBranchLoss.alpha</code> float
+when no override is supplied, otherwise the override tensor itself, without a read back to the host.</p>
               </div>
             </td>
           </tr>

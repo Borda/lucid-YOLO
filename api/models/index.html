@@ -5098,14 +5098,12 @@
     <div class="doc doc-contents first">
 
         <p>Build a :class:<code>Segmenter</code> for a named scale variant.</p>
-<p><code>num_coeffs</code> is forwarded rather than fixed. :class:<code>Segmenter</code> has always
-accepted it, and a builder that dropped it made the class's own third argument
-unreachable through the function the package exports for building one — a caller
-wanting a narrower coefficient width had to bypass the builder and instantiate the
-class, which is precisely the seam builders exist to remove.</p>
-<p>The default is unchanged, so every model this function built before is the model it
-builds now, byte-identical state dict included; the WP-023 parameter and FLOP
-goldens read the default path and do not move.</p>
+<p><code>num_coeffs</code> is forwarded rather than fixed. :class:<code>Segmenter</code> has always accepted it, and a builder that
+dropped it made the class's own third argument unreachable through the function the package exports for building
+one — a caller wanting a narrower coefficient width had to bypass the builder and instantiate the class, which is
+precisely the seam builders exist to remove.</p>
+<p>The default is unchanged, so every model this function built before is the model it builds now, byte-identical
+state dict included; the WP-023 parameter and FLOP goldens read the default path and do not move.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5160,9 +5158,8 @@ goldens read the default path and do not move.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Mask-coefficient width <code>K</code> (A14), shared by the head's
-coefficient stems and the prototype stack — one prototype per
-coefficient. Defaults to :data:<code>DEFAULT_NUM_COEFFS</code>.</p>
+                <p>Mask-coefficient width <code>K</code> (A14), shared by the head's coefficient stems and the prototype
+stack — one prototype per coefficient. Defaults to :data:<code>DEFAULT_NUM_COEFFS</code>.</p>
               </div>
             </td>
             <td>
@@ -5188,17 +5185,7 @@ coefficient. Defaults to :data:<code>DEFAULT_NUM_COEFFS</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The assembled :class:<code>Segmenter</code> module, its head and prototype stack both</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><a class="autorefs autorefs-internal" title="            Segmenter (lucid_yolo.models.build.Segmenter)" href="#lucid_yolo.models.Segmenter">Segmenter</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>built at <code>num_coeffs</code>.</p>
+                <p>The assembled :class:<code>Segmenter</code> module, its head and prototype stack both built at <code>num_coeffs</code>.</p>
               </div>
             </td>
           </tr>
@@ -5299,8 +5286,7 @@ coefficient. Defaults to :data:<code>DEFAULT_NUM_COEFFS</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Number of object classes. Defaults to 80 to match
-:func:<code>build_detector</code>; DOTA-v1.0 work passes
+                <p>Number of object classes. Defaults to 80 to match :func:<code>build_detector</code>; DOTA-v1.0 work passes
 <code>len(DOTA_CLASSES) == 15</code>.</p>
               </div>
             </td>
@@ -5423,8 +5409,8 @@ coefficient. Defaults to :data:<code>DEFAULT_NUM_COEFFS</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Number of object classes. Defaults to 80 to match
-:func:<code>build_detector</code>; the COCO <code>person_keypoints</code> path passes 1.</p>
+                <p>Number of object classes. Defaults to 80 to match :func:<code>build_detector</code>; the COCO
+<code>person_keypoints</code> path passes 1.</p>
               </div>
             </td>
             <td>
@@ -5440,9 +5426,8 @@ coefficient. Defaults to :data:<code>DEFAULT_NUM_COEFFS</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Point count <code>K</code>, keyword-only and required — the point
-count is a property of the annotation schema, not something a model
-may pick (see :class:<code>KeypointDetector</code>).</p>
+                <p>Point count <code>K</code>, keyword-only and required — the point count is a property of the annotation
+schema, not something a model may pick (see :class:<code>KeypointDetector</code>).</p>
               </div>
             </td>
             <td>
@@ -5541,18 +5526,15 @@ may pick (see :class:<code>KeypointDetector</code>).</p>
 
 
         <p>Composite YOLO26 detector: backbone -&gt; neck -&gt; dual detection head.</p>
-<p>A single typed module wiring the three WP-020…WP-022 stages for one scale
-variant. :meth:<code>forward</code> takes an image batch and returns the head's
-:class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> (both the one-to-one and
-one-to-many dense predictions).</p>
-<p>:meth:<code>deploy</code> returns the NMS-free inference model: backbone -&gt; neck -&gt; one-to-one
-head. The one-to-many branch is training-only (R6) and never runs at E2E inference,
-so the deployed model executes a single detection branch. This is the module whose
-FLOPs match the R1 Table 7 GFLOP column (see the module docstring); its parameters
-are a strict subset of the full detector's, so model size is still reported from the
-whole :class:<code>Detector</code>. The returned module <strong>shares</strong> this detector's parameters
-(no copy), and its forward maps an image batch to the one-to-one branch's
-<code>(cls_logits, ltrb)</code> tensor pair.</p>
+<p>A single typed module wiring the three WP-020…WP-022 stages for one scale variant. :meth:<code>forward</code> takes an image
+batch and returns the head's :class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> (both the one-to-one and one-to-many
+dense predictions).</p>
+<p>:meth:<code>deploy</code> returns the NMS-free inference model: backbone -&gt; neck -&gt; one-to-one head. The one-to-many branch
+is training-only (R6) and never runs at E2E inference, so the deployed model executes a single detection branch.
+This is the module whose FLOPs match the R1 Table 7 GFLOP column (see the module docstring); its parameters are a
+strict subset of the full detector's, so model size is still reported from the whole :class:<code>Detector</code>. The
+returned module <strong>shares</strong> this detector's parameters (no copy), and its forward maps an image batch to the
+one-to-one branch's <code>(cls_logits, ltrb)</code> tensor pair.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5575,9 +5557,9 @@ whole :class:<code>Detector</code>. The returned module <strong>shares</strong> 
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Scale name (<code>"n"</code>/<code>"s"</code>/<code>"m"</code>/<code>"l"</code>/<code>"x"</code>) resolved
-through :func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a
-:class:<code>~lucid_yolo.models.registry.ScaleSpec</code> of raw multipliers.</p>
+                <p>Scale name (<code>"n"</code>/<code>"s"</code>/<code>"m"</code>/<code>"l"</code>/<code>"x"</code>) resolved through
+:func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a :class:<code>~lucid_yolo.models.registry.ScaleSpec</code> of raw
+multipliers.</p>
               </div>
             </td>
             <td>
@@ -5709,7 +5691,7 @@ through :func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The head's :class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> with dense</p>
+                <p>The head's :class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> with dense class logits and raw ltrb distances</p>
               </div>
             </td>
           </tr>
@@ -5724,22 +5706,7 @@ through :func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a
             </td>
             <td>
               <div class="doc-md-description">
-                <p>class logits and raw ltrb distances for both branches, plus the optional</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><a class="autorefs autorefs-internal" title="            DualHeadOutput
-
-
-  
-      dataclass
-   (lucid_yolo.models.heads.DualHeadOutput)" href="#lucid_yolo.models.DualHeadOutput">DualHeadOutput</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>fields the model's stage option enables (angle, or keypoints and</p>
+                <p>for both branches, plus the optional fields the model's stage option enables (angle, or keypoints and</p>
               </div>
             </td>
           </tr>
@@ -5780,11 +5747,10 @@ through :func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a
     <div class="doc doc-contents ">
 
         <p>Return the NMS-free inference model: backbone -&gt; neck -&gt; one-to-one head.</p>
-<p>The one-to-many branch is training-only (R6) and never runs at E2E inference,
-so the deployed model executes a single detection branch, including only that
-branch's optional stems. The returned module <strong>shares</strong> this model's
-parameters (no copy); each subclass docstring states which tensors it returns
-and which golden reads its FLOPs.</p>
+<p>The one-to-many branch is training-only (R6) and never runs at E2E inference, so the deployed model executes a
+single detection branch, including only that branch's optional stems. The returned module <strong>shares</strong> this
+model's parameters (no copy); each subclass docstring states which tensors it returns and which golden reads
+its FLOPs.</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -5850,21 +5816,17 @@ and which golden reads its FLOPs.</p>
 
 
         <p>Composite YOLO26 segmentation model: detector plus the mask and aux branches.</p>
-<p>Mirrors :class:<code>Detector</code> — same backbone and neck for a given variant — and
-adds the three WP-047…WP-050 segmentation stages on top: the detection head
-now also emits per-anchor mask coefficients,
-:class:<code>~lucid_yolo.models.heads.ProtoFusion</code> collapses the neck's three
-levels into the Eq. 8 fused feature, :class:<code>~lucid_yolo.models.heads.ProtoNet</code>
-turns that feature into <code>K</code> prototype maps, and
-:class:<code>~lucid_yolo.models.heads.SemanticAux</code> attaches the training-only
-auxiliary classifier to the same fused feature.</p>
-<p><code>num_coeffs</code> is threaded into both the head's coefficient stems and the
-prototype count, one prototype per coefficient: Eq. 7 contracts the two
-against each other, so a single constructor argument is what stops the two
+<p>Mirrors :class:<code>Detector</code> — same backbone and neck for a given variant — and adds the three WP-047…WP-050
+segmentation stages on top: the detection head now also emits per-anchor mask coefficients,
+:class:<code>~lucid_yolo.models.heads.ProtoFusion</code> collapses the neck's three levels into the Eq. 8 fused feature,
+:class:<code>~lucid_yolo.models.heads.ProtoNet</code> turns that feature into <code>K</code> prototype maps, and
+:class:<code>~lucid_yolo.models.heads.SemanticAux</code> attaches the training-only auxiliary classifier to the same fused
+feature.</p>
+<p><code>num_coeffs</code> is threaded into both the head's coefficient stems and the prototype count, one prototype per
+coefficient: Eq. 7 contracts the two against each other, so a single constructor argument is what stops the two
 sides from drifting apart.</p>
-<p>The fused feature is computed exactly once and shared by the prototype and
-auxiliary branches — recomputing it would silently double that subgraph's
-cost in the FLOP measurement.</p>
+<p>The fused feature is computed exactly once and shared by the prototype and auxiliary branches — recomputing it
+would silently double that subgraph's cost in the FLOP measurement.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5887,9 +5849,9 @@ cost in the FLOP measurement.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Scale name (<code>"n"</code>/<code>"s"</code>/<code>"m"</code>/<code>"l"</code>/<code>"x"</code>) resolved
-through :func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a
-:class:<code>~lucid_yolo.models.registry.ScaleSpec</code> of raw multipliers.</p>
+                <p>Scale name (<code>"n"</code>/<code>"s"</code>/<code>"m"</code>/<code>"l"</code>/<code>"x"</code>) resolved through
+:func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a :class:<code>~lucid_yolo.models.registry.ScaleSpec</code> of raw
+multipliers.</p>
               </div>
             </td>
             <td>
@@ -5905,8 +5867,7 @@ through :func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Number of object classes the head and the auxiliary branch
-predict.</p>
+                <p>Number of object classes the head and the auxiliary branch predict.</p>
               </div>
             </td>
             <td>
@@ -6035,7 +5996,7 @@ predict.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>class:<code>SegmentOutput</code> holding the dual head's dense predictions,</p>
+                <p>class:<code>SegmentOutput</code> holding the dual head's dense predictions, the raw prototype maps, and the</p>
               </div>
             </td>
           </tr>
@@ -6050,22 +6011,7 @@ predict.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>the raw prototype maps, and the auxiliary semantic logits (<code>None</code></p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-<td></td>            <td>
-                  <code><a class="autorefs autorefs-internal" title="            SegmentOutput
-
-
-  
-      dataclass
-   (lucid_yolo.models.build.SegmentOutput)" href="#lucid_yolo.models.SegmentOutput">SegmentOutput</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>outside training mode).</p>
+                <p>auxiliary semantic logits (<code>None</code> outside training mode).</p>
               </div>
             </td>
           </tr>
@@ -6091,14 +6037,12 @@ predict.</p>
     <div class="doc doc-contents ">
 
         <p>Return the inference model: backbone -&gt; neck -&gt; one-to-one head + prototypes.</p>
-<p>Two branches of the trained model are training-only and are therefore
-absent from the returned module: the one-to-many detection branch, which
-never runs on the NMS-free E2E path (R6), and the auxiliary semantic
-branch, which exists only to shape the shared prototype features (A17).
-Neither is disabled or skipped — neither is held at all. The returned
-module <strong>shares</strong> this segmenter's parameters (no copy), so it is a view
-rather than a second model. This is the module whose parameters and FLOPs the
-Phase 7 segmentation fidelity gate is measured on.</p>
+<p>Two branches of the trained model are training-only and are therefore absent from the returned module: the
+one-to-many detection branch, which never runs on the NMS-free E2E path (R6), and the auxiliary semantic
+branch, which exists only to shape the shared prototype features (A17). Neither is disabled or skipped —
+neither is held at all. The returned module <strong>shares</strong> this segmenter's parameters (no copy), so it is a view
+rather than a second model. This is the module whose parameters and FLOPs the Phase 7 segmentation fidelity
+gate is measured on.</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -6116,7 +6060,7 @@ Phase 7 segmentation fidelity gate is measured on.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>class:<code>torch.nn.Module</code> whose forward maps an image batch to the</p>
+                <p>class:<code>torch.nn.Module</code> whose forward maps an image batch to the <code>(cls, box, coeff, prototypes)</code></p>
               </div>
             </td>
           </tr>
@@ -6126,7 +6070,7 @@ Phase 7 segmentation fidelity gate is measured on.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>(cls, box, coeff, prototypes)</code> tuple needed to assemble masks: dense</p>
+                <p>tuple needed to assemble masks: dense class logits <code>(N, A, num_classes)</code>, raw ltrb distances</p>
               </div>
             </td>
           </tr>
@@ -6136,27 +6080,7 @@ Phase 7 segmentation fidelity gate is measured on.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>class logits <code>(N, A, num_classes)</code>, raw ltrb distances <code>(N, A, 4)</code>,</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-<td></td>            <td>
-                  <code><span title="torch.nn.Module">Module</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>tanh mask coefficients <code>(N, A, K)</code>, and raw prototype maps</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-<td></td>            <td>
-                  <code><span title="torch.nn.Module">Module</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p><code>(N, K, H/4, W/4)</code>.</p>
+                <p><code>(N, A, 4)</code>, tanh mask coefficients <code>(N, A, K)</code>, and raw prototype maps <code>(N, K, H/4, W/4)</code>.</p>
               </div>
             </td>
           </tr>
@@ -6206,24 +6130,18 @@ Phase 7 segmentation fidelity gate is measured on.</p>
 
 
         <p>Composite YOLO26 oriented detector: the detector plus the A20 angle branch.</p>
-<p>Structurally :class:<code>Detector</code> with <code>predict_angle=True</code>: identical
-backbone, neck, and dual head for a given variant, with a third per-level
-stem on <strong>each</strong> head branch emitting the single orientation scalar of R1
-sec. 3.4.3. The angle is predicted raw (R1 Eq. 13, <code>theta_hat = z</code>); the
-oriented box is assembled and normalized by
-:func:<code>~lucid_yolo.models.heads.obb.decode_rboxes</code> (A23), not by the model.
-:meth:<code>forward</code> returns a :class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> whose
-angle fields are populated for both branches.</p>
-<p>The angle stems sit on the head's two branches rather than in a fourth
-top-level module, which is what makes the one-to-many angle stems training-only
-in the same sense the one-to-many box and class stems already are: they are
-dropped by :meth:<code>deploy</code> with the branch that owns them, rather than needing
-a rule of their own.</p>
-<p>:meth:<code>deploy</code> therefore executes a single detection branch — including only that
-branch's angle stems — and maps an image batch to the one-to-one branch's
-<code>(cls_logits, ltrb, angle)</code> tensor triple. This is the module whose FLOPs the
-R1 Table S11 gate reads, at the table's 1024-pixel input. The returned module
-<strong>shares</strong> this detector's parameters (no copy).</p>
+<p>Structurally :class:<code>Detector</code> with <code>predict_angle=True</code>: identical backbone, neck, and dual head for a given
+variant, with a third per-level stem on <strong>each</strong> head branch emitting the single orientation scalar of R1
+sec. 3.4.3. The angle is predicted raw (R1 Eq. 13, <code>theta_hat = z</code>); the oriented box is assembled and
+normalized by :func:<code>~lucid_yolo.models.heads.obb.decode_rboxes</code> (A23), not by the model. :meth:<code>forward</code> returns a
+:class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> whose angle fields are populated for both branches.</p>
+<p>The angle stems sit on the head's two branches rather than in a fourth top-level module, which is what makes the
+one-to-many angle stems training-only in the same sense the one-to-many box and class stems already are: they are
+dropped by :meth:<code>deploy</code> with the branch that owns them, rather than needing a rule of their own.</p>
+<p>:meth:<code>deploy</code> therefore executes a single detection branch — including only that branch's angle stems — and maps
+an image batch to the one-to-one branch's <code>(cls_logits, ltrb, angle)</code> tensor triple. This is the module whose
+FLOPs the R1 Table S11 gate reads, at the table's 1024-pixel input. The returned module <strong>shares</strong> this
+detector's parameters (no copy).</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6246,9 +6164,9 @@ R1 Table S11 gate reads, at the table's 1024-pixel input. The returned module
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Scale name (<code>"n"</code>/<code>"s"</code>/<code>"m"</code>/<code>"l"</code>/<code>"x"</code>) resolved
-through :func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a
-:class:<code>~lucid_yolo.models.registry.ScaleSpec</code> of raw multipliers.</p>
+                <p>Scale name (<code>"n"</code>/<code>"s"</code>/<code>"m"</code>/<code>"l"</code>/<code>"x"</code>) resolved through
+:func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a :class:<code>~lucid_yolo.models.registry.ScaleSpec</code> of raw
+multipliers.</p>
               </div>
             </td>
             <td>
@@ -6264,9 +6182,8 @@ through :func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Number of object classes the head predicts. Defaults to 80
-for signature consistency with :class:<code>Detector</code>; the R1 Table S11
-fidelity gate and the DOTA path pass 15 explicitly.</p>
+                <p>Number of object classes the head predicts. Defaults to 80 for signature consistency with
+:class:<code>Detector</code>; the R1 Table S11 fidelity gate and the DOTA path pass 15 explicitly.</p>
               </div>
             </td>
             <td>
@@ -6382,7 +6299,7 @@ fidelity gate and the DOTA path pass 15 explicitly.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The head's :class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> with dense</p>
+                <p>The head's :class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> with dense class logits and raw ltrb distances</p>
               </div>
             </td>
           </tr>
@@ -6397,22 +6314,7 @@ fidelity gate and the DOTA path pass 15 explicitly.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>class logits and raw ltrb distances for both branches, plus the optional</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><a class="autorefs autorefs-internal" title="            DualHeadOutput
-
-
-  
-      dataclass
-   (lucid_yolo.models.heads.DualHeadOutput)" href="#lucid_yolo.models.DualHeadOutput">DualHeadOutput</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>fields the model's stage option enables (angle, or keypoints and</p>
+                <p>for both branches, plus the optional fields the model's stage option enables (angle, or keypoints and</p>
               </div>
             </td>
           </tr>
@@ -6453,11 +6355,10 @@ fidelity gate and the DOTA path pass 15 explicitly.</p>
     <div class="doc doc-contents ">
 
         <p>Return the NMS-free inference model: backbone -&gt; neck -&gt; one-to-one head.</p>
-<p>The one-to-many branch is training-only (R6) and never runs at E2E inference,
-so the deployed model executes a single detection branch, including only that
-branch's optional stems. The returned module <strong>shares</strong> this model's
-parameters (no copy); each subclass docstring states which tensors it returns
-and which golden reads its FLOPs.</p>
+<p>The one-to-many branch is training-only (R6) and never runs at E2E inference, so the deployed model executes a
+single detection branch, including only that branch's optional stems. The returned module <strong>shares</strong> this
+model's parameters (no copy); each subclass docstring states which tensors it returns and which golden reads
+its FLOPs.</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -6523,35 +6424,28 @@ and which golden reads its FLOPs.</p>
 
 
         <p>Composite YOLO26 keypoint detector: the detector plus the R14 point branch.</p>
-<p>Structurally :class:<code>Detector</code> with <code>num_keypoints=K</code>: identical backbone,
-neck, and dual head for a given variant, with a third per-level stem on
-<strong>each</strong> head branch emitting <code>K</code> raw <code>(x, y)</code> coordinate offsets and <code>K</code>
-raw per-axis sigma values. Coordinates are unbounded offsets composed against
-the anchor centre and stride by
-:func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code> (A70), not by the
-model; sigma stays raw (A65) because the RLE flow (R14 Eq. 12) is what
-interprets it. :meth:<code>forward</code> returns a
-:class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> whose keypoint and keypoint-sigma
-fields are populated for both branches.</p>
-<p>The point stems sit on the head's two branches rather than in a fourth
-top-level module, which is what makes the one-to-many point stems training-only
-in the same sense the one-to-many box and class stems already are: they are
-dropped by :meth:<code>deploy</code> with the branch that owns them, rather than needing
-a rule of their own. This mirrors :class:<code>OrientedDetector</code>'s angle stems.</p>
-<p>:meth:<code>deploy</code> therefore executes a single detection branch — including only that
-branch's point stems — and maps an image batch to the one-to-one branch's
-<code>(cls_logits, ltrb, keypoints)</code> tensor triple. This is the module the keypoint
-golden's GFLOPs are measured on, at detection's 640-pixel protocol. The returned
-module <strong>shares</strong> this detector's parameters (no copy).</p>
-<p>Sigma is <strong>not</strong> returned by the deployed view. It is consumed by the R14 loss during
-training and by nothing on the inference path: the decode
-(:func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code>, and
-:func:<code>~lucid_yolo.eval.coco_eval.gather_keypoints</code> after it) composes the
-coordinate offsets alone. Its cost is still counted, because one stem emits
-coordinates and sigma from the same convolution — omitting it from the return
-tuple drops a tensor, not a computation.</p>
-<p>The task is generic in <code>K</code>: nothing here knows what a point <em>means</em>, so
-human pose is one instantiation rather than the subject.</p>
+<p>Structurally :class:<code>Detector</code> with <code>num_keypoints=K</code>: identical backbone, neck, and dual head for a given
+variant, with a third per-level stem on <strong>each</strong> head branch emitting <code>K</code> raw <code>(x, y)</code> coordinate offsets and
+<code>K</code> raw per-axis sigma values. Coordinates are unbounded offsets composed against the anchor centre and stride
+by :func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code> (A70), not by the model; sigma stays raw (A65)
+because the RLE flow (R14 Eq. 12) is what interprets it. :meth:<code>forward</code> returns a
+:class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> whose keypoint and keypoint-sigma fields are populated for both
+branches.</p>
+<p>The point stems sit on the head's two branches rather than in a fourth top-level module, which is what makes the
+one-to-many point stems training-only in the same sense the one-to-many box and class stems already are: they are
+dropped by :meth:<code>deploy</code> with the branch that owns them, rather than needing a rule of their own. This mirrors
+:class:<code>OrientedDetector</code>'s angle stems.</p>
+<p>:meth:<code>deploy</code> therefore executes a single detection branch — including only that branch's point stems — and maps
+an image batch to the one-to-one branch's <code>(cls_logits, ltrb, keypoints)</code> tensor triple. This is the module the
+keypoint golden's GFLOPs are measured on, at detection's 640-pixel protocol. The returned module <strong>shares</strong> this
+detector's parameters (no copy).</p>
+<p>Sigma is <strong>not</strong> returned by the deployed view. It is consumed by the R14 loss during training and by nothing on
+the inference path: the decode (:func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code>, and
+:func:<code>~lucid_yolo.eval.coco_eval.gather_keypoints</code> after it) composes the coordinate offsets alone. Its cost is
+still counted, because one stem emits coordinates and sigma from the same convolution — omitting it from the
+return tuple drops a tensor, not a computation.</p>
+<p>The task is generic in <code>K</code>: nothing here knows what a point <em>means</em>, so human pose is one instantiation rather
+than the subject.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6574,9 +6468,9 @@ human pose is one instantiation rather than the subject.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Scale name (<code>"n"</code>/<code>"s"</code>/<code>"m"</code>/<code>"l"</code>/<code>"x"</code>) resolved
-through :func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a
-:class:<code>~lucid_yolo.models.registry.ScaleSpec</code> of raw multipliers.</p>
+                <p>Scale name (<code>"n"</code>/<code>"s"</code>/<code>"m"</code>/<code>"l"</code>/<code>"x"</code>) resolved through
+:func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a :class:<code>~lucid_yolo.models.registry.ScaleSpec</code> of raw
+multipliers.</p>
               </div>
             </td>
             <td>
@@ -6592,9 +6486,8 @@ through :func:<code>~lucid_yolo.models.registry.scale_spec</code>, or a
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Number of object classes the head predicts. Defaults to 80
-for signature consistency with :class:<code>Detector</code>; COCO's
-<code>person_keypoints</code> path passes 1.</p>
+                <p>Number of object classes the head predicts. Defaults to 80 for signature consistency with
+:class:<code>Detector</code>; COCO's <code>person_keypoints</code> path passes 1.</p>
               </div>
             </td>
             <td>
@@ -6610,14 +6503,11 @@ for signature consistency with :class:<code>Detector</code>; COCO's
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Point count <code>K</code> both head branches predict. Keyword-only
-and required, with no default: unlike <code>num_classes</code> there is nothing
-project-wide to fall back on, because <code>K</code> is a property of the
-<em>dataset's</em> annotation schema (COCO person is 17, another pose set is
-not). A default here would be a silent claim about data this model has
-never seen — the same refusal
-:class:<code>~lucid_yolo.ptl.module.DetectionLitModule</code> makes for
-<code>task="keypoints"</code>.</p>
+                <p>Point count <code>K</code> both head branches predict. Keyword-only and required, with no default:
+unlike <code>num_classes</code> there is nothing project-wide to fall back on, because <code>K</code> is a property of the
+<em>dataset's</em> annotation schema (COCO person is 17, another pose set is not). A default here would be a
+silent claim about data this model has never seen — the same refusal
+:class:<code>~lucid_yolo.ptl.module.DetectionLitModule</code> makes for <code>task="keypoints"</code>.</p>
               </div>
             </td>
             <td>
@@ -6735,7 +6625,7 @@ never seen — the same refusal
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The head's :class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> with dense</p>
+                <p>The head's :class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> with dense class logits and raw ltrb distances</p>
               </div>
             </td>
           </tr>
@@ -6750,22 +6640,7 @@ never seen — the same refusal
             </td>
             <td>
               <div class="doc-md-description">
-                <p>class logits and raw ltrb distances for both branches, plus the optional</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><a class="autorefs autorefs-internal" title="            DualHeadOutput
-
-
-  
-      dataclass
-   (lucid_yolo.models.heads.DualHeadOutput)" href="#lucid_yolo.models.DualHeadOutput">DualHeadOutput</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>fields the model's stage option enables (angle, or keypoints and</p>
+                <p>for both branches, plus the optional fields the model's stage option enables (angle, or keypoints and</p>
               </div>
             </td>
           </tr>
@@ -6806,11 +6681,10 @@ never seen — the same refusal
     <div class="doc doc-contents ">
 
         <p>Return the NMS-free inference model: backbone -&gt; neck -&gt; one-to-one head.</p>
-<p>The one-to-many branch is training-only (R6) and never runs at E2E inference,
-so the deployed model executes a single detection branch, including only that
-branch's optional stems. The returned module <strong>shares</strong> this model's
-parameters (no copy); each subclass docstring states which tensors it returns
-and which golden reads its FLOPs.</p>
+<p>The one-to-many branch is training-only (R6) and never runs at E2E inference, so the deployed model executes a
+single detection branch, including only that branch's optional stems. The returned module <strong>shares</strong> this
+model's parameters (no copy); each subclass docstring states which tensors it returns and which golden reads
+its FLOPs.</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -6877,11 +6751,10 @@ and which golden reads its FLOPs.</p>
 
 
         <p>Anchor-free dual detection head with direct ltrb regression (reg_max=1).</p>
-<p>Builds the R1 sec. 3.2.1-3.2.2 / Fig. S2 head: two branches
-(:attr:<code>o2o</code> for the NMS-free one-to-one path, :attr:<code>o2m</code> for dense
-one-to-many training supervision) share the neck features <code>(N3, N4, N5)</code>
-and each own per-level box and class stems over strides 8/16/32. Boxes are
-predicted as 4 raw ltrb scalars per anchor with no DFL (<code>reg_max = 1</code>).</p>
+<p>Builds the R1 sec. 3.2.1-3.2.2 / Fig. S2 head: two branches (:attr:<code>o2o</code> for the NMS-free one-to-one path,
+:attr:<code>o2m</code> for dense one-to-many training supervision) share the neck features <code>(N3, N4, N5)</code> and each own
+per-level box and class stems over strides 8/16/32. Boxes are predicted as 4 raw ltrb scalars per anchor with no
+DFL (<code>reg_max = 1</code>).</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -6904,8 +6777,8 @@ predicted as 4 raw ltrb scalars per anchor with no DFL (<code>reg_max = 1</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Neck output channel counts <code>(N3, N4, N5)</code> in stride order
-(8, 16, 32) — typically :attr:<code>DetectionNeck.channels</code>.</p>
+                <p>Neck output channel counts <code>(N3, N4, N5)</code> in stride order (8, 16, 32) — typically
+:attr:<code>DetectionNeck.channels</code>.</p>
               </div>
             </td>
             <td>
@@ -6937,9 +6810,8 @@ predicted as 4 raw ltrb scalars per anchor with no DFL (<code>reg_max = 1</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional mask-coefficient count. <code>None</code> preserves the
-detection-only head exactly; callers explicitly pass
-:data:<code>DEFAULT_NUM_COEFFS</code> to enable coefficients.</p>
+                <p>Optional mask-coefficient count. <code>None</code> preserves the detection-only head exactly; callers
+explicitly pass :data:<code>DEFAULT_NUM_COEFFS</code> to enable coefficients.</p>
               </div>
             </td>
             <td>
@@ -6955,9 +6827,8 @@ detection-only head exactly; callers explicitly pass
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Build both branches' orientation stems (A20). <code>False</code>
-preserves the detection-only head exactly; the oriented model passes
-<code>True</code>.</p>
+                <p>Build both branches' orientation stems (A20). <code>False</code> preserves the detection-only head
+exactly; the oriented model passes <code>True</code>.</p>
               </div>
             </td>
             <td>
@@ -6973,9 +6844,8 @@ preserves the detection-only head exactly; the oriented model passes
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional generic point count. <code>None</code> preserves the
-existing head exactly; passing <code>K</code> builds coordinate-and-sigma
-stems on both branches.</p>
+                <p>Optional generic point count. <code>None</code> preserves the existing head exactly; passing <code>K</code>
+builds coordinate-and-sigma stems on both branches.</p>
               </div>
             </td>
             <td>
@@ -7033,16 +6903,14 @@ stems on both branches.</p>
     <div class="doc doc-contents ">
 
         <p>Run <strong>one</strong> named branch over the neck features.</p>
-<p>:meth:<code>forward</code> runs both because training needs both: the one-to-many branch
-supplies the dense assignment's targets and the one-to-one branch the E2E ones.
-Inference does not. Every decode path reads exactly one branch -- the top-k path
-the one-to-one, the suppression path the one-to-many -- and the other branch's
-stems are computed, materialized and then dropped. This is the seam that lets a
-caller ask for only the half it will read.</p>
-<p><code>branch</code> is validated rather than dispatched on directly, because its violation
-is otherwise silent: a bare <code>if branch == "o2o"</code> maps <code>"O2O"</code>, <code>"o2o "</code> or a
-typo onto the <em>other</em> branch and returns a well-shaped tensor that no downstream
-check can recognise as the wrong one.</p>
+<p>:meth:<code>forward</code> runs both because training needs both: the one-to-many branch supplies the dense assignment's
+targets and the one-to-one branch the E2E ones. Inference does not. Every decode path reads exactly one branch
+-- the top-k path the one-to-one, the suppression path the one-to-many -- and the other branch's stems are
+computed, materialized and then dropped. This is the seam that lets a caller ask for only the half it will
+read.</p>
+<p><code>branch</code> is validated rather than dispatched on directly, because its violation is otherwise silent: a bare
+<code>if branch == "o2o"</code> maps <code>"O2O"</code>, <code>"o2o "</code> or a typo onto the <em>other</em> branch and returns a well-shaped
+tensor that no downstream check can recognise as the wrong one.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7065,8 +6933,8 @@ check can recognise as the wrong one.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The neck maps <code>(n3, n4, n5)</code> at strides 8, 16, and 32, with
-channel counts matching the constructor's <code>in_channels</code>.</p>
+                <p>The neck maps <code>(n3, n4, n5)</code> at strides 8, 16, and 32, with channel counts matching the
+constructor's <code>in_channels</code>.</p>
               </div>
             </td>
             <td>
@@ -7098,8 +6966,8 @@ channel counts matching the constructor's <code>in_channels</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Private scheduling seam of the opt-in CUDA prediction replay, passed
-on to the branch; not public API. <code>None</code>, the default, is the native call.</p>
+                <p>Private scheduling seam of the opt-in CUDA prediction replay, passed on to the branch; not public
+API. <code>None</code>, the default, is the native call.</p>
               </div>
             </td>
             <td>
@@ -7125,7 +6993,7 @@ on to the branch; not public API. <code>None</code>, the default, is the native 
             </td>
             <td>
               <div class="doc-md-description">
-                <p>That branch's :class:<code>BranchOutput</code>: dense class logits, raw ltrb distances,</p>
+                <p>That branch's :class:<code>BranchOutput</code>: dense class logits, raw ltrb distances, and whichever of the optional</p>
               </div>
             </td>
           </tr>
@@ -7135,17 +7003,7 @@ on to the branch; not public API. <code>None</code>, the default, is the native 
             </td>
             <td>
               <div class="doc-md-description">
-                <p>and whichever of the optional coefficient, angle and keypoint tensors the</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="lucid_yolo.models.heads.detect.BranchOutput">BranchOutput</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>head was built with.</p>
+                <p>coefficient, angle and keypoint tensors the head was built with.</p>
               </div>
             </td>
           </tr>
@@ -7231,8 +7089,8 @@ on to the branch; not public API. <code>None</code>, the default, is the native 
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The neck maps <code>(n3, n4, n5)</code> at strides 8, 16, and 32,
-with channel counts matching the constructor's <code>in_channels</code>.</p>
+                <p>The neck maps <code>(n3, n4, n5)</code> at strides 8, 16, and 32, with channel counts matching the
+constructor's <code>in_channels</code>.</p>
               </div>
             </td>
             <td>
@@ -7248,8 +7106,8 @@ with channel counts matching the constructor's <code>in_channels</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Private scheduling seam of the opt-in CUDA prediction replay, passed
-on to both branches; not public API. <code>None</code>, the default, is the native call.</p>
+                <p>Private scheduling seam of the opt-in CUDA prediction replay, passed on to both branches; not
+public API. <code>None</code>, the default, is the native call.</p>
               </div>
             </td>
             <td>
@@ -7280,7 +7138,7 @@ on to both branches; not public API. <code>None</code>, the default, is the nati
             </td>
             <td>
               <div class="doc-md-description">
-                <p>class:<code>DualHeadOutput</code> with dense class logits, raw ltrb</p>
+                <p>class:<code>DualHeadOutput</code> with dense class logits, raw ltrb distances, and — for whichever optional stems</p>
               </div>
             </td>
           </tr>
@@ -7295,7 +7153,7 @@ on to both branches; not public API. <code>None</code>, the default, is the nati
             </td>
             <td>
               <div class="doc-md-description">
-                <p>distances, and — for whichever optional stems were built — tanh mask</p>
+                <p>were built — tanh mask coefficients, raw orientation angles, and raw point-coordinate and uncertainty</p>
               </div>
             </td>
           </tr>
@@ -7310,22 +7168,7 @@ on to both branches; not public API. <code>None</code>, the default, is the nati
             </td>
             <td>
               <div class="doc-md-description">
-                <p>coefficients, raw orientation angles, and raw point-coordinate and</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-<td></td>            <td>
-                  <code><a class="autorefs autorefs-internal" title="            DualHeadOutput
-
-
-  
-      dataclass
-   (lucid_yolo.models.heads.detect.DualHeadOutput)" href="#lucid_yolo.models.DualHeadOutput">DualHeadOutput</a></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>uncertainty tensors, for both branches.</p>
+                <p>tensors, for both branches.</p>
               </div>
             </td>
           </tr>
@@ -7365,20 +7208,15 @@ on to both branches; not public API. <code>None</code>, the default, is the nati
 
 
         <p>Dense predictions of both detection branches.</p>
-<p>Every field is a dense per-anchor tensor with the <code>A</code> axis ordered
-level-by-level in row-major order (matching
-:func:<code>~lucid_yolo.assign.grid.make_anchor_points</code>). Class fields are raw
-logits; box fields are raw ltrb distances in stride units (decode them with
-:func:<code>decode_ltrb</code>). Coefficient fields, when enabled, are already
-tanh-activated in the head and lie in <code>[-1, 1]</code>. This deliberate asymmetry
-from the raw class and box outputs keeps the activation with its regression
-head; a later mask loss must not move it. Angle fields go the other way and
-are deliberately <strong>unactivated and unbounded</strong>: R1 Eq. 13 predicts
-<code>theta_hat = z</code>, so any range normalization belongs to the decode
-(:func:<code>~lucid_yolo.models.heads.obb.decode_rboxes</code>, A23), not here.
-Keypoint-coordinate fields are likewise raw offsets. Keypoint-sigma fields
-are raw and unbounded: no range or positivity normalization happens anywhere
-in this head, and WP-123's RLE loss owns that mapping (A65).</p>
+<p>Every field is a dense per-anchor tensor with the <code>A</code> axis ordered level-by-level in row-major order (matching
+:func:<code>~lucid_yolo.assign.grid.make_anchor_points</code>). Class fields are raw logits; box fields are raw ltrb
+distances in stride units (decode them with :func:<code>decode_ltrb</code>). Coefficient fields, when enabled, are already
+tanh-activated in the head and lie in <code>[-1, 1]</code>. This deliberate asymmetry from the raw class and box outputs
+keeps the activation with its regression head; a later mask loss must not move it. Angle fields go the other way
+and are deliberately <strong>unactivated and unbounded</strong>: R1 Eq. 13 predicts <code>theta_hat = z</code>, so any range
+normalization belongs to the decode (:func:<code>~lucid_yolo.models.heads.obb.decode_rboxes</code>, A23), not here.
+Keypoint-coordinate fields are likewise raw offsets. Keypoint-sigma fields are raw and unbounded: no range or
+positivity normalization happens anywhere in this head, and WP-123's RLE loss owns that mapping (A65).</p>
 
 
 <p><span class="doc-section-title">Attributes:</span></p>
@@ -7442,8 +7280,7 @@ in this head, and WP-123's RLE loss owns that mapping (A65).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>One-to-many tanh mask coefficients, shape <code>(B, A, K)</code>, or
-<code>None</code> when coefficients are disabled.</p>
+                <p>One-to-many tanh mask coefficients, shape <code>(B, A, K)</code>, or <code>None</code> when coefficients are disabled.</p>
               </div>
             </td>
           </tr>
@@ -7454,8 +7291,7 @@ in this head, and WP-123's RLE loss owns that mapping (A65).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>One-to-one tanh mask coefficients, shape <code>(B, A, K)</code>, or
-<code>None</code> when coefficients are disabled.</p>
+                <p>One-to-one tanh mask coefficients, shape <code>(B, A, K)</code>, or <code>None</code> when coefficients are disabled.</p>
               </div>
             </td>
           </tr>
@@ -7466,8 +7302,8 @@ in this head, and WP-123's RLE loss owns that mapping (A65).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>One-to-many raw orientation angles in radians, shape
-<code>(B, A, 1)</code>, or <code>None</code> when the angle branch is disabled.</p>
+                <p>One-to-many raw orientation angles in radians, shape <code>(B, A, 1)</code>, or <code>None</code> when the angle
+branch is disabled.</p>
               </div>
             </td>
           </tr>
@@ -7478,8 +7314,8 @@ in this head, and WP-123's RLE loss owns that mapping (A65).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>One-to-one raw orientation angles in radians, shape
-<code>(B, A, 1)</code>, or <code>None</code> when the angle branch is disabled.</p>
+                <p>One-to-one raw orientation angles in radians, shape <code>(B, A, 1)</code>, or <code>None</code> when the angle
+branch is disabled.</p>
               </div>
             </td>
           </tr>
@@ -7514,9 +7350,8 @@ K, 2)</code>, or <code>None</code> when keypoints are disabled.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>One-to-many raw, unbounded per-axis uncertainty,
-shape <code>(B, A, K, 2)</code>, or <code>None</code> when keypoints are disabled.
-WP-123's RLE loss owns the positivity mapping.</p>
+                <p>One-to-many raw, unbounded per-axis uncertainty, shape <code>(B, A, K, 2)</code>, or <code>None</code> when
+keypoints are disabled. WP-123's RLE loss owns the positivity mapping.</p>
               </div>
             </td>
           </tr>
@@ -7527,9 +7362,8 @@ WP-123's RLE loss owns the positivity mapping.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>One-to-one raw, unbounded per-axis uncertainty,
-shape <code>(B, A, K, 2)</code>, or <code>None</code> when keypoints are disabled.
-WP-123's RLE loss owns the positivity mapping.</p>
+                <p>One-to-one raw, unbounded per-axis uncertainty, shape <code>(B, A, K, 2)</code>, or <code>None</code> when
+keypoints are disabled. WP-123's RLE loss owns the positivity mapping.</p>
               </div>
             </td>
           </tr>
@@ -7585,10 +7419,9 @@ WP-123's RLE loss owns the positivity mapping.</p>
 
 
         <p>Dense predictions of the segmentation model's three branches.</p>
-<p>Groups what a segmentation forward pass produces without flattening it: the
-detection head's own dataclass is kept whole (so the dual-branch contract of
-:class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> stays in one place), and the
-two mask-side tensors sit beside it.</p>
+<p>Groups what a segmentation forward pass produces without flattening it: the detection head's own dataclass is
+kept whole (so the dual-branch contract of :class:<code>~lucid_yolo.models.heads.DualHeadOutput</code> stays in one place),
+and the two mask-side tensors sit beside it.</p>
 
 
 <p><span class="doc-section-title">Attributes:</span></p>
@@ -7613,8 +7446,8 @@ two mask-side tensors sit beside it.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The full :class:<code>~lucid_yolo.models.heads.DualHeadOutput</code>,
-including both branches' tanh mask coefficients.</p>
+                <p>The full :class:<code>~lucid_yolo.models.heads.DualHeadOutput</code>, including both branches' tanh mask
+coefficients.</p>
               </div>
             </td>
           </tr>
@@ -7625,8 +7458,8 @@ including both branches' tanh mask coefficients.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Raw Eq. 9 prototype maps of shape <code>(B, K, 2*H3, 2*W3)</code>,
-i.e. twice the P3 grid (A15), unactivated.</p>
+                <p>Raw Eq. 9 prototype maps of shape <code>(B, K, 2*H3, 2*W3)</code>, i.e. twice the P3 grid (A15),
+unactivated.</p>
               </div>
             </td>
           </tr>
@@ -7637,10 +7470,9 @@ i.e. twice the P3 grid (A15), unactivated.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Auxiliary per-class logits <code>(B, num_classes, H3, W3)</code> in
-training mode, <code>None</code> at eval — the branch is training-only (A17)
-and :class:<code>~lucid_yolo.models.heads.SemanticAux</code> returns <code>None</code>
-outside training rather than being skipped by the caller.</p>
+                <p>Auxiliary per-class logits <code>(B, num_classes, H3, W3)</code> in training mode, <code>None</code> at eval — the
+branch is training-only (A17) and :class:<code>~lucid_yolo.models.heads.SemanticAux</code> returns <code>None</code> outside
+training rather than being skipped by the caller.</p>
               </div>
             </td>
           </tr>
